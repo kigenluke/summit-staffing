@@ -1,7 +1,7 @@
 import React, {useEffect, useMemo, useRef} from 'react';
 import {Animated, View} from 'react-native';
 
-import {Colors, Radius, Spacing} from '../constants/theme';
+import { Colors, Radius, Spacing } from '../constants/theme.js';
 
 const SkeletonBlock = ({width, height, radius}) => {
   const shimmer = useRef(new Animated.Value(0)).current;

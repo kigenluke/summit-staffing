@@ -1,7 +1,7 @@
 import React, {useEffect, useMemo, useRef} from 'react';
 import {ActivityIndicator, Animated, SafeAreaView, Text, View} from 'react-native';
 
-import {Colors, Spacing, Typography} from '../constants/theme';
+import { Colors, Spacing, Typography } from '../constants/theme.js';
 
 export const LoadingScreen = ({message, transparent}) => {
   const opacity = useRef(new Animated.Value(0)).current;

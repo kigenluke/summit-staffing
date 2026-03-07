@@ -43,7 +43,7 @@ jest.mock('../src/navigation/AppNavigator', () => {
   };
 });
 
-import App from '../App';
+import App from './App';
 
 // Note: import explicitly to use the types shipped with jest.
 import {it, jest} from '@jest/globals';

@@ -1,9 +1,7 @@
 import React, {useMemo} from 'react';
 import {Alert, Linking, Pressable, Text, View} from 'react-native';
 
-import Icon from 'react-native-vector-icons/MaterialIcons';
-
-import {Colors, Radius, Shadows, Spacing, Typography} from '../constants/theme';
+import { Colors, Radius, Shadows, Spacing, Typography } from '../constants/theme.js';
 
 const urlRegex = /(https?:\/\/[^\s]+)|(www\.[^\s]+)/gi;
 const phoneRegex = /(\+?\d[\d\s\-()]{6,}\d)/g;
