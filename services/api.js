@@ -7,25 +7,24 @@ import { Platform } from 'react-native';
 import { getState, logout } from '../store/authStore.js';
 
 function resolveBaseURL() {
+  // Vite web builds
+  try {
+    const viteURL = eval("typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL");
+    if (viteURL) return viteURL;
+  } catch (_) {}
+
   // Expo / React Native env
   if (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_API_URL) {
     return process.env.EXPO_PUBLIC_API_URL;
   }
-  // Vite web builds (guarded so Hermes/Metro never parses import.meta)
-  try {
-    // eslint-disable-next-line no-eval
-    const viteURL = eval("typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL");
-    if (viteURL) return viteURL;
-  } catch (_) {
-    // not a Vite environment – ignore
-  }
-  // Mobile builds (Android / iOS) → use deployed Railway backend
+
+  // Mobile builds
   if (Platform.OS === 'android' || Platform.OS === 'ios') {
     return 'https://athletic-heart-backend-production.up.railway.app';
   }
-  return 'http://localhost:3000';
-}
 
+  return 'https://athletic-heart-backend-production.up.railway.app';
+}
 const defaultBaseURL = resolveBaseURL();
 
 export const ApiConfig = {
@@ -59,7 +58,7 @@ export function getHeaders(customHeaders = {}) {
  * Does not throw; parse response and surface errors for callers.
  */
 export async function request(method, path, body = null, options = {}) {
-  const url = path.startsWith('http') ? path : `${ApiConfig.baseURL}${path}`;
+  const url = path.startsWith('http') ? path : `${ApiConfig.baseURL.replace(/\/$/, '')}${path}`;;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), ApiConfig.timeout);
 

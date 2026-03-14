@@ -5,17 +5,17 @@ const checkParticipant = require('../middleware/checkParticipant');
 const checkWorker = require('../middleware/checkWorker');
 const shiftController = require('../controllers/shiftController');
 
-// Available shifts (any authenticated user)
-router.get('/', auth, shiftController.getAvailableShifts);
+// Create shift (participants only) - must be defined before GET routes
+router.post('/', auth, checkParticipant, shiftController.createShift);
 
 // My shifts (participant's own posted shifts)
 router.get('/mine', auth, shiftController.getMyShifts);
 
-// Single shift detail
-router.get('/:id', auth, shiftController.getShiftById);
+// Available shifts (any authenticated user)
+router.get('/', auth, shiftController.getAvailableShifts);
 
-// Create shift (participants only)
-router.post('/', auth, checkParticipant, shiftController.createShift);
+// Single shift detail (must be after all other routes)
+router.get('/:id', auth, shiftController.getShiftById);
 
 // Apply for shift (workers only)
 router.post('/:id/apply', auth, checkWorker, shiftController.applyForShift);

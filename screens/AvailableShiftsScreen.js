@@ -11,7 +11,18 @@ import {
 import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
-import { SERVICE_TYPES, getServiceTypeSuggestions } from '../constants/serviceTypes.js';
+import { SERVICE_TYPES } from '../constants/serviceTypes.js';
+
+const SERVICE_ICONS = {
+  // 'Personal Care': '🧴',
+  // 'Domestic Assistance': '🧹',
+  // 'Community Access': '🌍',
+  // 'Respite Care': '🏠',
+  // 'Assistance with Daily Life': '🤝',
+  // 'Transport': '🚗',
+  // 'Improved Health and Wellbeing': '💊',
+  // 'Improved Daily Living': '⭐',
+};
 
 const getServiceColor = (type) => {
   const map = {
@@ -27,7 +38,7 @@ const getServiceColor = (type) => {
   return map[type] || Colors.primary;
 };
 
-// ── Mini Calendar Component ───────────────────────────────────────
+// ── Mini Calendar Component ────────────────────────────────────────────────────
 function MiniCalendar({ selectedDate, onSelect }) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -37,30 +48,26 @@ function MiniCalendar({ selectedDate, onSelect }) {
 
   const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
   const firstDayOfWeek = new Date(viewYear, viewMonth, 1).getDay();
-  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'];
   const dayNames = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 
   const goBack = () => {
     if (viewMonth === 0) { setViewMonth(11); setViewYear(viewYear - 1); }
     else setViewMonth(viewMonth - 1);
   };
-
   const goForward = () => {
     if (viewMonth === 11) { setViewMonth(0); setViewYear(viewYear + 1); }
     else setViewMonth(viewMonth + 1);
   };
-
   const canGoBack = viewYear > today.getFullYear() || (viewYear === today.getFullYear() && viewMonth > today.getMonth());
-
   const pad = (n) => String(n).padStart(2, '0');
-
   const days = [];
   for (let i = 0; i < firstDayOfWeek; i++) days.push(null);
   for (let d = 1; d <= daysInMonth; d++) days.push(d);
 
   return (
     <View style={{ backgroundColor: Colors.surfaceSecondary, borderRadius: Radius.md, padding: Spacing.md, marginBottom: Spacing.md }}>
-      {/* Month/Year nav */}
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.sm }}>
         <Pressable onPress={goBack} disabled={!canGoBack} style={{ padding: Spacing.sm, opacity: canGoBack ? 1 : 0.3 }}>
           <Text style={{ fontSize: 18, color: Colors.primary, fontWeight: '700' }}>{'<'}</Text>
@@ -72,8 +79,6 @@ function MiniCalendar({ selectedDate, onSelect }) {
           <Text style={{ fontSize: 18, color: Colors.primary, fontWeight: '700' }}>{'>'}</Text>
         </Pressable>
       </View>
-
-      {/* Day headers */}
       <View style={{ flexDirection: 'row' }}>
         {dayNames.map((d) => (
           <View key={d} style={{ flex: 1, alignItems: 'center', paddingVertical: 4 }}>
@@ -81,18 +86,13 @@ function MiniCalendar({ selectedDate, onSelect }) {
           </View>
         ))}
       </View>
-
-      {/* Day grid */}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
         {days.map((day, i) => {
-          if (day === null) {
-            return <View key={`blank-${i}`} style={{ width: '14.28%', height: 38 }} />;
-          }
+          if (day === null) return <View key={`blank-${i}`} style={{ width: '14.28%', height: 38 }} />;
           const dateObj = new Date(viewYear, viewMonth, day);
           const isPast = dateObj < today;
           const dateStr = `${viewYear}-${pad(viewMonth + 1)}-${pad(day)}`;
           const isSelected = dateStr === selectedDate;
-
           return (
             <Pressable
               key={day}
@@ -117,12 +117,51 @@ function MiniCalendar({ selectedDate, onSelect }) {
   );
 }
 
-// ── Create Shift Modal ────────────────────────────────────────────
-function CreateShiftModal({ visible, onClose, onCreated, navigation }) {
+// ── Service Type Card ─────────────────────────────────────────────────────────
+function ServiceTypeCard({ type, selected, onPress }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: selected ? Colors.primary : Colors.surface,
+        borderWidth: 2,
+        borderColor: selected ? Colors.primary : Colors.border,
+        borderRadius: Radius.lg,
+        padding: Spacing.md,
+        marginBottom: Spacing.sm,
+        opacity: pressed ? 0.85 : 1,
+        ...Shadows.sm,
+      })}
+    >
+      {/* <Text style={{ fontSize: 22, marginRight: Spacing.sm }}>{SERVICE_ICONS[type] || '🔧'}</Text> */}
+      <Text style={{
+        flex: 1,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.semibold,
+        color: selected ? Colors.text.white : Colors.text.primary,
+      }}>
+        {type}
+      </Text>
+      <View style={{
+        width: 22, height: 22, borderRadius: 11,
+        backgroundColor: selected ? Colors.text.white : Colors.surfaceSecondary,
+        borderWidth: selected ? 0 : 1,
+        borderColor: Colors.border,
+        alignItems: 'center', justifyContent: 'center',
+      }}>
+        {selected && <Text style={{ color: Colors.primary, fontSize: 13, fontWeight: Typography.fontWeight.bold }}>✓</Text>}
+      </View>
+    </Pressable>
+  );
+}
+
+// ── Create Shift Modal ────────────────────────────────────────────────────────
+function CreateShiftModal({ visible, onClose, onCreated }) {
   const [title, setTitle] = useState('');
   const [serviceType, setServiceType] = useState('');
-  const [serviceTypeQuery, setServiceTypeQuery] = useState('');
-  const [showServiceSuggestions, setShowServiceSuggestions] = useState(false);
+  const [showServicePicker, setShowServicePicker] = useState(false);
   const [hourlyRate, setHourlyRate] = useState('');
   const [date, setDate] = useState('');
   const [startTime, setStartTime] = useState('');
@@ -132,12 +171,10 @@ function CreateShiftModal({ visible, onClose, onCreated, navigation }) {
   const [saving, setSaving] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
 
-  const serviceSuggestions = getServiceTypeSuggestions(serviceTypeQuery || serviceType);
-
   const reset = () => {
-    setTitle(''); setServiceType(''); setServiceTypeQuery(''); setHourlyRate(''); setDate('');
+    setTitle(''); setServiceType(''); setHourlyRate(''); setDate('');
     setStartTime(''); setEndTime(''); setLocation(''); setDescription('');
-    setShowServiceSuggestions(false);
+    setShowServicePicker(false); setShowCalendar(false);
   };
 
   const handleCreate = async () => {
@@ -145,18 +182,15 @@ function CreateShiftModal({ visible, onClose, onCreated, navigation }) {
       Alert.alert('Missing Fields', 'Please fill in all required fields.');
       return;
     }
-
     const start_time = `${date}T${startTime}:00`;
     const end_time = `${date}T${endTime}:00`;
-
     if (new Date(end_time) <= new Date(start_time)) {
       Alert.alert('Invalid Time', 'End time must be after start time.');
       return;
     }
-
     setSaving(true);
     try {
-      const { data, error } = await api.post('/api/shifts', {
+      const { error } = await api.post('/api/shifts', {
         title,
         service_type: serviceType,
         hourly_rate: parseFloat(hourlyRate),
@@ -165,7 +199,6 @@ function CreateShiftModal({ visible, onClose, onCreated, navigation }) {
         location,
         description,
       });
-
       if (error) {
         Alert.alert('Error', error.message || 'Failed to create shift');
       } else {
@@ -173,7 +206,6 @@ function CreateShiftModal({ visible, onClose, onCreated, navigation }) {
         reset();
         onClose();
         onCreated?.();
-        navigation?.goBack?.();
       }
     } catch (e) {
       Alert.alert('Error', 'Failed to create shift');
@@ -184,66 +216,87 @@ function CreateShiftModal({ visible, onClose, onCreated, navigation }) {
   return (
     <Modal visible={visible} animationType="slide" transparent>
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
-        <View style={{ backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '90%' }}>
-          <ScrollView contentContainerStyle={{ padding: Spacing.lg, paddingBottom: Spacing.xxl }}>
+        <View style={{ backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '92%' }}>
+          <ScrollView contentContainerStyle={{ padding: Spacing.lg, paddingBottom: Spacing.xxl }} keyboardShouldPersistTaps="handled">
+
             {/* Header */}
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.lg }}>
               <Text style={{ fontSize: Typography.fontSize.xl, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>
                 Post a New Shift
               </Text>
               <Pressable onPress={() => { reset(); onClose(); }}>
-                <Text style={{ fontSize: 24, color: Colors.text.muted }}></Text>
+                <Text style={{ fontSize: 24, color: Colors.text.muted }}>✕</Text>
               </Pressable>
             </View>
 
             {/* Title */}
             <Text style={labelStyle}>Title *</Text>
-            <TextInput style={inputStyle} value={title} onChangeText={setTitle} placeholder="e.g. Morning personal care support" placeholderTextColor={Colors.text.muted} />
-
-            {/* Service Type with suggestions */}
-            <Text style={labelStyle}>Service Type *</Text>
             <TextInput
               style={inputStyle}
-              value={serviceTypeQuery || serviceType}
-              onChangeText={(text) => {
-                setServiceTypeQuery(text);
-                setShowServiceSuggestions(true);
-                if (SERVICE_TYPES.includes(text)) {
-                  setServiceType(text);
-                  setServiceTypeQuery('');
-                  setShowServiceSuggestions(false);
-                } else {
-                  setServiceType('');
-                }
-              }}
-              onFocus={() => setShowServiceSuggestions(true)}
-              onBlur={() => setTimeout(() => setShowServiceSuggestions(false), 200)}
-              placeholder="e.g. cleaning, personal care..."
+              value={title}
+              onChangeText={setTitle}
+              placeholder="e.g. Morning personal care support"
               placeholderTextColor={Colors.text.muted}
             />
-            {showServiceSuggestions && (serviceTypeQuery || !serviceType) && serviceSuggestions.length > 0 && (
-              <View style={{ backgroundColor: Colors.surfaceSecondary, borderRadius: Radius.md, marginBottom: Spacing.md, maxHeight: 200 }}>
-                <ScrollView keyboardShouldPersistTaps="handled" nestedScrollEnabled>
-                  {serviceSuggestions.map((st) => (
-                    <Pressable
-                      key={st}
-                      onPress={() => {
-                        setServiceType(st);
-                        setServiceTypeQuery('');
-                        setShowServiceSuggestions(false);
-                      }}
-                      style={{ padding: Spacing.md, borderBottomWidth: 1, borderBottomColor: Colors.border }}
-                    >
-                      <Text style={{ color: st === serviceType ? Colors.primary : Colors.text.primary, fontWeight: st === serviceType ? Typography.fontWeight.bold : Typography.fontWeight.normal }}>{st}</Text>
-                    </Pressable>
-                  ))}
-                </ScrollView>
+
+            {/* ── Service Type Picker ── */}
+            <Text style={labelStyle}>Service Type *</Text>
+
+            {/* Selected value display / toggle button */}
+            <Pressable
+              onPress={() => setShowServicePicker(!showServicePicker)}
+              style={[inputStyle, {
+                flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                borderColor: showServicePicker ? Colors.primary : Colors.border,
+              }]}
+            >
+              <Text style={{ color: serviceType ? Colors.text.primary : Colors.text.muted, fontSize: Typography.fontSize.base }}>
+                {serviceType
+                  ? ` ${serviceType}`
+                  : 'Select a service type...'}
+              </Text>
+              <Text style={{ color: Colors.text.muted, fontSize: 12 }}>
+                {showServicePicker ? '▲' : '▼'}
+              </Text>
+            </Pressable>
+
+            {/* Service type cards — shown inline when picker is open */}
+            {showServicePicker && (
+              <View style={{
+                backgroundColor: Colors.surfaceSecondary,
+                borderRadius: Radius.lg,
+                padding: Spacing.md,
+                marginBottom: Spacing.md,
+                borderWidth: 1,
+                borderColor: Colors.border,
+              }}>
+                <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginBottom: Spacing.sm }}>
+                  Tap to select
+                </Text>
+                {SERVICE_TYPES.map((type) => (
+                  <ServiceTypeCard
+                    key={type}
+                    type={type}
+                    selected={serviceType === type}
+                    onPress={() => {
+                      setServiceType(type);
+                      setShowServicePicker(false);
+                    }}
+                  />
+                ))}
               </View>
             )}
 
             {/* Hourly Rate */}
             <Text style={labelStyle}>Hourly Rate ($) *</Text>
-            <TextInput style={inputStyle} value={hourlyRate} onChangeText={setHourlyRate} placeholder="e.g. 55.00" keyboardType="numeric" placeholderTextColor={Colors.text.muted} />
+            <TextInput
+              style={inputStyle}
+              value={hourlyRate}
+              onChangeText={setHourlyRate}
+              placeholder="e.g. 55.00"
+              keyboardType="numeric"
+              placeholderTextColor={Colors.text.muted}
+            />
 
             {/* Date */}
             <Text style={labelStyle}>Date *</Text>
@@ -276,14 +329,23 @@ function CreateShiftModal({ visible, onClose, onCreated, navigation }) {
 
             {/* Location */}
             <Text style={labelStyle}>Location *</Text>
-            <TextInput style={inputStyle} value={location} onChangeText={setLocation} placeholder="e.g. 123 Main St, Melbourne VIC" placeholderTextColor={Colors.text.muted} />
+            <TextInput
+              style={inputStyle}
+              value={location}
+              onChangeText={setLocation}
+              placeholder="e.g. 123 Main St, Melbourne VIC"
+              placeholderTextColor={Colors.text.muted}
+            />
 
             {/* Description */}
             <Text style={labelStyle}>Description</Text>
             <TextInput
               style={[inputStyle, { height: 80, textAlignVertical: 'top' }]}
-              value={description} onChangeText={setDescription} multiline
-              placeholder="Any additional details..." placeholderTextColor={Colors.text.muted}
+              value={description}
+              onChangeText={setDescription}
+              multiline
+              placeholder="Any additional details..."
+              placeholderTextColor={Colors.text.muted}
             />
 
             {/* Submit */}
@@ -292,8 +354,11 @@ function CreateShiftModal({ visible, onClose, onCreated, navigation }) {
               disabled={saving}
               style={({ pressed }) => ({
                 backgroundColor: saving ? Colors.text.muted : Colors.primary,
-                paddingVertical: Spacing.md, borderRadius: Radius.md, alignItems: 'center',
-                opacity: pressed ? 0.8 : 1, marginTop: Spacing.md,
+                paddingVertical: Spacing.md,
+                borderRadius: Radius.md,
+                alignItems: 'center',
+                opacity: pressed ? 0.8 : 1,
+                marginTop: Spacing.md,
               })}
             >
               <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold, fontSize: Typography.fontSize.base }}>
@@ -307,14 +372,25 @@ function CreateShiftModal({ visible, onClose, onCreated, navigation }) {
   );
 }
 
-const labelStyle = { fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4, marginTop: Spacing.sm };
+const labelStyle = {
+  fontSize: Typography.fontSize.sm,
+  color: Colors.text.secondary,
+  marginBottom: 4,
+  marginTop: Spacing.sm,
+};
 const inputStyle = {
-  backgroundColor: Colors.surfaceSecondary, borderWidth: 1, borderColor: Colors.border,
-  borderRadius: Radius.md, paddingVertical: Spacing.sm, paddingHorizontal: Spacing.md,
-  fontSize: Typography.fontSize.base, color: Colors.text.primary, marginBottom: Spacing.sm,
+  backgroundColor: Colors.surfaceSecondary,
+  borderWidth: 1,
+  borderColor: Colors.border,
+  borderRadius: Radius.md,
+  paddingVertical: Spacing.sm,
+  paddingHorizontal: Spacing.md,
+  fontSize: Typography.fontSize.base,
+  color: Colors.text.primary,
+  marginBottom: Spacing.sm,
 };
 
-// ── Shift Card ───────────────────────────────────────────────────
+// ── Shift Card ────────────────────────────────────────────────────────────────
 function ShiftCard({ shift, onApply, isWorker }) {
   const startDate = new Date(shift.start_time);
   const endDate = new Date(shift.end_time);
@@ -322,57 +398,37 @@ function ShiftCard({ shift, onApply, isWorker }) {
 
   return (
     <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.sm, ...Shadows.md }}>
-      {/* Service Type Badge */}
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.sm }}>
         <View style={{ backgroundColor: getServiceColor(shift.service_type), paddingHorizontal: Spacing.sm, paddingVertical: 3, borderRadius: Radius.full }}>
-          <Text style={{ color: Colors.text.white, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.bold }}>{shift.service_type}</Text>
+          <Text style={{ color: Colors.text.white, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.bold }}>
+            {shift.service_type}
+          </Text>
         </View>
         <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted }}>{shift.application_count || 0} applicant(s)</Text>
       </View>
 
-      {/* Title */}
       <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.xs }}>
         {shift.title}
       </Text>
 
-      {/* Date & Time */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-        <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary }}>
-          {startDate.toLocaleDateString()} • {startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} – {endDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ({hours}h)
-        </Text>
-      </View>
+      <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>
+        {startDate.toLocaleDateString()} • {startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} – {endDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ({hours}h)
+      </Text>
 
-      {/* Rate */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-        <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary }}>
-          ${parseFloat(shift.hourly_rate).toFixed(2)}/hr • ~${(parseFloat(shift.hourly_rate) * parseFloat(hours)).toFixed(2)} total
-        </Text>
-      </View>
+      <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>
+        ${parseFloat(shift.hourly_rate).toFixed(2)}/hr • ~${(parseFloat(shift.hourly_rate) * parseFloat(hours)).toFixed(2)} total
+      </Text>
 
-      {/* Location */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: Spacing.sm }}>
-        <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary }}>{shift.location}</Text>
-      </View>
+      <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: Spacing.sm }}>
+        📍 {shift.location}
+      </Text>
 
-      {/* Required Skills */}
-      {shift.required_skills && shift.required_skills.length > 0 && (
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: Spacing.sm }}>
-          {shift.required_skills.map((skill, i) => (
-            <View key={i} style={{ backgroundColor: Colors.surfaceSecondary, paddingHorizontal: Spacing.sm, paddingVertical: 2, borderRadius: Radius.full, borderWidth: 1, borderColor: Colors.border }}>
-              <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.secondary }}>{skill}</Text>
-            </View>
-          ))}
-        </View>
-      )}
-
-      {/* Participant Info */}
-      {shift.participant_first_name ? (
+      {shift.participant_first_name && (
         <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginBottom: Spacing.sm }}>
           Posted by {shift.participant_first_name} {shift.participant_last_name}
         </Text>
-      ) : null}
+      )}
 
-      {/* Apply Button (workers) */}
       {isWorker && (
         <Pressable
           onPress={() => onApply(shift)}
@@ -388,7 +444,7 @@ function ShiftCard({ shift, onApply, isWorker }) {
   );
 }
 
-// ── Main Screen ──────────────────────────────────────────────────
+// ── Main Screen ───────────────────────────────────────────────────────────────
 export function AvailableShiftsScreen({ navigation }) {
   const { user } = useAuthStore();
   const isWorker = user?.role === 'worker';
@@ -403,9 +459,7 @@ export function AvailableShiftsScreen({ navigation }) {
     try {
       const endpoint = isParticipant ? '/api/shifts/mine' : '/api/shifts';
       const { data } = await api.get(endpoint);
-      if (data?.ok) {
-        setShifts(data.shifts || []);
-      }
+      if (data?.ok) setShifts(data.shifts || []);
     } catch (e) {}
     setLoading(false);
   }, [isParticipant]);
@@ -419,40 +473,22 @@ export function AvailableShiftsScreen({ navigation }) {
   }, [loadShifts]);
 
   const handleApply = (shift) => {
-    const confirmAction = () => {
-      applyForShift(shift.id);
-    };
-
+    const confirmAction = () => applyForShift(shift.id);
     if (Platform.OS === 'web') {
-      if (typeof window !== 'undefined' && window.confirm(`Apply for "${shift.title}"?`)) {
-        confirmAction();
-      }
+      if (window.confirm(`Apply for "${shift.title}"?`)) confirmAction();
     } else {
       Alert.alert(
         'Apply for Shift',
-        `Are you sure you want to apply for "${shift.title}"?\n\nRate: $${parseFloat(shift.hourly_rate).toFixed(2)}/hr\nLocation: ${shift.location}`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Apply', onPress: confirmAction },
-        ]
+        `Apply for "${shift.title}"?\n\nRate: $${parseFloat(shift.hourly_rate).toFixed(2)}/hr\nLocation: ${shift.location}`,
+        [{ text: 'Cancel', style: 'cancel' }, { text: 'Apply', onPress: confirmAction }]
       );
     }
   };
 
   const applyForShift = async (shiftId) => {
-    try {
-      const { data, error } = await api.post(`/api/shifts/${shiftId}/apply`, {
-        message: 'I am interested in this shift.',
-      });
-      if (error) {
-        Alert.alert('Error', error.message || 'Failed to apply');
-      } else {
-        Alert.alert('Applied!', 'Your application has been submitted.');
-        loadShifts();
-      }
-    } catch (e) {
-      Alert.alert('Error', 'Failed to apply for shift');
-    }
+    const { error } = await api.post(`/api/shifts/${shiftId}/apply`, { message: 'I am interested in this shift.' });
+    if (error) Alert.alert('Error', error.message || 'Failed to apply');
+    else { Alert.alert('Applied!', 'Your application has been submitted.'); loadShifts(); }
   };
 
   return (
@@ -462,23 +498,15 @@ export function AvailableShiftsScreen({ navigation }) {
         keyExtractor={(item) => item.id}
         contentContainerStyle={{ padding: Spacing.md, paddingBottom: Spacing.xxl }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
-        renderItem={({ item }) => (
-          <ShiftCard shift={item} onApply={handleApply} isWorker={isWorker} />
-        )}
+        renderItem={({ item }) => <ShiftCard shift={item} onApply={handleApply} isWorker={isWorker} />}
         ListHeaderComponent={
-          isParticipant ? (
-            <View style={{ marginBottom: Spacing.md }}>
-              <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary }}>
-                Your posted shifts are listed below. Tap + to create a new one.
-              </Text>
-            </View>
-          ) : (
-            <View style={{ marginBottom: Spacing.md }}>
-              <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary }}>
-                Browse available shifts and apply for the ones that match your skills.
-              </Text>
-            </View>
-          )
+          <View style={{ marginBottom: Spacing.md }}>
+            <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary }}>
+              {isParticipant
+                ? 'Your posted shifts are listed below. Tap + to create a new one.'
+                : 'Browse available shifts and apply for the ones that match your skills.'}
+            </Text>
+          </View>
         }
         ListEmptyComponent={
           loading ? (
@@ -514,8 +542,7 @@ export function AvailableShiftsScreen({ navigation }) {
       <CreateShiftModal
         visible={showCreateModal}
         onClose={() => setShowCreateModal(false)}
-        onCreated={() => { loadShifts(); navigation.goBack(); }}
-        navigation={navigation}
+        onCreated={loadShifts}
       />
     </View>
   );

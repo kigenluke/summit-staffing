@@ -98,6 +98,9 @@ app.use('/api/users', userRoutes);
 app.use('/api/shifts', shiftRoutes);
 app.use('/api/notifications', notificationRoutes);
 
+// Explicit preflight handler for CORS
+app.options('*', cors());
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({ success: false, error: 'Route not found' });

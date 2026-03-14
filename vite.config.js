@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Transform .js files that contain JSX (so Vite parses them correctly)
+// Transform .js files that contain JSX
 function jsxInJs() {
   return {
     name: 'jsx-in-js',
@@ -19,10 +19,28 @@ function jsxInJs() {
   };
 }
 
+// Stub out fbjs/lib/warning for web
+function fbjsStub() {
+  return {
+    name: 'fbjs-stub',
+    resolveId(id) {
+      if (id === 'fbjs/lib/warning' || id.startsWith('fbjs/')) {
+        return id;
+      }
+    },
+    load(id) {
+      if (id === 'fbjs/lib/warning' || id.startsWith('fbjs/')) {
+        return 'export default function() {}; module.exports = function() {};';
+      }
+    },
+  };
+}
+
 export default defineConfig({
   root: '.',
   publicDir: 'public',
   plugins: [
+    fbjsStub(),
     jsxInJs(),
     react({ include: /\.[jt]sx?$/, exclude: /node_modules/ }),
   ],
@@ -31,6 +49,8 @@ export default defineConfig({
       'react-native': path.resolve(__dirname, 'stubs/react-native-web-shim.js'),
       'react-native-web': 'react-native-web',
       '@react-native-community/datetimepicker': path.resolve(__dirname, 'stubs/datetimepicker.web.js'),
+      'fbjs/lib/warning': path.resolve(__dirname, 'stubs/fbjs-warning.js'),
+      'fbjs/lib/invariant': path.resolve(__dirname, 'stubs/fbjs-invariant.js'),
     },
     extensions: ['.web.js', '.web.jsx', '.web.ts', '.web.tsx', '.js', '.jsx', '.ts', '.tsx', '.json'],
   },
@@ -40,6 +60,7 @@ export default defineConfig({
   },
   optimizeDeps: {
     exclude: ['bcrypt', 'pg', 'puppeteer', '@aws-sdk/client-s3', 'express', 'socket.io', 'react-native'],
+    include: ['react-native-web'],
     esbuildOptions: {
       resolveExtensions: ['.web.js', '.js', '.jsx', '.ts', '.tsx'],
       loader: { '.js': 'jsx' },
