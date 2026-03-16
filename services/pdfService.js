@@ -1,7 +1,12 @@
 const fs = require('fs');
 const path = require('path');
 
-const puppeteer = require('puppeteer');
+let puppeteer;
+try {
+  puppeteer = require('puppeteer');
+} catch (e) {
+  // puppeteer not available in this environment
+}
 
 const { uploadBuffer } = require('./s3Service');
 
@@ -20,6 +25,16 @@ const formatMoney = (value) => {
 };
 
 const generateInvoicePDF = async (invoiceData) => {
+  if (!puppeteer) {
+    // Return a placeholder or error response if puppeteer not available
+    console.warn('Puppeteer not available - PDF generation skipped');
+    return { 
+      url: null, 
+      buffer: null,
+      warning: 'PDF generation not available in this environment'
+    };
+  }
+
   const templatePath = path.join(__dirname, '..', 'templates', 'invoice-template.html');
   const template = fs.readFileSync(templatePath, 'utf8');
 
