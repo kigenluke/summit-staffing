@@ -30,6 +30,9 @@ const allowedOrigins = [
 
 const app = express();
 
+// Trust proxy - needed for Railway/reverse proxy environments
+app.set('trust proxy', 1);
+
 // 1) morgan
 app.use(morgan('dev'));
 
