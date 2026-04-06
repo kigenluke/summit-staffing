@@ -41,6 +41,7 @@ const buttonStyle = (pressed) => ({
 export function RegisterScreen({ navigation, route }) {
   const initialRole = route.params?.role === 'worker' ? 'worker' : 'participant';
   const [role, setRole] = useState(initialRole);
+  const [workAs, setWorkAs] = useState('individual');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [firstName, setFirstName] = useState('');
@@ -143,6 +144,48 @@ export function RegisterScreen({ navigation, route }) {
             </Text>
           </Pressable>
         </View>
+
+        {role === 'worker' && (
+          <>
+            <Text style={{ fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.medium, color: Colors.text.primary, marginBottom: Spacing.sm }}>
+              Work as a
+            </Text>
+            <View style={{ flexDirection: 'row', marginBottom: Spacing.lg, gap: Spacing.sm }}>
+              <Pressable
+                onPress={() => setWorkAs('individual')}
+                style={{
+                  flex: 1,
+                  paddingVertical: Spacing.md,
+                  borderRadius: Radius.md,
+                  backgroundColor: workAs === 'individual' ? Colors.primary : Colors.surface,
+                  borderWidth: 1,
+                  borderColor: workAs === 'individual' ? Colors.primary : Colors.border,
+                  alignItems: 'center',
+                }}
+              >
+                <Text style={{ color: workAs === 'individual' ? Colors.text.white : Colors.text.primary, fontWeight: Typography.fontWeight.semibold }}>
+                  Individual
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setWorkAs('vendor')}
+                style={{
+                  flex: 1,
+                  paddingVertical: Spacing.md,
+                  borderRadius: Radius.md,
+                  backgroundColor: workAs === 'vendor' ? Colors.primary : Colors.surface,
+                  borderWidth: 1,
+                  borderColor: workAs === 'vendor' ? Colors.primary : Colors.border,
+                  alignItems: 'center',
+                }}
+              >
+                <Text style={{ color: workAs === 'vendor' ? Colors.text.white : Colors.text.primary, fontWeight: Typography.fontWeight.semibold }}>
+                  Vendor
+                </Text>
+              </Pressable>
+            </View>
+          </>
+        )}
 
         <Text style={labelStyle}>Email</Text>
         <TextInput style={[inputStyle, { marginBottom: Spacing.md }]} placeholder="you@example.com" placeholderTextColor={Colors.text.muted} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" editable={!isLoading} />

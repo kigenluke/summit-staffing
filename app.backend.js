@@ -98,6 +98,46 @@ app.use('/api/users', userRoutes);
 app.use('/api/shifts', shiftRoutes);
 app.use('/api/notifications', notificationRoutes);
 
+
+app.get('/api/maps/autocomplete', async (req, res) => {
+  try {
+    const input = (req.query.input || '').toString().trim();
+
+    if (!input || input.length < 2) {
+      return res.json({ success: true, predictions: [] });
+    }
+
+    const apiKey = process.env.GOOGLE_MAPS_BROWSER_KEY;
+
+    if (!apiKey) {
+      return res.status(500).json({
+        success: false,
+        error: 'Google Maps API key missing'
+      });
+    }
+
+    const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(
+      input
+    )}&key=${apiKey}`;
+
+    const fetch = (await import('node-fetch')).default;
+    const response = await fetch(url);
+    const data = await response.json();
+
+    return res.json({
+      success: true,
+      predictions: data.predictions || []
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      error: 'Something went wrong'
+    });
+  }
+});
+
 // Explicit preflight handler for CORS
 app.options('*', cors());
 

@@ -3,21 +3,9 @@
  */
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text, View, Pressable } from 'react-native';
+import { Text, Pressable } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { DashboardScreen } from '../screens/DashboardScreen.js';
-
-function MessagesHeaderRight() {
-  const nav = useNavigation();
-  return (
-    <Pressable
-      onPress={() => nav.navigate('SelectMessageRecipient')}
-      style={({ pressed }) => ({ opacity: pressed ? 0.8 : 1, paddingHorizontal: 12, paddingVertical: 8 })}
-    >
-      <Text style={{ color: Colors.text.white, fontWeight: '600', fontSize: 15 }}>New</Text>
-    </Pressable>
-  );
-}
 import { SearchWorkersScreen } from '../screens/SearchWorkersScreen.js';
 import { BookingsScreen } from '../screens/BookingsScreen.js';
 import { MessagesScreen } from '../screens/MessagesScreen.js';
@@ -26,6 +14,18 @@ import { Colors } from '../constants/theme.js';
 import { useAuthStore } from '../store/authStore.js';
 
 const Tab = createBottomTabNavigator();
+
+function MessagesHeaderRight() {
+  const nav = useNavigation();
+  return (
+    <Pressable
+      onPress={() => nav.navigate('SelectMessageRecipient' as never)}
+      style={({ pressed }) => ({ opacity: pressed ? 0.8 : 1, paddingHorizontal: 12, paddingVertical: 8 })}
+    >
+      <Text style={{ color: Colors.text.white, fontWeight: '600', fontSize: 15 }}>New</Text>
+    </Pressable>
+  );
+}
 
 export function MainTabs() {
   const { user } = useAuthStore();

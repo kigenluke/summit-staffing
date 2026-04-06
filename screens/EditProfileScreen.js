@@ -1,11 +1,13 @@
 /**
  * Summit Staffing – Edit Profile Screen
  */
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, Text, ScrollView, TextInput, Pressable, Alert, ActivityIndicator } from 'react-native';
 import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
+
+/** Address suggestions: only via backend GET /api/maps/autocomplete (Railway env keys — no Vite/Google key in frontend). */
 
 const Field = ({ label, value, onChangeText, placeholder, keyboardType, editable = true }) => (
   <View style={{ marginBottom: Spacing.md }}>
@@ -39,9 +41,15 @@ export function EditProfileScreen({ navigation }) {
   const [lastName, setLastName] = useState('');
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
+  const [addressFocused, setAddressFocused] = useState(false);
+  const [addressPredictions, setAddressPredictions] = useState([]);
+  const [loadingAddressPredictions, setLoadingAddressPredictions] = useState(false);
+  const [addressSuggestError, setAddressSuggestError] = useState('');
+  const [addressSuggestHint, setAddressSuggestHint] = useState('');
   const [bio, setBio] = useState('');
   const [hourlyRate, setHourlyRate] = useState('');
   const [ndisNumber, setNdisNumber] = useState('');
+  const addressDebounceRef = useRef(null);
 
   const loadProfile = useCallback(async () => {
     try {
@@ -68,6 +76,79 @@ export function EditProfileScreen({ navigation }) {
   }, [isWorker]);
 
   useEffect(() => { loadProfile(); }, [loadProfile]);
+  useEffect(() => {
+    return () => {
+      if (addressDebounceRef.current) clearTimeout(addressDebounceRef.current);
+    };
+  }, []);
+
+  const fetchAddressPredictions = useCallback(async (query) => {
+    const trimmed = query.trim();
+    if (trimmed.length < 3) {
+      setAddressPredictions([]);
+      setAddressSuggestError('');
+      setAddressSuggestHint('');
+      setLoadingAddressPredictions(false);
+      return;
+    }
+
+    setLoadingAddressPredictions(true);
+    setAddressSuggestError('');
+    setAddressSuggestHint('');
+    try {
+      const { data, error } = await api.get(`/api/maps/autocomplete?input=${encodeURIComponent(trimmed)}`);
+      if (!error && data?.ok && Array.isArray(data.predictions)) {
+        setAddressPredictions(data.predictions);
+        return;
+      }
+
+      if (error) {
+        setAddressPredictions([]);
+        const msg = (error.message || '').trim();
+        const is404 = error.status === 404 || msg === 'Route not found';
+        const isNet = error.status === 0 || /failed to fetch|networkerror|load failed/i.test(msg);
+        if (is404) {
+          setAddressSuggestError('Address search is not available on this API (404).');
+          setAddressSuggestHint(
+            'Deploy the latest backend to Railway (it must include GET /api/maps/autocomplete). Set VITE_PROXY_TARGET in .env.local to that Railway service URL and restart npm run web.',
+          );
+        } else if (isNet) {
+          setAddressSuggestError(msg || 'Network error.');
+          setAddressSuggestHint('Check internet; DevTools → Network → turn OFF "Offline". Ensure VITE_PROXY_TARGET points to your Railway API.');
+        } else {
+          setAddressSuggestError(msg || 'Could not load suggestions.');
+          setAddressSuggestHint('Railway: set GOOGLE_MAPS_SERVER_KEY or GOOGLE_MAPS_API_KEY (or BROWSER_KEY) and enable Places API for that key.');
+        }
+        return;
+      }
+
+      setAddressPredictions([]);
+      setAddressSuggestError(data?.error || 'Could not load suggestions.');
+      setAddressSuggestHint(
+        'Railway env: GOOGLE_MAPS_* + Places API enabled. Server keys must not be "HTTP referrer only" restrictions.',
+      );
+    } catch (e) {
+      setAddressPredictions([]);
+      setAddressSuggestError((e && e.message) || 'Could not load suggestions.');
+      setAddressSuggestHint('Check VITE_PROXY_TARGET and Railway backend.');
+    } finally {
+      setLoadingAddressPredictions(false);
+    }
+  }, []);
+
+  const handleAddressChange = useCallback((text) => {
+    setAddress(text);
+    if (addressDebounceRef.current) clearTimeout(addressDebounceRef.current);
+    if (text.trim().length < 3) {
+      setAddressPredictions([]);
+      setAddressSuggestError('');
+      setAddressSuggestHint('');
+      return;
+    }
+    addressDebounceRef.current = setTimeout(() => {
+      fetchAddressPredictions(text);
+    }, 300);
+  }, [fetchAddressPredictions]);
 
   const saveProfile = async () => {
     setSaving(true);
@@ -124,7 +205,94 @@ export function EditProfileScreen({ navigation }) {
         <Field label="First Name" value={firstName} onChangeText={setFirstName} placeholder="First name" />
         <Field label="Last Name" value={lastName} onChangeText={setLastName} placeholder="Last name" />
         <Field label="Phone" value={phone} onChangeText={setPhone} placeholder="Phone number" keyboardType="phone-pad" />
-        <Field label="Address" value={address} onChangeText={setAddress} placeholder="Your address" />
+        <View style={{ marginBottom: Spacing.md, zIndex: 10 }}>
+          <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>Address</Text>
+          <TextInput
+            style={{
+              backgroundColor: Colors.surfaceSecondary,
+              borderWidth: 2,
+              borderColor: addressFocused ? Colors.primary : Colors.border,
+              borderRadius: Radius.md,
+              paddingVertical: Spacing.sm,
+              paddingHorizontal: Spacing.md,
+              fontSize: Typography.fontSize.base,
+              color: Colors.text.primary,
+            }}
+            value={address}
+            onChangeText={handleAddressChange}
+            placeholder="Start typing street, suburb, or city"
+            placeholderTextColor={Colors.text.muted}
+            onFocus={() => {
+              setAddressFocused(true);
+              if (address.trim().length >= 3) fetchAddressPredictions(address);
+            }}
+            onBlur={() => {
+              // Keep list visible briefly so item taps are registered.
+              setTimeout(() => setAddressFocused(false), 120);
+            }}
+          />
+          {addressFocused && (
+            <View
+              style={{
+                marginTop: Spacing.sm,
+                borderWidth: 1,
+                borderColor: Colors.primaryLight,
+                borderRadius: Radius.md,
+                backgroundColor: Colors.surface,
+                overflow: 'hidden',
+                ...Shadows.lg,
+                maxHeight: 280,
+              }}
+            >
+              <View style={{ paddingVertical: Spacing.xs, paddingHorizontal: Spacing.md, backgroundColor: Colors.surfaceSecondary, borderBottomWidth: 1, borderBottomColor: Colors.border }}>
+                <Text style={{ fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.semibold, color: Colors.text.secondary, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                  Address suggestions
+                </Text>
+              </View>
+              {loadingAddressPredictions ? (
+                <View style={{ paddingVertical: Spacing.md, paddingHorizontal: Spacing.md, alignItems: 'center' }}>
+                  <ActivityIndicator size="small" color={Colors.primary} />
+                  <Text style={{ color: Colors.text.muted, marginTop: Spacing.sm }}>Searching places…</Text>
+                </View>
+              ) : addressSuggestError ? (
+                <View style={{ paddingVertical: Spacing.md, paddingHorizontal: Spacing.md }}>
+                  <Text style={{ color: Colors.status.error, fontSize: Typography.fontSize.sm }}>{addressSuggestError}</Text>
+                  <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs, marginTop: Spacing.xs }}>
+                    {addressSuggestHint}
+                  </Text>
+                </View>
+              ) : addressPredictions.length > 0 ? (
+                <ScrollView style={{ maxHeight: 220 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+                  {addressPredictions.slice(0, 8).map((item) => (
+                    <Pressable
+                      key={item.place_id}
+                      onPress={() => {
+                        setAddress(item.description || '');
+                        setAddressPredictions([]);
+                        setAddressSuggestError('');
+                        setAddressSuggestHint('');
+                        setAddressFocused(false);
+                      }}
+                      style={({ pressed }) => ({
+                        paddingVertical: Spacing.md,
+                        paddingHorizontal: Spacing.md,
+                        borderBottomWidth: 1,
+                        borderBottomColor: Colors.borderLight,
+                        backgroundColor: pressed ? 'rgba(34, 211, 238, 0.18)' : Colors.surface,
+                      })}
+                    >
+                      <Text style={{ color: Colors.text.primary, fontSize: Typography.fontSize.base }}>{item.description}</Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              ) : address.trim().length >= 3 ? (
+                <View style={{ paddingVertical: Spacing.md, paddingHorizontal: Spacing.md }}>
+                  <Text style={{ color: Colors.text.muted }}>No matches yet — try a street name or suburb.</Text>
+                </View>
+              ) : null}
+            </View>
+          )}
+        </View>
 
         {isWorker && (
           <>

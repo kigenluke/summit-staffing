@@ -22,9 +22,12 @@ import { AvailableShiftsScreen } from '../screens/AvailableShiftsScreen.js';
 import { HelpScreen } from '../screens/HelpScreen.js';
 import { DocumentsScreen } from '../screens/DocumentsScreen.js';
 import { EarningsScreen } from '../screens/EarningsScreen.js';
+import { EarningsDashboard } from '../screens/EarningsDashboard.js';
+import { BudgetScreen } from '../screens/BudgetScreen.js';
 import { TrainingScreen } from '../screens/TrainingScreen.js';
 import { EditProfileScreen } from '../screens/EditProfileScreen.js';
 import { Colors } from '../constants/theme.js';
+import { WorkerGateProvider } from '../context/WorkerGateContext.js';
 
 const Stack = createNativeStackNavigator();
 
@@ -36,6 +39,7 @@ export function AppNavigator() {
   }
 
   return (
+    <WorkerGateProvider>
     <Stack.Navigator
       screenOptions={{
         headerStyle: { backgroundColor: Colors.primary },
@@ -63,12 +67,15 @@ export function AppNavigator() {
       <Stack.Screen name="Terms" component={TermsScreen} options={{ title: 'Terms & Conditions' }} />
       <Stack.Screen name="AdminDashboard" component={AdminDashboardScreen} options={{ title: 'Admin Panel' }} />
       <Stack.Screen name="Reviews" component={ReviewsScreen} options={{ title: 'Reviews' }} />
-      <Stack.Screen name="AvailableShifts" component={AvailableShiftsScreen} options={{ title: 'Available Shifts' }} />
+      <Stack.Screen name="AvailableShifts" component={AvailableShiftsScreen} options={{ title: 'Find a worker' }} />
       <Stack.Screen name="Help" component={HelpScreen} options={{ title: 'Help & Support' }} />
       <Stack.Screen name="Documents" component={DocumentsScreen} options={{ title: 'Documents' }} />
       <Stack.Screen name="Earnings" component={EarningsScreen} options={{ title: 'Earnings' }} />
+      <Stack.Screen name="EarningsDashboard" component={EarningsDashboard} options={{ title: 'Earnings Dashboard' }} />
+      <Stack.Screen name="BudgetDashboard" component={BudgetScreen} options={{ title: 'Budget Dashboard' }} />
       <Stack.Screen name="Training" component={TrainingScreen} options={{ title: 'My Training' }} />
       <Stack.Screen name="EditProfile" component={EditProfileScreen} options={{ title: 'Edit Profile' }} />
     </Stack.Navigator>
+    </WorkerGateProvider>
   );
 }

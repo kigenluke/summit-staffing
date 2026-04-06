@@ -13,6 +13,12 @@ function resolveBaseURL() {
     if (viteURL) return viteURL;
   } catch (_) {}
 
+  // Vite dev (npm run web): same-origin /api → proxied to Railway in vite.config.js
+  try {
+    const isViteDev = eval("typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV");
+    if (isViteDev) return '';
+  } catch (_) {}
+
   // Expo / React Native env
   if (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_API_URL) {
     return process.env.EXPO_PUBLIC_API_URL;

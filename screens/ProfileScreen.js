@@ -8,18 +8,26 @@ import { launchImageLibrary } from 'react-native-image-picker';
 import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
+import { useWorkerGate } from '../context/WorkerGateContext.js';
+import { showVerificationRequiredAlert } from '../utils/verificationPrompt.js';
 
 // ── Menu Item Component ─────────────────────────────────────────
-const MenuItem = ({ label, badge, onPress }) => (
+const MenuItem = ({ label, badge, onPress, disabled }) => (
   <Pressable
-    onPress={onPress}
+    onPress={() => {
+      if (disabled) {
+        showVerificationRequiredAlert();
+        return;
+      }
+      onPress();
+    }}
     style={({ pressed }) => ({
       flexDirection: 'row', alignItems: 'center', paddingVertical: 14,
       borderBottomWidth: 1, borderBottomColor: Colors.borderLight,
-      opacity: pressed ? 0.6 : 1,
+      opacity: disabled ? 0.45 : pressed ? 0.6 : 1,
     })}
   >
-    <Text style={{ flex: 1, fontSize: Typography.fontSize.base, color: Colors.text.primary, fontWeight: Typography.fontWeight.medium }}>
+    <Text style={{ flex: 1, fontSize: Typography.fontSize.base, color: disabled ? Colors.text.muted : Colors.text.primary, fontWeight: Typography.fontWeight.medium }}>
       {label}
     </Text>
     {badge > 0 && (
@@ -50,6 +58,7 @@ export function ProfileScreen({ navigation }) {
   const { user, logout } = useAuthStore();
   const isWorker = user?.role === 'worker';
   const isAdmin = user?.role === 'admin';
+  const { restricted, syncFromWorkerProfile } = useWorkerGate();
 
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -79,7 +88,10 @@ export function ProfileScreen({ navigation }) {
       const { data } = await api.get(endpoint);
       if (data?.ok) {
         const p = isWorker ? data.worker : data.participant;
-        if (p) setProfile(p);
+        if (p) {
+          setProfile(p);
+          if (isWorker) syncFromWorkerProfile(p);
+        }
       }
     } catch (e) {}
     setLoading(false);
@@ -183,8 +195,8 @@ export function ProfileScreen({ navigation }) {
 
       {/* Sections with 2 items each; Edit Profile + Payment Details together for participants */}
       <MenuSection>
-        <MenuItem label="Notifications" badge={unreadCount} onPress={() => navigation.navigate('Notifications')} />
-        <MenuItem label="Inbox" onPress={() => navigation.navigate('Messages')} />
+        <MenuItem label="Notifications" badge={unreadCount} disabled={restricted} onPress={() => navigation.navigate('Notifications')} />
+        <MenuItem label="Inbox" disabled={restricted} onPress={() => navigation.navigate('Messages')} />
       </MenuSection>
 
       <MenuSection>
@@ -198,22 +210,22 @@ export function ProfileScreen({ navigation }) {
 
       {isWorker && (
         <MenuSection>
-          <MenuItem label="Payment Details" onPress={() => navigation.navigate('Payments')} />
-          <MenuItem label="My Earnings" onPress={() => navigation.navigate('Earnings')} />
+          <MenuItem label="Payment Details" disabled={restricted} onPress={() => navigation.navigate('Payments')} />
+          <MenuItem label="My Earnings" disabled={restricted} onPress={() => navigation.navigate('Earnings')} />
         </MenuSection>
       )}
 
       <MenuSection>
         {isWorker && (
-          <MenuItem label="My Training" onPress={() => navigation.navigate('Training')} />
+          <MenuItem label="My Training" disabled={restricted} onPress={() => navigation.navigate('Training')} />
         )}
-        <MenuItem label="Help & Support" onPress={() => navigation.navigate('Help')} />
+        <MenuItem label="Help & Support" disabled={isWorker && restricted} onPress={() => navigation.navigate('Help')} />
       </MenuSection>
 
       {isWorker && (
         <MenuSection>
-          <MenuItem label="Manage Worker Profile" onPress={() => navigation.navigate('WorkerManage')} />
-          <MenuItem label="Invoices" onPress={() => navigation.navigate('Invoices')} />
+          <MenuItem label="Manage Worker Profile" disabled={restricted} onPress={() => navigation.navigate('WorkerManage')} />
+          <MenuItem label="Invoices" disabled={restricted} onPress={() => navigation.navigate('Invoices')} />
         </MenuSection>
       )}
       {!isWorker && (
@@ -224,9 +236,9 @@ export function ProfileScreen({ navigation }) {
       )}
       {isWorker && (
         <MenuSection>
-          <MenuItem label="Terms & Conditions" onPress={() => navigation.navigate('Terms')} />
+          <MenuItem label="Terms & Conditions" disabled={restricted} onPress={() => navigation.navigate('Terms')} />
           {isAdmin && (
-            <MenuItem label="Admin Dashboard" onPress={() => navigation.navigate('AdminDashboard')} />
+            <MenuItem label="Admin Dashboard" disabled={restricted} onPress={() => navigation.navigate('AdminDashboard')} />
           )}
         </MenuSection>
       )}
