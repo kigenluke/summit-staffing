@@ -5,6 +5,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, ScrollView, Pressable, TextInput, RefreshControl, ActivityIndicator, FlatList } from 'react-native';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
+import { getServiceTypeSuggestions } from '../constants/serviceTypes.js';
 
 const WorkerCard = ({ worker, onPress }) => (
   <Pressable
@@ -83,10 +84,14 @@ export function SearchWorkersScreen({ navigation }) {
   const filtered = workers.filter(w => {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
+    const suggestedTypes = getServiceTypeSuggestions(searchQuery).map((s) => s.toLowerCase());
+    const workerSkills = Array.isArray(w.skills) ? w.skills.map((s) => String(s).toLowerCase()) : [];
     return (
       (w.first_name || '').toLowerCase().includes(q) ||
       (w.last_name || '').toLowerCase().includes(q) ||
-      (w.bio || '').toLowerCase().includes(q)
+      (w.bio || '').toLowerCase().includes(q) ||
+      workerSkills.some((s) => s.includes(q) || q.includes(s)) ||
+      suggestedTypes.some((type) => workerSkills.includes(type))
     );
   });
 

@@ -2,12 +2,30 @@
  * Summit Staffing – Edit Profile Screen
  */
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { View, Text, ScrollView, TextInput, Pressable, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, TextInput, Pressable, Alert, ActivityIndicator, Platform, StyleSheet } from 'react-native';
+import PlacesPkg from 'react-native-google-places-autocomplete';
 import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 
-/** Address suggestions: only via backend GET /api/maps/autocomplete (Railway env keys — no Vite/Google key in frontend). */
+const { GooglePlacesAutocomplete } = PlacesPkg;
+
+/** Same browser key as Google Cloud / Railway GOOGLE_MAPS_BROWSER_KEY — not sent to athletic-heart API. */
+function getGooglePlacesBrowserKey() {
+  try {
+    const env = import.meta.env;
+    if (env?.VITE_GOOGLE_MAPS_BROWSER_KEY) return env.VITE_GOOGLE_MAPS_BROWSER_KEY;
+    if (env?.VITE_GOOGLE_MAPS_API_KEY) return env.VITE_GOOGLE_MAPS_API_KEY;
+  } catch (_) {}
+  if (typeof process !== 'undefined' && process.env) {
+    return (
+      process.env.EXPO_PUBLIC_GOOGLE_MAPS_BROWSER_KEY ||
+      process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
+      ''
+    );
+  }
+  return '';
+}
 
 const Field = ({ label, value, onChangeText, placeholder, keyboardType, editable = true }) => (
   <View style={{ marginBottom: Spacing.md }}>
@@ -41,15 +59,16 @@ export function EditProfileScreen({ navigation }) {
   const [lastName, setLastName] = useState('');
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
-  const [addressFocused, setAddressFocused] = useState(false);
-  const [addressPredictions, setAddressPredictions] = useState([]);
-  const [loadingAddressPredictions, setLoadingAddressPredictions] = useState(false);
-  const [addressSuggestError, setAddressSuggestError] = useState('');
-  const [addressSuggestHint, setAddressSuggestHint] = useState('');
   const [bio, setBio] = useState('');
   const [hourlyRate, setHourlyRate] = useState('');
   const [ndisNumber, setNdisNumber] = useState('');
-  const addressDebounceRef = useRef(null);
+
+  const placesRef = useRef(null);
+  const googleKey = getGooglePlacesBrowserKey();
+  const isWeb = Platform.OS === 'web';
+  // On web, the local /__places-proxy injects GOOGLE_MAPS_* from .env.local.
+  // Library still requires a `query.key` field, so we pass a harmless placeholder if needed.
+  const placesQueryKey = googleKey || (isWeb ? 'web-proxy-key' : '');
 
   const loadProfile = useCallback(async () => {
     try {
@@ -76,79 +95,17 @@ export function EditProfileScreen({ navigation }) {
   }, [isWorker]);
 
   useEffect(() => { loadProfile(); }, [loadProfile]);
+
   useEffect(() => {
-    return () => {
-      if (addressDebounceRef.current) clearTimeout(addressDebounceRef.current);
-    };
-  }, []);
-
-  const fetchAddressPredictions = useCallback(async (query) => {
-    const trimmed = query.trim();
-    if (trimmed.length < 3) {
-      setAddressPredictions([]);
-      setAddressSuggestError('');
-      setAddressSuggestHint('');
-      setLoadingAddressPredictions(false);
-      return;
+    if (!loading && address && placesRef.current?.setAddressText) {
+      placesRef.current.setAddressText(address);
     }
+  }, [loading, address]);
 
-    setLoadingAddressPredictions(true);
-    setAddressSuggestError('');
-    setAddressSuggestHint('');
-    try {
-      const { data, error } = await api.get(`/api/maps/autocomplete?input=${encodeURIComponent(trimmed)}`);
-      if (!error && data?.ok && Array.isArray(data.predictions)) {
-        setAddressPredictions(data.predictions);
-        return;
-      }
-
-      if (error) {
-        setAddressPredictions([]);
-        const msg = (error.message || '').trim();
-        const is404 = error.status === 404 || msg === 'Route not found';
-        const isNet = error.status === 0 || /failed to fetch|networkerror|load failed/i.test(msg);
-        if (is404) {
-          setAddressSuggestError('Address search is not available on this API (404).');
-          setAddressSuggestHint(
-            'Deploy the latest backend to Railway (it must include GET /api/maps/autocomplete). Set VITE_PROXY_TARGET in .env.local to that Railway service URL and restart npm run web.',
-          );
-        } else if (isNet) {
-          setAddressSuggestError(msg || 'Network error.');
-          setAddressSuggestHint('Check internet; DevTools → Network → turn OFF "Offline". Ensure VITE_PROXY_TARGET points to your Railway API.');
-        } else {
-          setAddressSuggestError(msg || 'Could not load suggestions.');
-          setAddressSuggestHint('Railway: set GOOGLE_MAPS_SERVER_KEY or GOOGLE_MAPS_API_KEY (or BROWSER_KEY) and enable Places API for that key.');
-        }
-        return;
-      }
-
-      setAddressPredictions([]);
-      setAddressSuggestError(data?.error || 'Could not load suggestions.');
-      setAddressSuggestHint(
-        'Railway env: GOOGLE_MAPS_* + Places API enabled. Server keys must not be "HTTP referrer only" restrictions.',
-      );
-    } catch (e) {
-      setAddressPredictions([]);
-      setAddressSuggestError((e && e.message) || 'Could not load suggestions.');
-      setAddressSuggestHint('Check VITE_PROXY_TARGET and Railway backend.');
-    } finally {
-      setLoadingAddressPredictions(false);
-    }
-  }, []);
-
-  const handleAddressChange = useCallback((text) => {
-    setAddress(text);
-    if (addressDebounceRef.current) clearTimeout(addressDebounceRef.current);
-    if (text.trim().length < 3) {
-      setAddressPredictions([]);
-      setAddressSuggestError('');
-      setAddressSuggestHint('');
-      return;
-    }
-    addressDebounceRef.current = setTimeout(() => {
-      fetchAddressPredictions(text);
-    }, 300);
-  }, [fetchAddressPredictions]);
+  const placesRequestUrl =
+    Platform.OS === 'web' && typeof window !== 'undefined'
+      ? { url: `${window.location.origin}/__places-proxy`, useOnPlatform: 'web' }
+      : undefined;
 
   const saveProfile = async () => {
     setSaving(true);
@@ -183,8 +140,9 @@ export function EditProfileScreen({ navigation }) {
     <ScrollView
       style={{ flex: 1, backgroundColor: Colors.background }}
       contentContainerStyle={{ padding: Spacing.lg, paddingBottom: Spacing.xxl }}
+      keyboardShouldPersistTaps="handled"
+      nestedScrollEnabled
     >
-      {/* Avatar */}
       <View style={{ alignItems: 'center', marginBottom: Spacing.lg }}>
         <View style={{
           width: 80, height: 80, borderRadius: 40, backgroundColor: Colors.primary,
@@ -196,8 +154,7 @@ export function EditProfileScreen({ navigation }) {
         </View>
       </View>
 
-      {/* Editable Fields */}
-      <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.md, ...Shadows.sm }}>
+      <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.md, ...Shadows.sm, overflow: 'visible' }}>
         <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.md }}>
           Personal Information
         </Text>
@@ -205,92 +162,81 @@ export function EditProfileScreen({ navigation }) {
         <Field label="First Name" value={firstName} onChangeText={setFirstName} placeholder="First name" />
         <Field label="Last Name" value={lastName} onChangeText={setLastName} placeholder="Last name" />
         <Field label="Phone" value={phone} onChangeText={setPhone} placeholder="Phone number" keyboardType="phone-pad" />
-        <View style={{ marginBottom: Spacing.md, zIndex: 10 }}>
+
+        <View style={{ marginBottom: Spacing.md, zIndex: 20, position: 'relative' }}>
           <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>Address</Text>
-          <TextInput
-            style={{
-              backgroundColor: Colors.surfaceSecondary,
-              borderWidth: 2,
-              borderColor: addressFocused ? Colors.primary : Colors.border,
-              borderRadius: Radius.md,
-              paddingVertical: Spacing.sm,
-              paddingHorizontal: Spacing.md,
-              fontSize: Typography.fontSize.base,
-              color: Colors.text.primary,
-            }}
-            value={address}
-            onChangeText={handleAddressChange}
-            placeholder="Start typing street, suburb, or city"
-            placeholderTextColor={Colors.text.muted}
-            onFocus={() => {
-              setAddressFocused(true);
-              if (address.trim().length >= 3) fetchAddressPredictions(address);
-            }}
-            onBlur={() => {
-              // Keep list visible briefly so item taps are registered.
-              setTimeout(() => setAddressFocused(false), 120);
-            }}
-          />
-          {addressFocused && (
-            <View
-              style={{
-                marginTop: Spacing.sm,
-                borderWidth: 1,
-                borderColor: Colors.primaryLight,
-                borderRadius: Radius.md,
-                backgroundColor: Colors.surface,
-                overflow: 'hidden',
-                ...Shadows.lg,
-                maxHeight: 280,
+          {!isWeb && !googleKey ? (
+            <Text style={{ color: Colors.status.error, fontSize: Typography.fontSize.sm }}>
+              Add EXPO_PUBLIC_GOOGLE_MAPS_BROWSER_KEY (same key as Railway GOOGLE_MAPS_BROWSER_KEY) for native builds.
+            </Text>
+          ) : (
+            <GooglePlacesAutocomplete
+              ref={placesRef}
+              placeholder="Start typing street, suburb, or city"
+              onPress={(data) => {
+                setAddress(data.description || '');
               }}
-            >
-              <View style={{ paddingVertical: Spacing.xs, paddingHorizontal: Spacing.md, backgroundColor: Colors.surfaceSecondary, borderBottomWidth: 1, borderBottomColor: Colors.border }}>
-                <Text style={{ fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.semibold, color: Colors.text.secondary, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                  Address suggestions
-                </Text>
-              </View>
-              {loadingAddressPredictions ? (
-                <View style={{ paddingVertical: Spacing.md, paddingHorizontal: Spacing.md, alignItems: 'center' }}>
-                  <ActivityIndicator size="small" color={Colors.primary} />
-                  <Text style={{ color: Colors.text.muted, marginTop: Spacing.sm }}>Searching places…</Text>
-                </View>
-              ) : addressSuggestError ? (
-                <View style={{ paddingVertical: Spacing.md, paddingHorizontal: Spacing.md }}>
-                  <Text style={{ color: Colors.status.error, fontSize: Typography.fontSize.sm }}>{addressSuggestError}</Text>
-                  <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs, marginTop: Spacing.xs }}>
-                    {addressSuggestHint}
-                  </Text>
-                </View>
-              ) : addressPredictions.length > 0 ? (
-                <ScrollView style={{ maxHeight: 220 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
-                  {addressPredictions.slice(0, 8).map((item) => (
-                    <Pressable
-                      key={item.place_id}
-                      onPress={() => {
-                        setAddress(item.description || '');
-                        setAddressPredictions([]);
-                        setAddressSuggestError('');
-                        setAddressSuggestHint('');
-                        setAddressFocused(false);
-                      }}
-                      style={({ pressed }) => ({
-                        paddingVertical: Spacing.md,
-                        paddingHorizontal: Spacing.md,
-                        borderBottomWidth: 1,
-                        borderBottomColor: Colors.borderLight,
-                        backgroundColor: pressed ? 'rgba(34, 211, 238, 0.18)' : Colors.surface,
-                      })}
-                    >
-                      <Text style={{ color: Colors.text.primary, fontSize: Typography.fontSize.base }}>{item.description}</Text>
-                    </Pressable>
-                  ))}
-                </ScrollView>
-              ) : address.trim().length >= 3 ? (
-                <View style={{ paddingVertical: Spacing.md, paddingHorizontal: Spacing.md }}>
-                  <Text style={{ color: Colors.text.muted }}>No matches yet — try a street name or suburb.</Text>
-                </View>
-              ) : null}
-            </View>
+              onFail={(err) => {
+                if (isWeb) {
+                  Alert.alert(
+                    'Address Search',
+                    'Set GOOGLE_MAPS_BROWSER_KEY in .env.local and restart npm run web.',
+                  );
+                }
+              }}
+              query={{
+                key: placesQueryKey,
+                language: 'en',
+              }}
+              requestUrl={placesRequestUrl}
+              fetchDetails={false}
+              debounce={300}
+              minLength={2}
+              enablePoweredByContainer={false}
+              keyboardShouldPersistTaps="handled"
+              listViewDisplayed
+              keepResultsAfterBlur
+              suppressDefaultStyles
+              styles={{
+                container: { flex: 0 },
+                textInputContainer: { backgroundColor: 'transparent' },
+                textInput: {
+                  backgroundColor: Colors.surfaceSecondary,
+                  borderWidth: 2,
+                  borderColor: Colors.border,
+                  borderRadius: Radius.md,
+                  paddingVertical: Spacing.sm,
+                  paddingHorizontal: Spacing.md,
+                  fontSize: Typography.fontSize.base,
+                  color: Colors.text.primary,
+                  height: 48,
+                },
+                listView: {
+                  position: 'absolute',
+                  top: 52,
+                  left: 0,
+                  right: 0,
+                  zIndex: 9999,
+                  elevation: 10,
+                  backgroundColor: Colors.surface,
+                  borderWidth: 1,
+                  borderColor: Colors.border,
+                  borderRadius: Radius.md,
+                  marginTop: Spacing.xs,
+                  maxHeight: 220,
+                },
+                row: {
+                  backgroundColor: Colors.surface,
+                  padding: Spacing.md,
+                },
+                separator: { height: StyleSheet.hairlineWidth, backgroundColor: Colors.borderLight },
+                description: { fontSize: Typography.fontSize.base, color: Colors.text.primary },
+              }}
+              textInputProps={{
+                placeholderTextColor: Colors.text.muted,
+                onChangeText: (text) => setAddress(text),
+              }}
+            />
           )}
         </View>
 
@@ -305,7 +251,6 @@ export function EditProfileScreen({ navigation }) {
         )}
       </View>
 
-      {/* Read-only Account Info */}
       <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.lg, ...Shadows.sm }}>
         <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.md }}>
           Account Information
@@ -328,7 +273,6 @@ export function EditProfileScreen({ navigation }) {
         )}
       </View>
 
-      {/* Buttons */}
       <View style={{ flexDirection: 'row', gap: Spacing.sm }}>
         <Pressable
           onPress={() => navigation.goBack()}

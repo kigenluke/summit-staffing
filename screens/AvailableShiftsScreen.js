@@ -157,9 +157,7 @@ function ServiceTypeCard({ type, selected, onPress }) {
 
 // ── Create Shift Modal ────────────────────────────────────────────────────────
 function CreateShiftModal({ visible, onClose, onCreated }) {
-  const WORK_START_MIN = 9 * 60;
-  const WORK_END_MIN = 17 * 60;
-  const MAX_SHIFT_HOURS = 4;
+  const MAX_SHIFT_HOURS = 24;
 
   const [title, setTitle] = useState('');
   const [serviceType, setServiceType] = useState('');
@@ -175,8 +173,7 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
 
   const [workersCount, setWorkersCount] = useState('1');
   const [sameShift, setSameShift] = useState(true);
-  const [workerShifts, setWorkerShifts] = useState([{ start: '', end: '', duration: '1' }]);
-  const [commonDuration, setCommonDuration] = useState('1');
+  const [workerShifts, setWorkerShifts] = useState([{ start: '', end: '' }]);
   const [showFallbackTimeModal, setShowFallbackTimeModal] = useState(false);
   const [fallbackHour, setFallbackHour] = useState('09');
   const [fallbackMinute, setFallbackMinute] = useState('00');
@@ -185,6 +182,10 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
   const [step, setStep] = useState('workers');
   const [activeWorkerIndex, setActiveWorkerIndex] = useState(0);
   const commonStartWebRef = useRef(null);
+  const [addBreak, setAddBreak] = useState(false);
+  const [breakMinutes, setBreakMinutes] = useState('');
+  const [paidBreak, setPaidBreak] = useState(false);
+  const [breakPay, setBreakPay] = useState('');
 
   const reset = () => {
     setTitle(''); setServiceType(''); setHourlyRate(''); setDate('');
@@ -192,8 +193,11 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
     setShowServicePicker(false); setShowCalendar(false);
     setWorkersCount('1');
     setSameShift(true);
-    setWorkerShifts([{ start: '', end: '', duration: '1' }]);
-    setCommonDuration('1');
+    setWorkerShifts([{ start: '', end: '' }]);
+    setAddBreak(false);
+    setBreakMinutes('');
+    setPaidBreak(false);
+    setBreakPay('');
     setStep('workers');
     setActiveWorkerIndex(0);
   };
@@ -212,21 +216,13 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
     return hour * 60 + minute;
   };
 
-  const minutesToAmPm = (totalMinutes) => {
-    const hour24 = Math.floor(totalMinutes / 60);
-    const minute = totalMinutes % 60;
-    const period = hour24 >= 12 ? 'PM' : 'AM';
-    const hour12 = hour24 % 12 || 12;
-    return `${hour12}:${String(minute).padStart(2, '0')} ${period}`;
-  };
-
-  const buildEndFromStartAndHours = (start, durationHours) => {
-    const startMinutes = parseTimeToMinutes(start);
-    const duration = parseInt(durationHours, 10);
-    if (startMinutes == null || !duration) return '';
-    const endMinutes = startMinutes + duration * 60;
-    if (startMinutes < WORK_START_MIN || endMinutes > WORK_END_MIN) return '';
-    return minutesToAmPm(endMinutes);
+  const getShiftDurationMinutes = (start, end) => {
+    const s = parseTimeToMinutes(start);
+    const e = parseTimeToMinutes(end);
+    if (s == null || e == null) return null;
+    let diff = e - s;
+    if (diff <= 0) diff += 24 * 60; // overnight shift allowed
+    return diff;
   };
 
   const from24hToAmPm = (time24) => {
@@ -259,10 +255,7 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
 
   const isValidTime = (timeStr) => {
     const totalMinutes = parseTimeToMinutes(timeStr);
-    if (totalMinutes == null) return false;
-    const min = 9 * 60;
-    const max = 17 * 60;
-    return totalMinutes >= min && totalMinutes <= max;
+    return totalMinutes != null;
   };
 
   const toApiTime = (timeStr) => {
@@ -276,13 +269,13 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
   const openTimePickerFor = (scope, field, index = 0) => {
     let current = '';
     if (scope === 'common') {
-      current = startTime;
+      current = field === 'start' ? startTime : endTime;
     } else {
-      current = workerShifts[index]?.start || '';
+      current = field === 'start' ? (workerShifts[index]?.start || '') : (workerShifts[index]?.end || '');
     }
     setTimeTarget({ scope, field, index });
     if (Platform.OS === 'web') {
-      if (scope === 'common') {
+      if (scope === 'common' && field === 'start') {
         commonStartWebRef.current?.showPicker?.();
       }
       return;
@@ -296,13 +289,13 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
 
   const applyPickedTimeValue = (value) => {
     if (timeTarget.scope === 'common') {
-      setStartTime(value);
-      setEndTime(buildEndFromStartAndHours(value, commonDuration));
+      if (timeTarget.field === 'start') setStartTime(value);
+      else setEndTime(value);
       return;
     }
     setWorkerShifts((prev) => prev.map((item, idx) => (
       idx === timeTarget.index
-        ? { ...item, start: value, end: buildEndFromStartAndHours(value, item.duration) }
+        ? { ...item, [timeTarget.field]: value }
         : item
     )));
   };
@@ -326,11 +319,12 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
         return false;
       }
       if (!isValidTime(startTime) || !isValidTime(endTime)) {
-        Alert.alert('Invalid Time', 'Shift timing must be between 9:00 AM and 5:00 PM.');
+        Alert.alert('Invalid Time', 'Please enter valid start and end times.');
         return false;
       }
-      if (parseTimeToMinutes(endTime) <= parseTimeToMinutes(startTime)) {
-        Alert.alert('Invalid Time', 'End time must be after start time.');
+      const durationMin = getShiftDurationMinutes(startTime, endTime);
+      if (!durationMin || durationMin > MAX_SHIFT_HOURS * 60) {
+        Alert.alert('Invalid Time', `Shift must be between 1 minute and ${MAX_SHIFT_HOURS} hours.`);
         return false;
       }
       return true;
@@ -343,15 +337,48 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
         return false;
       }
       if (!isValidTime(shift.start) || !isValidTime(shift.end)) {
-        Alert.alert('Invalid Time', `Worker ${i + 1} timing must be between 9:00 AM and 5:00 PM.`);
+        Alert.alert('Invalid Time', `Please enter valid start/end times for Worker ${i + 1}.`);
         return false;
       }
-      if (parseTimeToMinutes(shift.end) <= parseTimeToMinutes(shift.start)) {
-        Alert.alert('Invalid Time', `Worker ${i + 1} end time must be after start time.`);
+      const durationMin = getShiftDurationMinutes(shift.start, shift.end);
+      if (!durationMin || durationMin > MAX_SHIFT_HOURS * 60) {
+        Alert.alert('Invalid Time', `Worker ${i + 1} shift must be between 1 minute and ${MAX_SHIFT_HOURS} hours.`);
         return false;
       }
     }
     return true;
+  };
+
+  const validateBreakFields = () => {
+    if (!addBreak) return true;
+    const minutes = parseInt(breakMinutes, 10);
+    if (!minutes || minutes < 1) {
+      Alert.alert('Invalid Break', 'Please enter break duration in minutes.');
+      return false;
+    }
+    const shiftDurationMin = getShiftDurationMinutes(startTime, endTime);
+    if (shiftDurationMin && minutes >= shiftDurationMin) {
+      Alert.alert('Invalid Break', 'Break duration must be less than total shift duration.');
+      return false;
+    }
+    if (paidBreak) {
+      const pay = parseFloat(breakPay);
+      if (Number.isNaN(pay) || pay < 0) {
+        Alert.alert('Invalid Break Pay', 'Please enter a valid paid break amount.');
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const combineDateAndTimeIso = (dateStr, timeStr, addDays = 0) => {
+    const base = new Date(`${dateStr}T00:00:00`);
+    if (isNaN(base.getTime())) return null;
+    const mins = parseTimeToMinutes(timeStr);
+    if (mins == null) return null;
+    base.setDate(base.getDate() + addDays);
+    base.setHours(Math.floor(mins / 60), mins % 60, 0, 0);
+    return base.toISOString();
   };
 
   const validateCommonFields = () => {
@@ -370,17 +397,34 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
     }
     if (!validateCommonFields()) return;
     if (!validateShifts()) return;
-
-    const primaryShift = (count >= 2 && !sameShift) ? workerShifts[0] : { start: startTime, end: endTime };
-    const apiStart = toApiTime(primaryShift.start);
-    const apiEnd = toApiTime(primaryShift.end);
-    if (!apiStart || !apiEnd) {
+    const primaryShift = (count >= 2 && !sameShift)
+      ? workerShifts[0]
+      : { start: startTime, end: endTime };
+    const startMinutes = parseTimeToMinutes(primaryShift.start);
+    const endMinutes = parseTimeToMinutes(primaryShift.end);
+    if (startMinutes == null || endMinutes == null) {
       Alert.alert('Invalid Time', 'Please enter valid times in AM/PM format.');
       return;
     }
+    if (!validateBreakFields()) return;
+    const breakMin = parseInt(breakMinutes, 10) || 0;
+    const durationMin = getShiftDurationMinutes(primaryShift.start, primaryShift.end) || 0;
+    if (addBreak && breakMin >= durationMin) {
+      Alert.alert('Invalid Break', 'Break duration must be less than total shift duration.');
+      return;
+    }
+    const endDayOffset = endMinutes <= startMinutes ? 1 : 0;
+    const start_time = combineDateAndTimeIso(date, primaryShift.start, 0);
+    const end_time = combineDateAndTimeIso(date, primaryShift.end, endDayOffset);
+    if (!start_time || !end_time) {
+      Alert.alert('Invalid Time', 'Please enter a valid shift start time.');
+      return;
+    }
 
-    const start_time = `${date}T${apiStart}`;
-    const end_time = `${date}T${apiEnd}`;
+    const breakMetaText = addBreak
+      ? `Break: ${breakMinutes} min | Paid break: ${paidBreak ? 'Yes' : 'No'}${paidBreak ? ` | Break pay: $${parseFloat(breakPay || 0).toFixed(2)}` : ''}`
+      : '';
+    const fullDescription = [description, breakMetaText].filter(Boolean).join('\n');
 
     setSaving(true);
     try {
@@ -391,9 +435,13 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
         start_time,
         end_time,
         location,
-        description,
+        description: fullDescription,
         workers_count: count,
         same_shift: count >= 2 ? sameShift : true,
+        has_break: addBreak,
+        break_minutes: addBreak ? parseInt(breakMinutes, 10) : 0,
+        paid_break: addBreak ? paidBreak : false,
+        break_pay: addBreak && paidBreak ? parseFloat(breakPay || 0) : 0,
         worker_shifts: count >= 2 && !sameShift
           ? workerShifts.map((shift, idx) => ({
             worker_number: idx + 1,
@@ -420,7 +468,7 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
   const setWorkersByStepper = (nextCount) => {
     const safeCount = Math.max(1, Math.min(10, nextCount));
     setWorkersCount(String(safeCount));
-    setWorkerShifts(Array.from({ length: safeCount }, () => ({ start: '', end: '', duration: '1' })));
+    setWorkerShifts(Array.from({ length: safeCount }, () => ({ start: '', end: '' })));
     if (safeCount < 2) setSameShift(true);
   };
 
@@ -457,14 +505,6 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
       return;
     }
     handleCreate();
-  };
-
-  const updateWorkerDuration = (index, duration) => {
-    setWorkerShifts((prev) => prev.map((item, idx) => (
-      idx === index
-        ? { ...item, duration, end: buildEndFromStartAndHours(item.start, duration) }
-        : item
-    )));
   };
 
   const renderCommonDetailsFields = () => (
@@ -505,6 +545,75 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
 
       <Text style={labelStyle}>Description</Text>
       <TextInput style={[inputStyle, { height: 80, textAlignVertical: 'top' }]} value={description} onChangeText={setDescription} multiline />
+
+      <Text style={labelStyle}>Do you want to add break?</Text>
+      <View style={{ flexDirection: 'row', gap: Spacing.sm }}>
+        <Pressable onPress={() => setAddBreak(true)} style={[toggleBtn, addBreak ? toggleBtnActive : null]}>
+          <Text style={[toggleBtnText, addBreak ? toggleBtnTextActive : null]}>Yes</Text>
+        </Pressable>
+        <Pressable onPress={() => { setAddBreak(false); setPaidBreak(false); setBreakMinutes(''); setBreakPay(''); }} style={[toggleBtn, !addBreak ? toggleBtnActive : null]}>
+          <Text style={[toggleBtnText, !addBreak ? toggleBtnTextActive : null]}>No</Text>
+        </Pressable>
+      </View>
+
+      {addBreak && (
+        <>
+          <Text style={labelStyle}>Break duration (minutes)</Text>
+          {Platform.OS === 'web' ? (
+            <View style={[inputStyle, webInputWrap]}>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={breakMinutes}
+                onChange={(e) => setBreakMinutes(e.target.value)}
+                style={webNumberInput}
+              />
+            </View>
+          ) : (
+            <TextInput
+              style={inputStyle}
+              value={breakMinutes}
+              onChangeText={setBreakMinutes}
+              keyboardType="numeric"
+            />
+          )}
+
+          <Text style={labelStyle}>Do you want to pay for break?</Text>
+          <View style={{ flexDirection: 'row', gap: Spacing.sm }}>
+            <Pressable onPress={() => setPaidBreak(true)} style={[toggleBtn, paidBreak ? toggleBtnActive : null]}>
+              <Text style={[toggleBtnText, paidBreak ? toggleBtnTextActive : null]}>Yes</Text>
+            </Pressable>
+            <Pressable onPress={() => { setPaidBreak(false); setBreakPay(''); }} style={[toggleBtn, !paidBreak ? toggleBtnActive : null]}>
+              <Text style={[toggleBtnText, !paidBreak ? toggleBtnTextActive : null]}>No</Text>
+            </Pressable>
+          </View>
+          {paidBreak && (
+            <>
+              <Text style={labelStyle}>Break pay amount ($)</Text>
+              {Platform.OS === 'web' ? (
+                <View style={[inputStyle, webInputWrap]}>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={breakPay}
+                    onChange={(e) => setBreakPay(e.target.value)}
+                    style={webNumberInput}
+                  />
+                </View>
+              ) : (
+                <TextInput
+                  style={inputStyle}
+                  value={breakPay}
+                  onChangeText={setBreakPay}
+                  keyboardType="numeric"
+                />
+              )}
+            </>
+          )}
+        </>
+      )}
     </>
   );
 
@@ -567,7 +676,7 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
             {step === 'workerDetails' && (
               <View style={workersSectionCard}>
                 <Text style={sectionHintText}>Worker {activeWorkerIndex + 1} Details</Text>
-                <Text style={helperText}>Set shift start + duration (max 4 hours). End time auto-calculates.</Text>
+                <Text style={helperText}>Set shift start and end time (up to 24 hours, overnight allowed).</Text>
                 <Text style={labelStyle}>Shift Start Time * (AM/PM)</Text>
                 {Platform.OS === 'web' ? (
                   <View style={[inputStyle, webInputWrap]}>
@@ -578,9 +687,7 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
                       onChange={(e) => {
                         const picked = from24hToAmPm(e.target.value);
                         setWorkerShifts((prev) => prev.map((item, idx) => (
-                          idx === activeWorkerIndex
-                            ? { ...item, start: picked, end: buildEndFromStartAndHours(picked, item.duration) }
-                            : item
+                          idx === activeWorkerIndex ? { ...item, start: picked } : item
                         )));
                       }}
                       style={webTimeInput}
@@ -593,27 +700,30 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
                     </Text>
                   </Pressable>
                 )}
-                <Text style={labelStyle}>Shift Duration (Hours) *</Text>
-                <View style={{ flexDirection: 'row', gap: Spacing.sm }}>
-                  {[1, 2, 3, 4].map((h) => (
-                    <Pressable
-                      key={h}
-                      onPress={() => updateWorkerDuration(activeWorkerIndex, String(h))}
-                      style={[hourChip, workerShifts[activeWorkerIndex]?.duration === String(h) ? hourChipActive : null]}
-                    >
-                      <Text style={[toggleBtnText, workerShifts[activeWorkerIndex]?.duration === String(h) ? toggleBtnTextActive : null]}>
-                        {h}h
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-                <Text style={labelStyle}>End Time (Auto)</Text>
-                <View style={[inputStyle, timePickerField]}>
-                  <Text style={{ color: workerShifts[activeWorkerIndex]?.end ? Colors.text.primary : Colors.text.muted }}>
-                    {workerShifts[activeWorkerIndex]?.end || 'Auto after selecting start + hours'}
-                  </Text>
-                </View>
-                <Text style={helperText}>Shift range allowed: 9:00 AM to 5:00 PM</Text>
+                <Text style={labelStyle}>Shift End Time * (AM/PM)</Text>
+                {Platform.OS === 'web' ? (
+                  <View style={[inputStyle, webInputWrap]}>
+                    <input
+                      type="time"
+                      step={900}
+                      value={to24hString(workerShifts[activeWorkerIndex]?.end)}
+                      onChange={(e) => {
+                        const picked = from24hToAmPm(e.target.value);
+                        setWorkerShifts((prev) => prev.map((item, idx) => (
+                          idx === activeWorkerIndex ? { ...item, end: picked } : item
+                        )));
+                      }}
+                      style={webTimeInput}
+                    />
+                  </View>
+                ) : (
+                  <Pressable style={[inputStyle, timePickerField]} onPress={() => openTimePickerFor('worker', 'end', activeWorkerIndex)}>
+                    <Text style={{ color: workerShifts[activeWorkerIndex]?.end ? Colors.text.primary : Colors.text.muted }}>
+                      {workerShifts[activeWorkerIndex]?.end || 'Select end time'}
+                    </Text>
+                  </Pressable>
+                )}
+                <Text style={helperText}>Up to 24 hours. Overnight shift is allowed.</Text>
                 {renderCommonDetailsFields()}
                 <View style={stepActions}>
                   <Pressable style={ghostBtn} onPress={() => (activeWorkerIndex === 0 ? setStep('mode') : setActiveWorkerIndex((p) => p - 1))}>
@@ -644,7 +754,6 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
                           onChange={(e) => {
                             const picked = from24hToAmPm(e.target.value);
                             setStartTime(picked);
-                            setEndTime(buildEndFromStartAndHours(picked, commonDuration));
                           }}
                           style={webTimeInput}
                         />
@@ -656,28 +765,25 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
                         </Text>
                       </Pressable>
                     )}
-                    <Text style={labelStyle}>Shift Duration (Hours) *</Text>
-                    <View style={{ flexDirection: 'row', gap: Spacing.sm }}>
-                      {[1, 2, 3, 4].map((h) => (
-                        <Pressable
-                          key={h}
-                          onPress={() => {
-                            setCommonDuration(String(h));
-                            setEndTime(buildEndFromStartAndHours(startTime, String(h)));
-                          }}
-                          style={[hourChip, commonDuration === String(h) ? hourChipActive : null]}
-                        >
-                          <Text style={[toggleBtnText, commonDuration === String(h) ? toggleBtnTextActive : null]}>{h}h</Text>
-                        </Pressable>
-                      ))}
-                    </View>
-                    <Text style={labelStyle}>End Time (Auto)</Text>
-                    <View style={[inputStyle, timePickerField]}>
-                      <Text style={{ color: endTime ? Colors.text.primary : Colors.text.muted }}>
-                        {endTime || 'Auto after selecting start + hours'}
-                      </Text>
-                    </View>
-                    <Text style={helperText}>Shift range allowed: 9:00 AM to 5:00 PM</Text>
+                    <Text style={labelStyle}>Shift End Time * (AM/PM)</Text>
+                    {Platform.OS === 'web' ? (
+                      <View style={[inputStyle, webInputWrap]}>
+                        <input
+                          type="time"
+                          step={900}
+                          value={to24hString(endTime)}
+                          onChange={(e) => setEndTime(from24hToAmPm(e.target.value))}
+                          style={webTimeInput}
+                        />
+                      </View>
+                    ) : (
+                      <Pressable style={[inputStyle, timePickerField]} onPress={() => openTimePickerFor('common', 'end')}>
+                        <Text style={{ color: endTime ? Colors.text.primary : Colors.text.muted }}>
+                          {endTime || 'Select end time'}
+                        </Text>
+                      </Pressable>
+                    )}
+                    <Text style={helperText}>Up to 24 hours. Overnight shift is allowed.</Text>
                   </View>
                 )}
 
@@ -864,6 +970,14 @@ const webTimeInput = {
   color: '#0f172a',
   fontSize: 16,
 };
+const webNumberInput = {
+  width: '100%',
+  border: 'none',
+  outline: 'none',
+  background: 'transparent',
+  color: '#0f172a',
+  fontSize: 16,
+};
 const workersSectionCard = {
   backgroundColor: 'transparent',
   borderRadius: Radius.md,
@@ -938,6 +1052,10 @@ function ShiftCard({ shift, onApply, isWorker }) {
   const startDate = new Date(shift.start_time);
   const endDate = new Date(shift.end_time);
   const hours = ((endDate - startDate) / (1000 * 60 * 60)).toFixed(1);
+  const breakMeta = (shift.description || '').match(/Break:\s*(\d+)\s*min\s*\|\s*Paid break:\s*(Yes|No)(?:\s*\|\s*Break pay:\s*\$([0-9.]+))?/i);
+  const breakMinutes = breakMeta ? breakMeta[1] : null;
+  const breakIsPaid = breakMeta ? (breakMeta[2] || '').toLowerCase() === 'yes' : false;
+  const breakPay = breakMeta && breakMeta[3] ? parseFloat(breakMeta[3]) : 0;
 
   return (
     <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.sm, ...Shadows.md }}>
@@ -961,6 +1079,11 @@ function ShiftCard({ shift, onApply, isWorker }) {
       <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>
         ${parseFloat(shift.hourly_rate).toFixed(2)}/hr • ~${(parseFloat(shift.hourly_rate) * parseFloat(hours)).toFixed(2)} total
       </Text>
+      {breakMinutes && (
+        <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>
+          Break: {breakMinutes} min • Paid: {breakIsPaid ? `Yes ($${breakPay.toFixed(2)})` : 'No'}
+        </Text>
+      )}
 
       <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: Spacing.sm }}>
         📍 {shift.location}
@@ -1093,6 +1216,25 @@ export function AvailableShiftsScreen({ navigation }) {
         renderItem={({ item }) => <ShiftCard shift={item} onApply={handleApply} isWorker={isWorker} />}
         ListHeaderComponent={
           <View style={{ marginBottom: Spacing.md }}>
+            {isParticipant && (
+              <Pressable
+                onPress={() => setShowCreateModal(true)}
+                style={({ pressed }) => ({
+                  backgroundColor: Colors.primary,
+                  borderRadius: Radius.lg,
+                  paddingVertical: Spacing.md,
+                  paddingHorizontal: Spacing.lg,
+                  marginBottom: Spacing.md,
+                  alignItems: 'center',
+                  ...Shadows.md,
+                  opacity: pressed ? 0.9 : 1,
+                })}
+              >
+                <Text style={{ color: Colors.text.white, fontSize: Typography.fontSize.base, fontWeight: Typography.fontWeight.bold }}>
+                  Add Shift
+                </Text>
+              </Pressable>
+            )}
             {isWorker && (
               <Pressable
                 onPress={() => navigation.navigate('Earnings')}

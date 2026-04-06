@@ -37,6 +37,10 @@ export function AdminDashboardScreen({ navigation }) {
   // Users
   const [users, setUsers] = useState([]);
   const [searchQ, setSearchQ] = useState('');
+  const [showComplianceModal, setShowComplianceModal] = useState(false);
+  const [complianceLoading, setComplianceLoading] = useState(false);
+  const [complianceUser, setComplianceUser] = useState(null);
+  const [complianceItems, setComplianceItems] = useState([]);
 
   // Revenue
   const [revenue, setRevenue] = useState(null);
@@ -104,6 +108,33 @@ export function AdminDashboardScreen({ navigation }) {
         else { Alert.alert('Success', 'User suspended'); loadUsers(); }
       }},
     ]);
+  };
+
+  const loadCompliance = async (userRow) => {
+    setComplianceLoading(true);
+    setComplianceUser(userRow);
+    setShowComplianceModal(true);
+    const { data, error } = await api.get(`/api/admin/users/${userRow.id}/compliance`);
+    if (error) {
+      Alert.alert('Error', error.message || 'Failed to load compliance');
+      setComplianceItems([]);
+    } else {
+      setComplianceItems(data?.items || []);
+    }
+    setComplianceLoading(false);
+  };
+
+  const updateComplianceItem = async (itemKey, action) => {
+    if (!complianceUser) return;
+    const { error } = await api.put(`/api/admin/users/${complianceUser.id}/compliance/${itemKey}`, {
+      action,
+      reason: action === 'reject' ? 'Rejected by admin' : null,
+    });
+    if (error) {
+      Alert.alert('Error', error.message || 'Failed to update status');
+      return;
+    }
+    await loadCompliance(complianceUser);
   };
 
   /* ── render ── */
@@ -195,12 +226,24 @@ export function AdminDashboardScreen({ navigation }) {
                   <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>{u.email}</Text>
                   <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs }}>{u.role} • {u.is_suspended ? ' Suspended' : ' Active'} • Joined {new Date(u.created_at).toLocaleDateString()}</Text>
                 </View>
-                <Pressable onPress={() => toggleSuspend(u.id, u.is_suspended || u.suspended)}
-                  style={{ backgroundColor: (u.is_suspended || u.suspended) ? Colors.text.muted : '#EF4444', paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: Radius.sm }}>
-                  <Text style={{ color: '#fff', fontWeight: Typography.fontWeight.bold, fontSize: Typography.fontSize.xs }}>
-                    {(u.is_suspended || u.suspended) ? 'Suspended' : 'Suspend'}
-                  </Text>
-                </Pressable>
+                <View style={{ alignItems: 'flex-end', gap: 6 }}>
+                  {u.role === 'worker' && (
+                    <Pressable
+                      onPress={() => loadCompliance(u)}
+                      style={{ backgroundColor: Colors.primary, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: Radius.sm }}
+                    >
+                      <Text style={{ color: '#fff', fontWeight: Typography.fontWeight.bold, fontSize: Typography.fontSize.xs }}>
+                        Review Compliance
+                      </Text>
+                    </Pressable>
+                  )}
+                  <Pressable onPress={() => toggleSuspend(u.id, u.is_suspended || u.suspended)}
+                    style={{ backgroundColor: (u.is_suspended || u.suspended) ? Colors.text.muted : '#EF4444', paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: Radius.sm }}>
+                    <Text style={{ color: '#fff', fontWeight: Typography.fontWeight.bold, fontSize: Typography.fontSize.xs }}>
+                      {(u.is_suspended || u.suspended) ? 'Suspended' : 'Suspend'}
+                    </Text>
+                  </Pressable>
+                </View>
               </View>
             ))}
           </>
@@ -259,6 +302,69 @@ export function AdminDashboardScreen({ navigation }) {
         )}
 
       </ScrollView>
+
+      <Modal visible={showComplianceModal} animationType="slide" transparent onRequestClose={() => setShowComplianceModal(false)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}>
+          <View style={{ backgroundColor: Colors.surface, borderTopLeftRadius: Radius.lg, borderTopRightRadius: Radius.lg, maxHeight: '85%', padding: Spacing.md }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.sm }}>
+              <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>
+                Worker Compliance Review
+              </Text>
+              <Pressable onPress={() => setShowComplianceModal(false)}>
+                <Text style={{ fontSize: 22, color: Colors.text.muted }}>✕</Text>
+              </Pressable>
+            </View>
+            <Text style={{ color: Colors.text.secondary, marginBottom: Spacing.md }}>{complianceUser?.email || ''}</Text>
+
+            {complianceLoading ? (
+              <ActivityIndicator color={Colors.primary} style={{ marginTop: Spacing.lg }} />
+            ) : (
+              <ScrollView>
+                {complianceItems.map((item) => (
+                  <View key={item.key} style={{ borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md, padding: Spacing.md, marginBottom: Spacing.sm }}>
+                    <Text style={{ color: Colors.text.primary, fontWeight: Typography.fontWeight.semibold }}>{item.label}</Text>
+                    <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs, marginTop: 2 }}>
+                      Status: {item.status}
+                    </Text>
+                    {!!item.reason && (
+                      <Text style={{ color: Colors.status.error, fontSize: Typography.fontSize.xs, marginTop: 2 }}>
+                        Reason: {item.reason}
+                      </Text>
+                    )}
+                    {item.actionable && (
+                      <View style={{ flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.sm }}>
+                        <Pressable
+                          onPress={() => updateComplianceItem(item.key, 'approve')}
+                          style={{ flex: 1, backgroundColor: Colors.status.success, paddingVertical: Spacing.sm, borderRadius: Radius.sm, alignItems: 'center' }}
+                        >
+                          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Approve</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => updateComplianceItem(item.key, 'reject')}
+                          style={{ flex: 1, backgroundColor: Colors.status.error, paddingVertical: Spacing.sm, borderRadius: Radius.sm, alignItems: 'center' }}
+                        >
+                          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Reject</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => updateComplianceItem(item.key, 'pending')}
+                          style={{ flex: 1, backgroundColor: Colors.status.warning, paddingVertical: Spacing.sm, borderRadius: Radius.sm, alignItems: 'center' }}
+                        >
+                          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Pending</Text>
+                        </Pressable>
+                      </View>
+                    )}
+                  </View>
+                ))}
+                {complianceItems.length === 0 && (
+                  <Text style={{ color: Colors.text.muted, textAlign: 'center', marginTop: Spacing.md }}>
+                    No compliance items found.
+                  </Text>
+                )}
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }

@@ -79,6 +79,14 @@ const getWorkers = async (req, res) => {
         w.verification_status,
         w.rating,
         w.total_reviews,
+        COALESCE(
+          (
+            SELECT ARRAY_AGG(ws2.skill_name ORDER BY ws2.skill_name)
+            FROM worker_skills ws2
+            WHERE ws2.worker_id = w.id
+          ),
+          '{}'
+        ) AS skills,
         w.created_at,
         w.updated_at
       FROM workers w

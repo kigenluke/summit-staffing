@@ -37,6 +37,25 @@ router.get(
   adminController.getUserList
 );
 
+router.get(
+  '/users/:id/compliance',
+  [auth, checkAdmin, param('id').isUUID()],
+  adminController.getUserComplianceStatus
+);
+
+router.put(
+  '/users/:id/compliance/:itemKey',
+  [
+    auth,
+    checkAdmin,
+    param('id').isUUID(),
+    param('itemKey').isString().isLength({ min: 2, max: 80 }),
+    body('action').isIn(['approve', 'reject', 'pending']),
+    body('reason').optional().isString().isLength({ max: 500 })
+  ],
+  adminController.updateUserComplianceItem
+);
+
 router.put(
   '/users/:id/suspend',
   [auth, checkAdmin, param('id').isUUID(), body('reason').optional().isString().isLength({ max: 500 })],

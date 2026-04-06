@@ -10,6 +10,10 @@ export const SERVICE_TYPES = [
   'Transport',
   'Improved Health and Wellbeing',
   'Improved Daily Living',
+  'Therapeutic Services',
+  'Logistics & Transport',
+  'Equipment & Supplies',
+  'Home & Community',
 ];
 
 /** Keywords per service type for search/suggestions (lowercase). */
@@ -22,6 +26,22 @@ const SERVICE_KEYWORDS = {
   'Transport': ['transport', 'travel', 'drive', 'driving', 'lift', 'taxi'],
   'Improved Health and Wellbeing': ['health', 'wellbeing', 'exercise', 'fitness', 'therapy'],
   'Improved Daily Living': ['daily living', 'skills', 'independence'],
+  'Therapeutic Services': [
+    'therapeutic', 'therapy', 'physiotherapy', 'physio', 'occupational therapy', 'ot',
+    'speech pathology', 'speech therapy', 'psychology', 'psychologist',
+  ],
+  'Logistics & Transport': [
+    'logistics', 'transport', 'disability taxi', 'taxi', 'patient transport',
+    'specialized travel', 'travel assistance',
+  ],
+  'Equipment & Supplies': [
+    'equipment', 'supplies', 'mobility aids', 'assistive technology',
+    'ndis consumables', 'consumables',
+  ],
+  'Home & Community': [
+    'home', 'community', 'specialist cleaning', 'cleaning', 'meal delivery',
+    'home modification', 'modification',
+  ],
 };
 
 /**

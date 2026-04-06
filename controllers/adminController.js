@@ -346,12 +346,152 @@ const getBookingMetrics = async (req, res) => {
   }
 };
 
+const COMPLIANCE_DOC_MAP = {
+  ndis_screening: { label: 'NDIS Worker Screening', documentType: 'ndis_screening' },
+  blue_card: { label: 'Blue Card / WWCC', documentType: 'wwcc' },
+  police_check: { label: 'National Police Check', documentType: 'police_check' },
+  first_aid: { label: 'First Aid / CPR', documentType: 'first_aid' },
+  insurance: { label: 'Insurance', documentType: 'insurance' },
+};
+
+const normalizeComplianceStatus = (doc) => {
+  if (!doc) return 'not_started';
+  if (doc.status === 'approved') return 'verified';
+  if (doc.status === 'pending') return 'pending';
+  return 'action_required';
+};
+
+const getUserComplianceStatus = async (req, res) => {
+  try {
+    if (respondValidation(req, res)) return;
+    const userId = req.params.id;
+
+    const workerRes = await pool.query(
+      `SELECT w.id AS worker_id, w.user_id, w.first_name, w.last_name, w.abn, w.verification_status, u.email
+       FROM workers w
+       JOIN users u ON u.id = w.user_id
+       WHERE w.user_id = $1
+       LIMIT 1`,
+      [userId]
+    );
+    if (workerRes.rowCount === 0) {
+      return res.status(404).json({ ok: false, error: 'Worker profile not found for this user' });
+    }
+    const worker = workerRes.rows[0];
+
+    const docsRes = await pool.query(
+      `SELECT id, document_type, status, rejection_reason, created_at, updated_at
+       FROM worker_documents
+       WHERE worker_id = $1
+       ORDER BY created_at DESC`,
+      [worker.worker_id]
+    );
+
+    const latestByType = {};
+    for (const d of docsRes.rows) {
+      if (!latestByType[d.document_type]) latestByType[d.document_type] = d;
+    }
+
+    const items = Object.entries(COMPLIANCE_DOC_MAP).map(([key, def]) => {
+      const doc = latestByType[def.documentType] || null;
+      return {
+        key,
+        label: def.label,
+        status: normalizeComplianceStatus(doc),
+        actionable: true,
+        documentType: def.documentType,
+        documentId: doc?.id || null,
+        reason: doc?.rejection_reason || null,
+        lastUpdatedAt: doc?.updated_at || doc?.created_at || null,
+      };
+    });
+
+    return res.status(200).json({
+      ok: true,
+      worker: {
+        worker_id: worker.worker_id,
+        user_id: worker.user_id,
+        name: `${worker.first_name || ''} ${worker.last_name || ''}`.trim(),
+        email: worker.email,
+        verification_status: worker.verification_status,
+      },
+      items,
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: 'Failed to fetch compliance status' });
+  }
+};
+
+const updateUserComplianceItem = async (req, res) => {
+  try {
+    if (respondValidation(req, res)) return;
+    const userId = req.params.id;
+    const itemKey = req.params.itemKey;
+    const action = req.body.action;
+    const reason = req.body.reason || null;
+
+    const mapping = COMPLIANCE_DOC_MAP[itemKey];
+    if (!mapping) {
+      return res.status(400).json({ ok: false, error: 'Unsupported compliance item' });
+    }
+
+    const workerRes = await pool.query(
+      'SELECT id, user_id FROM workers WHERE user_id = $1 LIMIT 1',
+      [userId]
+    );
+    if (workerRes.rowCount === 0) {
+      return res.status(404).json({ ok: false, error: 'Worker profile not found for this user' });
+    }
+    const worker = workerRes.rows[0];
+
+    const docRes = await pool.query(
+      `SELECT id
+       FROM worker_documents
+       WHERE worker_id = $1 AND document_type = $2
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [worker.id, mapping.documentType]
+    );
+    if (docRes.rowCount === 0) {
+      return res.status(404).json({ ok: false, error: `No uploaded document found for ${mapping.label}` });
+    }
+
+    let nextStatus = 'pending';
+    if (action === 'approve') nextStatus = 'approved';
+    if (action === 'reject') nextStatus = 'rejected';
+    if (action === 'pending') nextStatus = 'pending';
+
+    await pool.query(
+      `UPDATE worker_documents
+       SET status = $2, rejection_reason = $3, updated_at = now()
+       WHERE id = $1`,
+      [docRes.rows[0].id, nextStatus, nextStatus === 'rejected' ? reason : null]
+    );
+
+    await recomputeWorkerVerification(worker.id);
+
+    return res.status(200).json({
+      ok: true,
+      item: {
+        key: itemKey,
+        label: mapping.label,
+        status: nextStatus === 'approved' ? 'verified' : nextStatus === 'pending' ? 'pending' : 'action_required',
+        reason: nextStatus === 'rejected' ? reason : null,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: 'Failed to update compliance item' });
+  }
+};
+
 module.exports = {
   getDashboardStats,
   getPendingDocuments,
   approveDocument,
   rejectDocument,
   getUserList,
+  getUserComplianceStatus,
+  updateUserComplianceItem,
   suspendUser,
   getRevenueReport,
   getBookingMetrics

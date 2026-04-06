@@ -1,4 +1,5 @@
-require('dotenv').config();
+require('dotenv').config({ path: '.env' });
+console.log('DB URL:', process.env.DATABASE_URL);
 
 const http = require('http');
 const pool = require('./config/database');

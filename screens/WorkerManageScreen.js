@@ -2,11 +2,12 @@
  * Summit Staffing – Worker Management Screen
  * Skills, Documents, Availability, all from Profile tab
  */
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { View, Text, ScrollView, Pressable, TextInput, Alert, ActivityIndicator, RefreshControl, Platform } from 'react-native';
 import { api } from '../services/api.js';
 import { useAuthStore } from '../store/authStore.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
+import { SERVICE_TYPES } from '../constants/serviceTypes.js';
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const DOC_TYPES = [
@@ -17,6 +18,19 @@ const DOC_TYPES = [
   { key: 'insurance', label: 'Insurance' },
 ];
 const DOC_STATUS_COLORS = { pending: Colors.status.warning, approved: Colors.status.success, rejected: Colors.status.error, expired: Colors.text.muted };
+const STATUS = {
+  not_started: { label: 'Not started', color: Colors.text.muted, icon: '⚪' },
+  pending: { label: 'Pending review', color: Colors.status.warning, icon: '🟡' },
+  action_required: { label: 'Action required', color: Colors.status.error, icon: '🔴' },
+  verified: { label: 'Verified', color: Colors.status.success, icon: '🟢' },
+};
+const STATUS_ORDER = { not_started: 0, pending: 1, action_required: 2, verified: 3 };
+const CORE_VENDOR_OPTIONS = [
+  'Therapeutic Services',
+  'Logistics & Transport',
+  'Equipment & Supplies',
+  'Home & Community',
+];
 
 const Section = ({ title, children }) => (
   <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.md, ...Shadows.sm }}>
@@ -25,7 +39,7 @@ const Section = ({ title, children }) => (
   </View>
 );
 
-export function WorkerManageScreen({ route }) {
+export function WorkerManageScreen({ route, navigation }) {
   const passedWorkerId = route?.params?.workerId;
   const [workerId, setWorkerId] = useState(passedWorkerId || null);
   const [worker, setWorker] = useState(null);
@@ -38,6 +52,8 @@ export function WorkerManageScreen({ route }) {
   const [setupFirstName, setSetupFirstName] = useState('');
   const [setupLastName, setSetupLastName] = useState('');
   const [settingUp, setSettingUp] = useState(false);
+  const [connectStatus, setConnectStatus] = useState(null);
+  const [expandedCard, setExpandedCard] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -55,6 +71,10 @@ export function WorkerManageScreen({ route }) {
           setWorkerId(wId);
           setWorker(w);
           setAvailability(w.availability);
+          try {
+            const pay = await api.get('/api/payments/connect/status');
+            if (pay.data?.ok) setConnectStatus(pay.data);
+          } catch (_) {}
           setLoading(false);
           return;
         }
@@ -71,6 +91,10 @@ export function WorkerManageScreen({ route }) {
         setWorker(w);
         setAvailability(w.availability);
       }
+      try {
+        const pay = await api.get('/api/payments/connect/status');
+        if (pay.data?.ok) setConnectStatus(pay.data);
+      } catch (_) {}
     } catch (e) {}
     setLoading(false);
   }, [workerId]);
@@ -86,6 +110,15 @@ export function WorkerManageScreen({ route }) {
     if (error) Alert.alert('Error', error.message);
     else { setNewSkill(''); load(); }
     setAddingSkill(false);
+  };
+
+  const addPresetSkill = async (skillName) => {
+    if (!workerId) return;
+    const already = (worker?.skills || []).some((s) => (s.skill_name || '').toLowerCase() === skillName.toLowerCase());
+    if (already) return;
+    const { error } = await api.post(`/api/workers/${workerId}/skills`, { skill_name: skillName });
+    if (error) Alert.alert('Error', error.message || 'Failed to add service');
+    else load();
   };
 
   const removeSkill = async (skillId) => {
@@ -203,9 +236,201 @@ export function WorkerManageScreen({ route }) {
     );
   }
 
+  const compliance = useMemo(() => {
+    const docs = worker.documents || [];
+    const byType = Object.fromEntries(docs.map((d) => [d.document_type, d]));
+    const skillNames = (worker.skills || []).map((s) => (s.skill_name || '').toLowerCase());
+    const hasCoreVendorSkill = skillNames.some((s) => CORE_VENDOR_OPTIONS.map((x) => x.toLowerCase()).includes(s));
+
+    const docStatus = (type) => {
+      const doc = byType[type];
+      if (!doc) return 'not_started';
+      const st = (doc.status || '').toLowerCase();
+      if (st === 'approved') return 'verified';
+      if (st === 'pending') return 'pending';
+      if (st === 'rejected' || st === 'expired') return 'action_required';
+      return 'pending';
+    };
+
+    const hasLegalEntity = !!(worker.first_name || worker.last_name);
+    const hasABN = !!(worker.abn && String(worker.abn).replace(/\D/g, '').length >= 11);
+    const coreInfoStatus = hasLegalEntity && hasABN ? 'verified' : (hasLegalEntity || hasABN ? 'pending' : 'not_started');
+    const contactStatus = worker.phone && worker.address ? 'verified' : ((worker.phone || worker.address) ? 'pending' : 'not_started');
+    const bankStatus = connectStatus?.charges_enabled ? 'verified' : (connectStatus ? 'pending' : 'not_started');
+
+    const cardDefinitions = [
+      {
+        id: 'company_identity',
+        title: 'Company Identity',
+        items: [
+          { key: 'legal', label: 'Legal entity name', status: coreInfoStatus, actionLabel: 'Edit profile', action: () => navigation.navigate('EditProfile') },
+          { key: 'abn', label: 'ABN provided', status: hasABN ? 'verified' : 'action_required', actionLabel: 'Edit profile', action: () => navigation.navigate('EditProfile') },
+          { key: 'contact', label: 'Contact details', status: contactStatus, actionLabel: 'Edit profile', action: () => navigation.navigate('EditProfile') },
+        ],
+      },
+      {
+        id: 'financials',
+        title: 'Financials',
+        items: [
+          { key: 'bank', label: 'Bank payout setup (Stripe)', status: bankStatus, actionLabel: 'Open payments', action: () => navigation.navigate('Payments') },
+          { key: 'gst', label: 'GST status', status: 'not_started' },
+        ],
+      },
+      {
+        id: 'risk',
+        title: 'Risk Management',
+        items: [
+          { key: 'insurance', label: 'Insurance document', status: docStatus('insurance'), actionLabel: 'Upload docs', action: () => navigation.navigate('Documents') },
+          { key: 'police', label: 'National Police Check', status: docStatus('police_check'), actionLabel: 'Upload docs', action: () => navigation.navigate('Documents') },
+        ],
+      },
+      {
+        id: 'care_standards',
+        title: 'Care Standards',
+        items: [
+          { key: 'ndis', label: 'NDIS Worker Screening', status: docStatus('ndis_screening'), actionLabel: 'Upload docs', action: () => navigation.navigate('Documents') },
+          { key: 'blue', label: 'Blue Card / WWCC', status: docStatus('wwcc'), actionLabel: 'Upload docs', action: () => navigation.navigate('Documents') },
+          { key: 'firstaid', label: 'First Aid / CPR', status: docStatus('first_aid'), actionLabel: 'Upload docs', action: () => navigation.navigate('Documents') },
+        ],
+      },
+      {
+        id: 'service_setup',
+        title: 'Service Setup',
+        items: [
+          { key: 'categories', label: 'Vendor service categories selected', status: hasCoreVendorSkill ? 'verified' : 'action_required' },
+          { key: 'availability', label: 'Weekly availability set', status: (availability || []).some((a) => a.is_available) ? 'verified' : 'pending' },
+        ],
+      },
+    ];
+
+    const withStatus = cardDefinitions.map((card) => {
+      const all = card.items.map((i) => STATUS_ORDER[i.status] ?? 0);
+      const cardStatus = card.items.some((i) => i.status === 'action_required')
+        ? 'action_required'
+        : card.items.some((i) => i.status === 'pending')
+          ? 'pending'
+          : card.items.every((i) => i.status === 'verified')
+            ? 'verified'
+            : 'not_started';
+      return {
+        ...card,
+        status: cardStatus,
+        completed: card.items.filter((i) => i.status === 'verified').length,
+        total: card.items.length,
+        _score: all.reduce((s, n) => s + n, 0),
+      };
+    });
+
+    const totalItems = withStatus.reduce((s, c) => s + c.total, 0);
+    const completedItems = withStatus.reduce((s, c) => s + c.completed, 0);
+    const pct = totalItems ? Math.round((completedItems / totalItems) * 100) : 0;
+    const hasRed = withStatus.some((c) => c.status === 'action_required');
+    const hasYellow = withStatus.some((c) => c.status === 'pending');
+    const overall = hasRed ? 'action_required' : hasYellow ? 'pending' : 'verified';
+
+    const hardBlock = !hasABN || bankStatus !== 'verified' || docStatus('police_check') === 'action_required';
+    const softBlock = !hardBlock && (overall !== 'verified');
+
+    return { cards: withStatus, pct, overall, hardBlock, softBlock };
+  }, [worker, availability, connectStatus, navigation]);
+
   return (
     <ScrollView style={{ flex: 1, backgroundColor: Colors.background }} contentContainerStyle={{ padding: Spacing.lg, paddingBottom: Spacing.xxl }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}>
+
+      {/* Onboarding Progress + Compliance Traffic Light */}
+      <Section title=" Onboarding Progress">
+        <View style={{ marginBottom: Spacing.sm }}>
+          <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, marginBottom: 6 }}>
+            Profile completion: {compliance.pct}%
+          </Text>
+          <View style={{ height: 10, borderRadius: Radius.full, backgroundColor: Colors.borderLight, overflow: 'hidden' }}>
+            <View style={{ width: `${compliance.pct}%`, height: 10, backgroundColor: STATUS[compliance.overall].color }} />
+          </View>
+        </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm }}>
+          <Text style={{ fontSize: Typography.fontSize.base }}>{STATUS[compliance.overall].icon}</Text>
+          <Text style={{ color: STATUS[compliance.overall].color, fontWeight: Typography.fontWeight.semibold }}>
+            Overall compliance: {STATUS[compliance.overall].label}
+          </Text>
+        </View>
+        {compliance.hardBlock && (
+          <Text style={{ color: Colors.status.error, fontSize: Typography.fontSize.sm }}>
+            Hard block: profile cannot be fully live until ABN, payout setup, and critical checks are complete.
+          </Text>
+        )}
+        {!compliance.hardBlock && compliance.softBlock && (
+          <Text style={{ color: Colors.status.warning, fontSize: Typography.fontSize.sm }}>
+            Soft block: you can continue setup, but complete pending items to go fully live.
+          </Text>
+        )}
+      </Section>
+
+      <Section title=" Compliance Checklist">
+        {compliance.cards.map((card) => (
+          <View
+            key={card.id}
+            style={{
+              borderWidth: 1,
+              borderColor: Colors.border,
+              borderRadius: Radius.md,
+              marginBottom: Spacing.sm,
+              overflow: 'hidden',
+              backgroundColor: Colors.surface,
+            }}
+          >
+            <Pressable
+              onPress={() => setExpandedCard((prev) => (prev === card.id ? null : card.id))}
+              style={{ padding: Spacing.md, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+            >
+              <View style={{ flex: 1, paddingRight: Spacing.sm }}>
+                <Text style={{ color: Colors.text.primary, fontWeight: Typography.fontWeight.semibold }}>
+                  {STATUS[card.status].icon} {card.title}
+                </Text>
+                <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs, marginTop: 2 }}>
+                  {card.completed}/{card.total} verified
+                </Text>
+              </View>
+              <Text style={{ color: Colors.text.muted }}>{expandedCard === card.id ? '▲' : '▼'}</Text>
+            </Pressable>
+
+            {expandedCard === card.id && (
+              <View style={{ borderTopWidth: 1, borderTopColor: Colors.borderLight, padding: Spacing.md }}>
+                {card.items.map((item) => (
+                  <View key={item.key} style={{ marginBottom: Spacing.sm }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <Text style={{ color: Colors.text.primary, flex: 1, marginRight: Spacing.sm }}>
+                        {STATUS[item.status].icon} {item.label}
+                      </Text>
+                      <Text style={{ color: STATUS[item.status].color, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.semibold }}>
+                        {STATUS[item.status].label}
+                      </Text>
+                    </View>
+                    {item.action && item.status !== 'verified' && (
+                      <Pressable
+                        onPress={item.action}
+                        style={({ pressed }) => ({
+                          alignSelf: 'flex-start',
+                          marginTop: 6,
+                          paddingHorizontal: Spacing.sm,
+                          paddingVertical: 4,
+                          borderRadius: Radius.full,
+                          backgroundColor: `${Colors.primary}22`,
+                          opacity: pressed ? 0.75 : 1,
+                        })}
+                      >
+                        <Text style={{ color: Colors.primary, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.semibold }}>
+                          {item.actionLabel || 'Complete'}
+                        </Text>
+                      </Pressable>
+                    )}
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        ))}
+      </Section>
 
       {/* Verification Status */}
       <Section title=" Verification Status">
@@ -219,6 +444,58 @@ export function WorkerManageScreen({ route }) {
 
       {/* Skills */}
       <Section title=" Skills & Services">
+        <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: Spacing.sm }}>
+          Core vendor categories (tap to add)
+        </Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs, marginBottom: Spacing.md }}>
+          {CORE_VENDOR_OPTIONS.map((name) => {
+            const selected = (worker.skills || []).some((s) => (s.skill_name || '').toLowerCase() === name.toLowerCase());
+            return (
+              <Pressable
+                key={name}
+                onPress={() => addPresetSkill(name)}
+                style={{
+                  borderRadius: Radius.full,
+                  paddingHorizontal: Spacing.md,
+                  paddingVertical: Spacing.xs,
+                  borderWidth: 1,
+                  borderColor: selected ? Colors.primary : Colors.border,
+                  backgroundColor: selected ? `${Colors.primary}22` : Colors.surface,
+                }}
+              >
+                <Text style={{ color: selected ? Colors.primary : Colors.text.secondary, fontWeight: Typography.fontWeight.medium }}>
+                  {name}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: Spacing.sm }}>
+          All supported service tags
+        </Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs, marginBottom: Spacing.md }}>
+          {SERVICE_TYPES.map((name) => {
+            const selected = (worker.skills || []).some((s) => (s.skill_name || '').toLowerCase() === name.toLowerCase());
+            return (
+              <Pressable
+                key={name}
+                onPress={() => addPresetSkill(name)}
+                style={{
+                  borderRadius: Radius.full,
+                  paddingHorizontal: Spacing.md,
+                  paddingVertical: Spacing.xs,
+                  borderWidth: 1,
+                  borderColor: selected ? Colors.primary : Colors.border,
+                  backgroundColor: selected ? `${Colors.primary}22` : Colors.surface,
+                }}
+              >
+                <Text style={{ color: selected ? Colors.primary : Colors.text.secondary, fontWeight: Typography.fontWeight.medium }}>
+                  {name}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs, marginBottom: Spacing.md }}>
           {(worker.skills || []).map(s => (
             <Pressable key={s.id} onPress={() => removeSkill(s.id)}

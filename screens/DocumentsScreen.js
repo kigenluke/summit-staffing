@@ -3,8 +3,9 @@
  * Displays invoices as document cards with status badges.
  */
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, FlatList, RefreshControl, ActivityIndicator } from 'react-native';
+import { View, Text, FlatList, RefreshControl, ActivityIndicator, Pressable } from 'react-native';
 import { api } from '../services/api.js';
+import { useAuthStore } from '../store/authStore.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 
 const getStatusColor = (status) => {
@@ -17,6 +18,8 @@ const getStatusColor = (status) => {
 };
 
 export function DocumentsScreen({ navigation }) {
+  const { user } = useAuthStore();
+  const isWorker = user?.role === 'worker';
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -47,13 +50,55 @@ export function DocumentsScreen({ navigation }) {
         contentContainerStyle={{ padding: Spacing.md, paddingBottom: Spacing.xxl }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
         ListHeaderComponent={
-          <View style={{ backgroundColor: Colors.primary, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.md }}>
-            <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.white }}>
-              Your Documents
-            </Text>
-            <Text style={{ fontSize: Typography.fontSize.sm, color: 'rgba(255,255,255,0.85)', marginTop: Spacing.xs }}>
-              View your invoices and service documents below.
-            </Text>
+          <View>
+            <View style={{ backgroundColor: Colors.primary, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.md }}>
+              <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.white }}>
+                Your Documents
+              </Text>
+              <Text style={{ fontSize: Typography.fontSize.sm, color: 'rgba(255,255,255,0.85)', marginTop: Spacing.xs }}>
+                View your invoices and service documents below.
+              </Text>
+            </View>
+
+            <View style={{ flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.md }}>
+              <Pressable
+                onPress={() => navigation.navigate(isWorker ? 'WorkerManage' : 'Invoices')}
+                style={({ pressed }) => ({
+                  flex: 1,
+                  backgroundColor: Colors.surface,
+                  borderWidth: 1,
+                  borderColor: Colors.border,
+                  borderRadius: Radius.md,
+                  paddingVertical: Spacing.sm,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  opacity: pressed ? 0.9 : 1,
+                  ...Shadows.sm,
+                })}
+              >
+                <Text style={{ color: Colors.text.primary, fontWeight: Typography.fontWeight.semibold }}>
+                  Add Documents
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => navigation.navigate('Payments')}
+                style={({ pressed }) => ({
+                  flex: 1,
+                  backgroundColor: Colors.primary,
+                  borderRadius: Radius.md,
+                  paddingVertical: Spacing.sm,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  opacity: pressed ? 0.9 : 1,
+                  ...Shadows.sm,
+                })}
+              >
+                <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>
+                  Add Bank Details
+                </Text>
+              </Pressable>
+            </View>
           </View>
         }
         renderItem={({ item }) => (
