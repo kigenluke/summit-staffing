@@ -9,7 +9,7 @@ router.get('/autocomplete', async (req, res) => {
 
   const params = new URLSearchParams({
     input: input.trim(),
-    key: process.env.GOOGLE_MAPS_BROWSER_KEY,
+    key: process.env.GOOGLE_MAPS_BROWSER_KEY || process.env.GOOGLE_MAPS_API_KEY,
     language: 'en',
   });
 

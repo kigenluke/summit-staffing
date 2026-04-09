@@ -7,6 +7,7 @@ import PlacesPkg from 'react-native-google-places-autocomplete';
 import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
+import { LocationAutocomplete } from '../components/LocationAutoComplete.js';
 
 const { GooglePlacesAutocomplete } = PlacesPkg;
 
@@ -16,7 +17,7 @@ function getGooglePlacesBrowserKey() {
     const env = import.meta.env;
     if (env?.VITE_GOOGLE_MAPS_BROWSER_KEY) return env.VITE_GOOGLE_MAPS_BROWSER_KEY;
     if (env?.VITE_GOOGLE_MAPS_API_KEY) return env.VITE_GOOGLE_MAPS_API_KEY;
-  } catch (_) {}
+  } catch (_) { }
   if (typeof process !== 'undefined' && process.env) {
     return (
       process.env.EXPO_PUBLIC_GOOGLE_MAPS_BROWSER_KEY ||
@@ -90,7 +91,7 @@ export function EditProfileScreen({ navigation }) {
           }
         }
       }
-    } catch (e) {}
+    } catch (e) { }
     setLoading(false);
   }, [isWorker]);
 
@@ -163,81 +164,14 @@ export function EditProfileScreen({ navigation }) {
         <Field label="Last Name" value={lastName} onChangeText={setLastName} placeholder="Last name" />
         <Field label="Phone" value={phone} onChangeText={setPhone} placeholder="Phone number" keyboardType="phone-pad" />
 
-        <View style={{ marginBottom: Spacing.md, zIndex: 20, position: 'relative' }}>
-          <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>Address</Text>
-          {!isWeb && !googleKey ? (
-            <Text style={{ color: Colors.status.error, fontSize: Typography.fontSize.sm }}>
-              Add EXPO_PUBLIC_GOOGLE_MAPS_BROWSER_KEY (same key as Railway GOOGLE_MAPS_BROWSER_KEY) for native builds.
-            </Text>
-          ) : (
-            <GooglePlacesAutocomplete
-              ref={placesRef}
-              placeholder="Start typing street, suburb, or city"
-              onPress={(data) => {
-                setAddress(data.description || '');
-              }}
-              onFail={(err) => {
-                if (isWeb) {
-                  Alert.alert(
-                    'Address Search',
-                    'Set GOOGLE_MAPS_BROWSER_KEY in .env.local and restart npm run web.',
-                  );
-                }
-              }}
-              query={{
-                key: placesQueryKey,
-                language: 'en',
-              }}
-              requestUrl={placesRequestUrl}
-              fetchDetails={false}
-              debounce={300}
-              minLength={2}
-              enablePoweredByContainer={false}
-              keyboardShouldPersistTaps="handled"
-              listViewDisplayed
-              keepResultsAfterBlur
-              suppressDefaultStyles
-              styles={{
-                container: { flex: 0 },
-                textInputContainer: { backgroundColor: 'transparent' },
-                textInput: {
-                  backgroundColor: Colors.surfaceSecondary,
-                  borderWidth: 2,
-                  borderColor: Colors.border,
-                  borderRadius: Radius.md,
-                  paddingVertical: Spacing.sm,
-                  paddingHorizontal: Spacing.md,
-                  fontSize: Typography.fontSize.base,
-                  color: Colors.text.primary,
-                  height: 48,
-                },
-                listView: {
-                  position: 'absolute',
-                  top: 52,
-                  left: 0,
-                  right: 0,
-                  zIndex: 9999,
-                  elevation: 10,
-                  backgroundColor: Colors.surface,
-                  borderWidth: 1,
-                  borderColor: Colors.border,
-                  borderRadius: Radius.md,
-                  marginTop: Spacing.xs,
-                  maxHeight: 220,
-                },
-                row: {
-                  backgroundColor: Colors.surface,
-                  padding: Spacing.md,
-                },
-                separator: { height: StyleSheet.hairlineWidth, backgroundColor: Colors.borderLight },
-                description: { fontSize: Typography.fontSize.base, color: Colors.text.primary },
-              }}
-              textInputProps={{
-                placeholderTextColor: Colors.text.muted,
-                onChangeText: (text) => setAddress(text),
-              }}
-            />
-          )}
+        <View style={{ marginBottom: Spacing.md, zIndex: 20 }}>
+          <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>
+            Address
+          </Text>
+          <LocationAutocomplete
+            value={address}
+            onChange={setAddress}
+          />
         </View>
 
         {isWorker && (
