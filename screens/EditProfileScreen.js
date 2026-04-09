@@ -7,7 +7,7 @@ import PlacesPkg from 'react-native-google-places-autocomplete';
 import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
-import { LocationAutocomplete } from '../components/LocationAutoComplete.js';
+import { LocationAutocomplete } from '../components/LocationAutocomplete.js';
 
 const { GooglePlacesAutocomplete } = PlacesPkg;
 
