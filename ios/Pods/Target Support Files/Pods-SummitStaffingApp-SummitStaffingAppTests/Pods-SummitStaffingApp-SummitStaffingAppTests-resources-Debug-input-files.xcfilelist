@@ -1,0 +1,4 @@
+${PODS_ROOT}/Target Support Files/Pods-SummitStaffingApp-SummitStaffingAppTests/Pods-SummitStaffingApp-SummitStaffingAppTests-resources.sh
+${PODS_CONFIGURATION_BUILD_DIR}/RNCAsyncStorage/RNCAsyncStorage_resources.bundle
+${PODS_CONFIGURATION_BUILD_DIR}/React-Core/RCTI18nStrings.bundle
+${PODS_CONFIGURATION_BUILD_DIR}/react-native-image-picker/RNImagePickerPrivacyInfo.bundle
