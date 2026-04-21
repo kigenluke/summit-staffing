@@ -88,6 +88,22 @@ app.get('/', (req, res) => {
   });
 });
 
+// Stripe Connect redirect targets (from return_url / refresh_url).
+// These endpoints prevent "Route not found" after onboarding redirects.
+app.get('/stripe/return', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'Stripe onboarding returned successfully. You can close this tab and go back to the app.',
+  });
+});
+
+app.get('/stripe/refresh', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'Stripe onboarding link refreshed. Return to the app and tap Setup Stripe Account again.',
+  });
+});
+
 // routes
 app.use('/api/auth', authRoutes);
 app.use('/api/workers', workerRoutes);
