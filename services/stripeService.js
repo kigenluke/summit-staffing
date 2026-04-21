@@ -69,6 +69,10 @@ const createAccountLink = async (accountId) => {
   });
 };
 
+const createAccountLoginLink = async (accountId) => {
+  return stripe.accounts.createLoginLink(accountId);
+};
+
 const createPaymentIntent = async ({ amountCents, currency = 'aud', bookingId, metadata = {} }) => {
   return stripe.paymentIntents.create({
     amount: amountCents,
@@ -144,6 +148,7 @@ module.exports = {
   resolveAppBaseUrl,
   createConnectedAccount,
   createAccountLink,
+  createAccountLoginLink,
   createPaymentIntent,
   createCheckoutSession,
   createTransfer,

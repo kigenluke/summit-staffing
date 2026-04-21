@@ -21,6 +21,8 @@ router.get('/connect/onboard', (req, res) => {
 router.post('/connect/onboard', [auth, checkWorker], paymentController.createConnectAccount);
 router.get('/connect/config-check', [auth, checkWorker], paymentController.getConnectConfigCheck);
 router.get('/connect/status', [auth, checkWorker], paymentController.getAccountStatus);
+router.post('/connect/login-link', [auth, checkWorker], paymentController.createConnectLoginLink);
+router.post('/connect/disconnect', [auth, checkWorker], paymentController.disconnectConnectAccount);
 
 router.post(
   '/checkout-session',

@@ -83,6 +83,40 @@ export function PaymentsScreen() {
     }
   };
 
+  const openStripeDashboard = async () => {
+    const { data, error } = await api.post('/api/payments/connect/login-link');
+    if (error) {
+      Alert.alert('Error', error.message || 'Failed to open Stripe dashboard');
+      return;
+    }
+    if (data?.loginUrl) {
+      await Linking.openURL(data.loginUrl);
+    }
+  };
+
+  const disconnectStripe = async () => {
+    Alert.alert(
+      'Disconnect Stripe?',
+      'You can reconnect another Stripe account later.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Disconnect',
+          style: 'destructive',
+          onPress: async () => {
+            const { error } = await api.post('/api/payments/connect/disconnect');
+            if (error) {
+              Alert.alert('Error', error.message || 'Failed to disconnect account');
+              return;
+            }
+            await load();
+            Alert.alert('Done', 'Stripe account disconnected.');
+          }
+        }
+      ]
+    );
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
       {/* Stripe Connect — workers only (API returns 403 for participants) */}
@@ -91,19 +125,43 @@ export function PaymentsScreen() {
           <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.sm }}>
             <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.sm }}>Payment Setup</Text>
             {connectStatus?.charges_enabled ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
-                <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.status.success }} />
-                <Text style={{ color: Colors.status.success }}>Stripe connected – payouts enabled</Text>
-              </View>
+              <>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm }}>
+                  <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.status.success }} />
+                  <Text style={{ color: Colors.status.success, fontWeight: Typography.fontWeight.semibold }}>Stripe connected - payouts enabled</Text>
+                </View>
+                <View style={{ backgroundColor: Colors.surfaceSecondary, borderWidth: 1, borderColor: Colors.borderLight, borderRadius: Radius.md, padding: Spacing.sm, marginBottom: Spacing.md }}>
+                  <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs, marginBottom: 2 }}>
+                    Connected account
+                  </Text>
+                  <Text style={{ color: Colors.text.primary, fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.medium, marginBottom: 6 }}>
+                    {connectStatus?.account?.id || connectStatus?.accountId || '—'}
+                  </Text>
+                  <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs }}>
+                    {connectStatus?.account?.email || 'Email not provided'}
+                  </Text>
+                </View>
+                <Pressable onPress={openStripeDashboard} style={({ pressed }) => ({ backgroundColor: '#635BFF', paddingVertical: Spacing.sm + 1, borderRadius: Radius.md, alignItems: 'center', opacity: pressed ? 0.88 : 1, marginBottom: Spacing.sm })}>
+                  <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Manage Stripe Account</Text>
+                </Pressable>
+                <Pressable onPress={disconnectStripe} style={({ pressed }) => ({ backgroundColor: Colors.surfaceSecondary, borderWidth: 1, borderColor: Colors.status.error, paddingVertical: Spacing.sm + 1, borderRadius: Radius.md, alignItems: 'center', opacity: pressed ? 0.88 : 1 })}>
+                  <Text style={{ color: Colors.status.error, fontWeight: Typography.fontWeight.bold }}>Use Another Account</Text>
+                </Pressable>
+              </>
             ) : connectStatus?.details_submitted ? (
               <>
-                <Text style={{ color: Colors.text.secondary, marginBottom: Spacing.sm }}>
-                  Stripe details submitted. Account is under review or requires additional setup before payouts are enabled.
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm }}>
+                  <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.status.warning }} />
+                  <Text style={{ color: Colors.status.warning, fontWeight: Typography.fontWeight.semibold }}>Stripe details submitted</Text>
+                </View>
+                <Text style={{ color: Colors.text.secondary, marginBottom: Spacing.md }}>
+                  Account is under review or requires more info before payouts are enabled.
                 </Text>
-                <Pressable onPress={setupStripe} style={({ pressed }) => ({ backgroundColor: '#635BFF', paddingVertical: Spacing.sm, borderRadius: Radius.md, alignItems: 'center', opacity: pressed ? 0.8 : 1 })}>
-                  <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>
-                    {openingStripe ? 'Opening Stripe...' : 'Continue Stripe Setup'}
-                  </Text>
+                <Pressable onPress={setupStripe} style={({ pressed }) => ({ backgroundColor: '#635BFF', paddingVertical: Spacing.sm + 1, borderRadius: Radius.md, alignItems: 'center', opacity: pressed ? 0.88 : 1, marginBottom: Spacing.sm })}>
+                    <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Manage Account</Text>
+                </Pressable>
+                <Pressable onPress={disconnectStripe} style={({ pressed }) => ({ backgroundColor: Colors.surfaceSecondary, borderWidth: 1, borderColor: Colors.status.error, paddingVertical: Spacing.sm + 1, borderRadius: Radius.md, alignItems: 'center', opacity: pressed ? 0.88 : 1 })}>
+                  <Text style={{ color: Colors.status.error, fontWeight: Typography.fontWeight.bold }}>Use Another Account</Text>
                 </Pressable>
               </>
             ) : connectStatus?.hasWorkerProfile === false ? (
@@ -113,7 +171,7 @@ export function PaymentsScreen() {
             ) : (
               <>
                 <Text style={{ color: Colors.text.secondary, marginBottom: Spacing.sm }}>Connect your bank account via Stripe to receive payouts.</Text>
-                <Pressable onPress={setupStripe} style={({ pressed }) => ({ backgroundColor: '#635BFF', paddingVertical: Spacing.sm, borderRadius: Radius.md, alignItems: 'center', opacity: pressed ? 0.8 : 1 })}>
+                <Pressable onPress={setupStripe} style={({ pressed }) => ({ backgroundColor: '#635BFF', paddingVertical: Spacing.sm + 1, borderRadius: Radius.md, alignItems: 'center', opacity: pressed ? 0.88 : 1 })}>
                   <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>
                     {openingStripe ? 'Opening Stripe...' : 'Setup Stripe Account'}
                   </Text>

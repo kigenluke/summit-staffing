@@ -6,6 +6,7 @@ const {
   resolveAppBaseUrl,
   createConnectedAccount,
   createAccountLink,
+  createAccountLoginLink,
   createPaymentIntent,
   createCheckoutSession,
   createTransfer,
@@ -281,10 +282,60 @@ const getAccountStatus = async (req, res) => {
       onboardingComplete,
       charges_enabled: account.charges_enabled,
       payouts_enabled: account.payouts_enabled,
-      details_submitted: account.details_submitted
+      details_submitted: account.details_submitted,
+      account: {
+        id: account.id,
+        country: account.country,
+        email: account.email || null,
+        type: account.type || null,
+        business_type: account.business_type || null,
+        default_currency: account.default_currency || null,
+        details_submitted: account.details_submitted,
+        charges_enabled: account.charges_enabled,
+        payouts_enabled: account.payouts_enabled,
+      }
     });
   } catch (err) {
     return res.status(500).json({ ok: false, error: 'Failed to get Stripe account status' });
+  }
+};
+
+const createConnectLoginLinkHandler = async (req, res) => {
+  try {
+    if (!ensureStripeConfigured(res)) return;
+    const workerRes = await pool.query(
+      'SELECT stripe_account_id FROM workers WHERE user_id = $1 LIMIT 1',
+      [req.user.userId]
+    );
+    if (workerRes.rowCount === 0 || !workerRes.rows[0].stripe_account_id) {
+      return res.status(404).json({ ok: false, error: 'No Stripe account connected yet' });
+    }
+    const loginLink = await createAccountLoginLink(workerRes.rows[0].stripe_account_id);
+    return res.status(200).json({ ok: true, loginUrl: loginLink.url });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: pickErrorMessage(err) || 'Failed to open Stripe dashboard' });
+  }
+};
+
+const disconnectConnectAccountHandler = async (req, res) => {
+  try {
+    const workerRes = await pool.query(
+      'SELECT id, stripe_account_id FROM workers WHERE user_id = $1 LIMIT 1',
+      [req.user.userId]
+    );
+    if (workerRes.rowCount === 0) {
+      return res.status(403).json({ ok: false, error: 'Worker profile not found' });
+    }
+    if (!workerRes.rows[0].stripe_account_id) {
+      return res.status(200).json({ ok: true, disconnected: false, message: 'No Stripe account was connected' });
+    }
+    await pool.query(
+      'UPDATE workers SET stripe_account_id = NULL, updated_at = now() WHERE id = $1',
+      [workerRes.rows[0].id]
+    );
+    return res.status(200).json({ ok: true, disconnected: true });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: pickErrorMessage(err) || 'Failed to disconnect Stripe account' });
   }
 };
 
@@ -676,6 +727,8 @@ module.exports = {
   createConnectAccount,
   getConnectConfigCheck,
   getAccountStatus,
+  createConnectLoginLink: createConnectLoginLinkHandler,
+  disconnectConnectAccount: disconnectConnectAccountHandler,
   createPaymentIntent: createPaymentIntentHandler,
   createCheckoutSession: createCheckoutSessionHandler,
   confirmPayment,
