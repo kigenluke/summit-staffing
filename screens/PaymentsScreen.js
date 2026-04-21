@@ -2,7 +2,7 @@
  * Summit Staffing – Payments Screen (History + Stripe connect for workers)
  */
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, FlatList, Pressable, RefreshControl, ActivityIndicator, Alert, Linking } from 'react-native';
+import { View, Text, FlatList, Pressable, RefreshControl, ActivityIndicator, Alert, Linking, AppState } from 'react-native';
 import { api } from '../services/api.js';
 import { useAuthStore } from '../store/authStore.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
@@ -16,6 +16,7 @@ export function PaymentsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [connectStatus, setConnectStatus] = useState(null);
+  const [openingStripe, setOpeningStripe] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -35,6 +36,16 @@ export function PaymentsScreen() {
 
   useEffect(() => { load(); }, [load]);
   const onRefresh = useCallback(async () => { setRefreshing(true); await load(); setRefreshing(false); }, [load]);
+
+  // When user returns from browser (Stripe onboarding), refresh account status automatically.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        load();
+      }
+    });
+    return () => sub.remove();
+  }, [load]);
 
   const setupStripe = async () => {
     try {
@@ -57,7 +68,13 @@ export function PaymentsScreen() {
           Alert.alert('Error', 'Unable to open Stripe onboarding link.');
           return;
         }
+        setOpeningStripe(true);
         await Linking.openURL(redirectUrl);
+        // Best-effort refresh shortly after opening, and AppState listener will refresh on return.
+        setTimeout(() => {
+          load();
+          setOpeningStripe(false);
+        }, 1500);
         return;
       }
       Alert.alert('Success', 'Stripe account setup initiated');
@@ -78,6 +95,17 @@ export function PaymentsScreen() {
                 <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.status.success }} />
                 <Text style={{ color: Colors.status.success }}>Stripe connected – payouts enabled</Text>
               </View>
+            ) : connectStatus?.details_submitted ? (
+              <>
+                <Text style={{ color: Colors.text.secondary, marginBottom: Spacing.sm }}>
+                  Stripe details submitted. Account is under review or requires additional setup before payouts are enabled.
+                </Text>
+                <Pressable onPress={setupStripe} style={({ pressed }) => ({ backgroundColor: '#635BFF', paddingVertical: Spacing.sm, borderRadius: Radius.md, alignItems: 'center', opacity: pressed ? 0.8 : 1 })}>
+                  <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>
+                    {openingStripe ? 'Opening Stripe...' : 'Continue Stripe Setup'}
+                  </Text>
+                </Pressable>
+              </>
             ) : connectStatus?.hasWorkerProfile === false ? (
               <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm }}>
                 Complete your worker profile first (Profile → worker setup), then you can connect Stripe for payouts.
@@ -86,7 +114,9 @@ export function PaymentsScreen() {
               <>
                 <Text style={{ color: Colors.text.secondary, marginBottom: Spacing.sm }}>Connect your bank account via Stripe to receive payouts.</Text>
                 <Pressable onPress={setupStripe} style={({ pressed }) => ({ backgroundColor: '#635BFF', paddingVertical: Spacing.sm, borderRadius: Radius.md, alignItems: 'center', opacity: pressed ? 0.8 : 1 })}>
-                  <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Setup Stripe Account</Text>
+                  <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>
+                    {openingStripe ? 'Opening Stripe...' : 'Setup Stripe Account'}
+                  </Text>
                 </Pressable>
               </>
             )}
