@@ -7,6 +7,7 @@ const {
   createConnectedAccount,
   createAccountLink,
   createPaymentIntent,
+  createCheckoutSession,
   createTransfer,
   verifyWebhookSignature
 } = require('../services/stripeService');
@@ -49,6 +50,52 @@ const pickErrorMessage = (err) => {
   if (err.detail) return String(err.detail).trim().slice(0, 500);
   if (err.message && String(err.message).trim()) return String(err.message).trim().slice(0, 500);
   return '';
+};
+
+const computeCommissionBreakdown = (amount) => {
+  const total = Number(amount || 0);
+  const commission = Number((total * 0.1).toFixed(2));
+  const workerPayout = Number((total - commission).toFixed(2));
+  return { total, commission, workerPayout };
+};
+
+const ensurePaymentRecordForIntent = async (paymentIntentId, paymentIntent) => {
+  const existing = await pool.query(
+    'SELECT id, worker_payout, stripe_transfer_id FROM payments WHERE stripe_payment_intent_id = $1 LIMIT 1',
+    [paymentIntentId]
+  );
+  if (existing.rowCount > 0) return existing.rows[0];
+
+  const pi = paymentIntent || await stripe.paymentIntents.retrieve(paymentIntentId);
+  const bookingId = pi?.metadata?.bookingId;
+  if (!bookingId) {
+    throw new Error('Missing bookingId metadata');
+  }
+
+  const bookingRes = await pool.query(
+    'SELECT id, total_amount FROM bookings WHERE id = $1 LIMIT 1',
+    [bookingId]
+  );
+  if (bookingRes.rowCount === 0) {
+    throw new Error('Booking not found for PaymentIntent');
+  }
+
+  const { total, commission, workerPayout } = computeCommissionBreakdown(bookingRes.rows[0].total_amount);
+  await pool.query(
+    `INSERT INTO payments (booking_id, stripe_payment_intent_id, amount, commission, worker_payout, status, payment_date)
+     VALUES ($1, $2, $3, $4, $5, 'pending', NULL)
+     ON CONFLICT (stripe_payment_intent_id) DO NOTHING`,
+    [bookingId, paymentIntentId, total, commission, workerPayout]
+  );
+
+  const inserted = await pool.query(
+    'SELECT id, worker_payout, stripe_transfer_id FROM payments WHERE stripe_payment_intent_id = $1 LIMIT 1',
+    [paymentIntentId]
+  );
+  if (inserted.rowCount === 0) {
+    throw new Error('Failed to create payment record');
+  }
+  return inserted.rows[0];
 };
 
 const createConnectAccount = async (req, res) => {
@@ -115,10 +162,37 @@ const createConnectAccount = async (req, res) => {
     }
   }
 
+  const makeOnboardingLink = async (acctId) => {
+    return createAccountLink(acctId);
+  };
+
   let link;
   try {
-    link = await createAccountLink(accountId);
+    link = await makeOnboardingLink(accountId);
   } catch (err) {
+    const noSuchAccount =
+      err?.code === 'resource_missing' ||
+      /no such account/i.test(String(err?.raw?.message || err?.message || ''));
+
+    if (noSuchAccount) {
+      try {
+        const recreated = await createConnectedAccount(worker.email);
+        accountId = recreated.id;
+        await pool.query('UPDATE workers SET stripe_account_id = $2, updated_at = now() WHERE id = $1', [worker.id, accountId]);
+        link = await makeOnboardingLink(accountId);
+        return res.status(200).json({ ok: true, accountId, onboardingUrl: link.url, recovered: true });
+      } catch (recoverErr) {
+        // eslint-disable-next-line no-console
+        console.error('createConnectAccount account recovery failed:', recoverErr);
+        return res.status(502).json({
+          ok: false,
+          error: pickErrorMessage(recoverErr) || 'Failed to recover Stripe account',
+          step: 'stripe_account_recovery',
+          code: recoverErr.code || recoverErr.type,
+        });
+      }
+    }
+
     // eslint-disable-next-line no-console
     console.error('createConnectAccount Stripe accountLinks.create:', err);
     return res.status(502).json({
@@ -289,6 +363,73 @@ const createPaymentIntentHandler = async (req, res) => {
   }
 };
 
+const createCheckoutSessionHandler = async (req, res) => {
+  try {
+    if (!ensureStripeConfigured(res)) return;
+    if (respondValidation(req, res)) return;
+
+    const participantRes = await pool.query('SELECT id FROM participants WHERE user_id = $1 LIMIT 1', [req.user.userId]);
+    if (participantRes.rowCount === 0) {
+      return res.status(403).json({ ok: false, error: 'Forbidden' });
+    }
+    const participantId = participantRes.rows[0].id;
+    const { bookingId } = req.body;
+
+    const bookingRes = await pool.query(
+      `SELECT b.id, b.participant_id, b.worker_id, b.status, b.total_amount
+       FROM bookings b
+       WHERE b.id = $1
+       LIMIT 1`,
+      [bookingId]
+    );
+    if (bookingRes.rowCount === 0) {
+      return res.status(404).json({ ok: false, error: 'Booking not found' });
+    }
+    const booking = bookingRes.rows[0];
+    if (booking.participant_id !== participantId) {
+      return res.status(403).json({ ok: false, error: 'Forbidden' });
+    }
+    if (!['confirmed', 'completed'].includes(booking.status)) {
+      return res.status(400).json({ ok: false, error: 'Booking must be confirmed (or completed) before payment' });
+    }
+
+    const existingPaid = await pool.query(
+      "SELECT id FROM payments WHERE booking_id = $1 AND status = 'succeeded' LIMIT 1",
+      [booking.id]
+    );
+    if (existingPaid.rowCount > 0) {
+      return res.status(409).json({ ok: false, error: 'This booking is already paid' });
+    }
+
+    const { total } = computeCommissionBreakdown(booking.total_amount);
+    if (total <= 0) {
+      return res.status(400).json({ ok: false, error: 'Invalid booking amount' });
+    }
+
+    const appUrl = resolveAppBaseUrl();
+    const successUrl = `${appUrl}/booking/${booking.id}?payment=success`;
+    const cancelUrl = `${appUrl}/booking/${booking.id}?payment=cancelled`;
+
+    const session = await createCheckoutSession({
+      amountCents: toCents(total),
+      currency: 'aud',
+      bookingId: booking.id,
+      workerId: booking.worker_id,
+      participantId,
+      successUrl,
+      cancelUrl,
+    });
+
+    return res.status(200).json({
+      ok: true,
+      checkout_url: session.url,
+      checkout_session_id: session.id,
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: pickErrorMessage(err) || 'Failed to create checkout session' });
+  }
+};
+
 const createTransferForPaymentIntent = async (paymentIntentId) => {
   if (!stripe) {
     throw new Error('Stripe is not configured');
@@ -321,16 +462,7 @@ const createTransferForPaymentIntent = async (paymentIntentId) => {
     throw new Error('Worker Stripe account not set');
   }
 
-  const paymentRes = await pool.query(
-    'SELECT id, worker_payout, stripe_transfer_id FROM payments WHERE stripe_payment_intent_id = $1 LIMIT 1',
-    [paymentIntentId]
-  );
-
-  if (paymentRes.rowCount === 0) {
-    throw new Error('Payment record not found');
-  }
-
-  const payment = paymentRes.rows[0];
+  const payment = await ensurePaymentRecordForIntent(paymentIntentId, pi);
 
   if (payment.stripe_transfer_id) {
     return { alreadyTransferred: true, transferId: payment.stripe_transfer_id };
@@ -398,6 +530,7 @@ const handleWebhook = async (req, res) => {
     switch (event.type) {
       case 'payment_intent.succeeded': {
         const pi = event.data.object;
+        await ensurePaymentRecordForIntent(pi.id, pi);
         await pool.query(
           "UPDATE payments SET status = 'succeeded', payment_date = now() WHERE stripe_payment_intent_id = $1",
           [pi.id]
@@ -407,6 +540,24 @@ const handleWebhook = async (req, res) => {
           await createTransferForPaymentIntent(pi.id);
         } catch (err) {
           // ignore
+        }
+        break;
+      }
+      case 'checkout.session.completed': {
+        const session = event.data.object;
+        const paymentIntentId = typeof session.payment_intent === 'string' ? session.payment_intent : null;
+        if (paymentIntentId) {
+          const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
+          await ensurePaymentRecordForIntent(paymentIntentId, pi);
+          await pool.query(
+            "UPDATE payments SET status = 'succeeded', payment_date = now() WHERE stripe_payment_intent_id = $1",
+            [paymentIntentId]
+          );
+          try {
+            await createTransferForPaymentIntent(paymentIntentId);
+          } catch (err) {
+            // ignore transfer retry failures in webhook path
+          }
         }
         break;
       }
@@ -526,6 +677,7 @@ module.exports = {
   getConnectConfigCheck,
   getAccountStatus,
   createPaymentIntent: createPaymentIntentHandler,
+  createCheckoutSession: createCheckoutSessionHandler,
   confirmPayment,
   createTransfer: async (req, res) => {
     try {

@@ -23,6 +23,12 @@ router.get('/connect/config-check', [auth, checkWorker], paymentController.getCo
 router.get('/connect/status', [auth, checkWorker], paymentController.getAccountStatus);
 
 router.post(
+  '/checkout-session',
+  [auth, checkParticipant, body('bookingId').isUUID().withMessage('bookingId is required')],
+  paymentController.createCheckoutSession
+);
+
+router.post(
   '/create-intent',
   [auth, checkParticipant, body('bookingId').isUUID().withMessage('bookingId is required')],
   paymentController.createPaymentIntent

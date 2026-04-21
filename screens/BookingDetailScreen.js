@@ -3,7 +3,7 @@
  * Shows full booking info, clock in/out (worker), leave review (participant), invoice/payment
  */
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, ScrollView, Pressable, Alert, TextInput, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, ScrollView, Pressable, Alert, TextInput, ActivityIndicator, Platform, Linking } from 'react-native';
 import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
@@ -152,6 +152,25 @@ export function BookingDetailScreen({ route, navigation }) {
     else Alert.alert('Success', `Invoice ${data?.invoice?.invoice_number || ''} generated!`);
   };
 
+  const handlePayWithStripe = async () => {
+    const { data, error } = await api.post('/api/payments/checkout-session', { bookingId });
+    if (error) {
+      Alert.alert('Payment error', error.message || 'Could not start Stripe checkout');
+      return;
+    }
+    const checkoutUrl = data?.checkout_url;
+    if (!checkoutUrl) {
+      Alert.alert('Payment error', 'Stripe checkout URL was not returned.');
+      return;
+    }
+    const canOpen = await Linking.canOpenURL(checkoutUrl);
+    if (!canOpen) {
+      Alert.alert('Payment error', 'Could not open Stripe checkout URL.');
+      return;
+    }
+    await Linking.openURL(checkoutUrl);
+  };
+
   if (loading) {
     return <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background }}>
       <ActivityIndicator size="large" color={Colors.primary} />
@@ -240,6 +259,12 @@ export function BookingDetailScreen({ route, navigation }) {
       {(b.status === 'pending' || b.status === 'confirmed') && !isWorker && (
         <Pressable onPress={() => handleAction('cancel')} style={({ pressed }) => ({ backgroundColor: Colors.status.error, paddingVertical: Spacing.md, borderRadius: Radius.md, alignItems: 'center', marginBottom: Spacing.md, opacity: pressed ? 0.8 : 1 })}>
           <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Cancel Booking</Text>
+        </Pressable>
+      )}
+
+      {!isWorker && (b.status === 'confirmed' || b.status === 'completed') && (
+        <Pressable onPress={handlePayWithStripe} style={({ pressed }) => ({ backgroundColor: '#635BFF', paddingVertical: Spacing.md, borderRadius: Radius.md, alignItems: 'center', marginBottom: Spacing.md, opacity: pressed ? 0.8 : 1 })}>
+          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Pay with Stripe</Text>
         </Pressable>
       )}
 

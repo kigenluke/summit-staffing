@@ -26,16 +26,24 @@ const createConnectedAccount = async (workerEmail) => {
     throw Object.assign(new Error('Worker email is missing or invalid. Update your account email first.'), { code: 'email_invalid' });
   }
 
-  // AU Express: Stripe typically requires both for marketplace-style payouts
-  return stripe.accounts.create({
-    type: 'express',
-    country: 'AU',
-    email,
-    capabilities: {
-      card_payments: { requested: true },
-      transfers: { requested: true },
-    },
-  });
+  // Some Stripe accounts reject capabilities on create; retry with minimal payload.
+  try {
+    return await stripe.accounts.create({
+      type: 'express',
+      country: 'AU',
+      email,
+      capabilities: {
+        card_payments: { requested: true },
+        transfers: { requested: true },
+      },
+    });
+  } catch (err) {
+    return stripe.accounts.create({
+      type: 'express',
+      country: 'AU',
+      email,
+    });
+  }
 };
 
 const createAccountLink = async (accountId) => {
@@ -83,6 +91,47 @@ const createTransfer = async ({ amountCents, destination, sourceTransaction, met
   });
 };
 
+const createCheckoutSession = async ({
+  amountCents,
+  currency = 'aud',
+  bookingId,
+  workerId,
+  participantId,
+  successUrl,
+  cancelUrl,
+}) => {
+  return stripe.checkout.sessions.create({
+    mode: 'payment',
+    success_url: successUrl,
+    cancel_url: cancelUrl,
+    line_items: [
+      {
+        quantity: 1,
+        price_data: {
+          currency,
+          unit_amount: amountCents,
+          product_data: {
+            name: `Booking #${bookingId} payment`,
+          },
+        },
+      },
+    ],
+    metadata: {
+      bookingId: String(bookingId),
+      workerId: String(workerId),
+      participantId: String(participantId),
+    },
+    payment_intent_data: {
+      metadata: {
+        bookingId: String(bookingId),
+        workerId: String(workerId),
+        participantId: String(participantId),
+      },
+      automatic_payment_methods: { enabled: true },
+    },
+  });
+};
+
 const verifyWebhookSignature = (payloadBuffer, signature) => {
   if (!webhookSecret) {
     throw new Error('STRIPE_WEBHOOK_SECRET is not set');
@@ -96,6 +145,7 @@ module.exports = {
   createConnectedAccount,
   createAccountLink,
   createPaymentIntent,
+  createCheckoutSession,
   createTransfer,
   verifyWebhookSignature
 };

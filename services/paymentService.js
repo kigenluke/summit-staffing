@@ -4,6 +4,10 @@ export const createPaymentIntent = async (bookingId) => {
   return safeRequest('POST', '/api/payments/create-intent', { bookingId });
 };
 
+export const createCheckoutSession = async (bookingId) => {
+  return safeRequest('POST', '/api/payments/checkout-session', { bookingId });
+};
+
 export const confirmPayment = async (paymentIntentId) => {
   return safeRequest('POST', '/api/payments/confirm', { payment_intent_id: paymentIntentId });
 };
