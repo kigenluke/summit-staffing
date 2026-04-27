@@ -88,6 +88,15 @@ const getMinutesFromTime24 = (time24 = '00:00') => {
   return (h * 60) + m;
 };
 
+const normalizeTime24 = (value, fallback = '09:00') => {
+  const raw = String(value || '').trim();
+  const match = raw.match(/^([01]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/);
+  if (!match) return fallback;
+  const hh = String(Number(match[1])).padStart(2, '0');
+  const mm = match[2];
+  return `${hh}:${mm}`;
+};
+
 export function WorkerManageScreen({ route, navigation }) {
   const passedWorkerId = route?.params?.workerId;
   const availabilityOnly = route?.params?.availabilityOnly === true;
@@ -320,7 +329,7 @@ export function WorkerManageScreen({ route, navigation }) {
   };
 
   const updateDayTime = (dayIndex, field, value) => {
-    const cleaned = value.replace(/[^\d:]/g, '').slice(0, 5);
+    const cleaned = normalizeTime24(value, field === 'start_time' ? '09:00' : '17:00');
     setAvailability(prev => {
       const existing = prev.find(a => a.day_of_week === dayIndex);
       if (existing) {
@@ -347,7 +356,8 @@ export function WorkerManageScreen({ route, navigation }) {
       setTimePickerTarget({ dayIndex, field });
       return;
     }
-    const [h, m] = String(currentValue || '09:00').split(':').map(Number);
+    const normalized = normalizeTime24(currentValue, field === 'start_time' ? '09:00' : '17:00');
+    const [h, m] = normalized.split(':').map(Number);
     const d = new Date();
     d.setHours(Number.isFinite(h) ? h : 9, Number.isFinite(m) ? m : 0, 0, 0);
     setNativePickerValue(d);
@@ -922,6 +932,10 @@ export function WorkerManageScreen({ route, navigation }) {
             mode="time"
             display={Platform.OS === 'ios' ? 'spinner' : 'default'}
             onChange={(event, selectedTime) => {
+              if (event?.type === 'dismissed') {
+                setShowNativeTimePicker(false);
+                return;
+              }
               setShowNativeTimePicker(false);
               if (!selectedTime || !timePickerTarget) return;
               const hh = String(selectedTime.getHours()).padStart(2, '0');
