@@ -278,7 +278,7 @@ export function ProfileScreen({ navigation }) {
       {isWorker && (
         <MenuSection>
           {/* Always enabled: workers need Stripe/payment history before verification can complete */}
-          <MenuItem label="Payment Details" onPress={() => safeNavigate('Payments')} />
+          <MenuItem label="Payment Details" disabled={false} onPress={() => safeNavigate('Payments')} />
           <MenuItem label="My Earnings" disabled={restricted} onPress={() => safeNavigate('Earnings')} />
         </MenuSection>
       )}

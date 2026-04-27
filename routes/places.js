@@ -1,16 +1,29 @@
 const express = require('express');
 const router = express.Router();
 
-router.get('/autocomplete', async (req, res) => {
+function getGooglePlacesKey() {
+  return (
+    process.env.GOOGLE_MAPS_BROWSER_KEY ||
+    process.env.GOOGLE_MAPS_API_KEY ||
+    ''
+  );
+}
+
+async function handleAutocomplete(req, res) {
   const { input } = req.query;
   if (!input || input.trim().length < 2) {
     return res.status(400).json({ ok: false, error: 'input required' });
   }
 
+  const key = getGooglePlacesKey();
+  if (!key) {
+    return res.status(503).json({ ok: false, error: 'Google Maps key is not configured' });
+  }
+
   const params = new URLSearchParams({
     input: input.trim(),
-    key: process.env.GOOGLE_MAPS_BROWSER_KEY,
-    language: 'en',
+    key,
+    language: String(req.query.language || 'en'),
   });
 
   try {
@@ -22,6 +35,11 @@ router.get('/autocomplete', async (req, res) => {
   } catch (err) {
     res.status(500).json({ ok: false, error: 'Places API request failed' });
   }
-});
+}
+
+// Existing API endpoint
+router.get('/autocomplete', handleAutocomplete);
+// Vite-compatible proxy endpoint path
+router.get('/place/autocomplete/json', handleAutocomplete);
 
 module.exports = router;

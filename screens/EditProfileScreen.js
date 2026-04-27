@@ -3,12 +3,28 @@
  */
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, Text, ScrollView, TextInput, Pressable, Alert, ActivityIndicator, Platform, StyleSheet } from 'react-native';
-import PlacesPkg from 'react-native-google-places-autocomplete';
 import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 
-const { GooglePlacesAutocomplete } = PlacesPkg;
+function getGooglePlacesAutocompleteComponent() {
+  if (Platform.OS !== 'web') return null;
+  try {
+    const placesModule = require('react-native-google-places-autocomplete');
+    // Try all known export shapes — check each is actually a function/component
+    const candidates = [
+      placesModule?.GooglePlacesAutocomplete,
+      placesModule?.default?.GooglePlacesAutocomplete,
+      placesModule?.default,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'function') return candidate;
+    }
+    return null;
+  } catch (_) {
+    return null;
+  }
+}
 
 let nativeConfig = null;
 function getNativeConfig() {
@@ -24,11 +40,6 @@ function getNativeConfig() {
 
 /** Same browser key as Google Cloud / Railway GOOGLE_MAPS_BROWSER_KEY — not sent to athletic-heart API. */
 function getGooglePlacesBrowserKey() {
-  try {
-    const env = eval("typeof import.meta !== 'undefined' && import.meta.env");
-    if (env?.VITE_GOOGLE_MAPS_BROWSER_KEY) return env.VITE_GOOGLE_MAPS_BROWSER_KEY;
-    if (env?.VITE_GOOGLE_MAPS_API_KEY) return env.VITE_GOOGLE_MAPS_API_KEY;
-  } catch (_) {}
   if (typeof process !== 'undefined' && process.env) {
     const processKey = (
       process.env.EXPO_PUBLIC_GOOGLE_MAPS_BROWSER_KEY ||
@@ -81,14 +92,14 @@ export function EditProfileScreen({ navigation }) {
   const [hourlyRate, setHourlyRate] = useState('');
   const [maxTravelKm, setMaxTravelKm] = useState('');
   const [ndisNumber, setNdisNumber] = useState('');
-  const [showPlaceResults, setShowPlaceResults] = useState(false);
 
+  // Resolve once at module level so the reference is stable across renders
+  const GooglePlacesAutocompleteComponent = useRef(getGooglePlacesAutocompleteComponent()).current;
   const placesRef = useRef(null);
+
   const googleKey = getGooglePlacesBrowserKey();
   const isWeb = Platform.OS === 'web';
-  const canUsePlacesAutocomplete = !!GooglePlacesAutocomplete && (isWeb || !!googleKey);
-  // On web, the local /__places-proxy injects GOOGLE_MAPS_* from .env.local.
-  // Library still requires a `query.key` field, so we pass a harmless placeholder if needed.
+  const canUsePlacesAutocomplete = isWeb && typeof GooglePlacesAutocompleteComponent === 'function';
   const placesQueryKey = googleKey || (isWeb ? 'web-proxy-key' : '');
 
   const loadProfile = useCallback(async () => {
@@ -219,25 +230,24 @@ export function EditProfileScreen({ navigation }) {
                 placeholderTextColor={Colors.text.muted}
               />
               <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs, marginTop: Spacing.xs }}>
-                {!GooglePlacesAutocomplete
+                {!GooglePlacesAutocompleteComponent
                   ? 'Address suggestions are unavailable on this build. You can still type address manually.'
-                  : 'Address search needs GOOGLE_MAPS_BROWSER_KEY in native `.env` for APK suggestions.'}
+                  : 'Address suggestions need GOOGLE_MAPS_BROWSER_KEY in your web env (.env or .env.local), then restart npm run web.'}
               </Text>
             </>
           ) : (
-            <GooglePlacesAutocomplete
+            <GooglePlacesAutocompleteComponent
               ref={placesRef}
               placeholder="Start typing street, suburb, or city"
               onPress={(data) => {
                 setAddress(data.description || '');
-                setShowPlaceResults(false);
                 if (placesRef.current?.blur) placesRef.current.blur();
               }}
               onFail={(err) => {
                 if (isWeb) {
                   Alert.alert(
                     'Address Search',
-                    'Set GOOGLE_MAPS_BROWSER_KEY in .env.local and restart npm run web.',
+                    'Set GOOGLE_MAPS_BROWSER_KEY in .env or .env.local and restart npm run web.',
                   );
                 }
               }}
@@ -251,7 +261,6 @@ export function EditProfileScreen({ navigation }) {
               minLength={2}
               enablePoweredByContainer={false}
               keyboardShouldPersistTaps="handled"
-              listViewDisplayed={showPlaceResults}
               keepResultsAfterBlur={false}
               suppressDefaultStyles
               styles={{
@@ -291,12 +300,6 @@ export function EditProfileScreen({ navigation }) {
               }}
               textInputProps={{
                 placeholderTextColor: Colors.text.muted,
-                onFocus: () => setShowPlaceResults(true),
-                onBlur: () => setShowPlaceResults(false),
-                onChangeText: (text) => {
-                  setAddress(text);
-                  setShowPlaceResults((text || '').trim().length >= 2);
-                },
               }}
             />
           )}
@@ -336,7 +339,7 @@ export function EditProfileScreen({ navigation }) {
         )}
       </View>
 
-      <View style={{ flexDirection: 'row', gap: Spacing.sm }}>
+      <View style={{ flexDirection: 'row' }}>
         <Pressable
           onPress={() => navigation.goBack()}
           style={({ pressed }) => ({
@@ -350,7 +353,7 @@ export function EditProfileScreen({ navigation }) {
           onPress={saveProfile}
           disabled={saving}
           style={({ pressed }) => ({
-            flex: 2, backgroundColor: saving ? Colors.text.muted : Colors.primary,
+            flex: 2, marginLeft: Spacing.sm, backgroundColor: saving ? Colors.text.muted : Colors.primary,
             paddingVertical: Spacing.md, borderRadius: Radius.md, alignItems: 'center',
             opacity: pressed ? 0.8 : 1,
           })}

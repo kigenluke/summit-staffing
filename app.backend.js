@@ -119,6 +119,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/shifts', shiftRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/places', placesRoutes);
+app.use('/__places-proxy', placesRoutes);
 
 // Explicit preflight handler for CORS
 app.options('*', cors());
