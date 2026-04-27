@@ -3,28 +3,10 @@
  */
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, Text, ScrollView, TextInput, Pressable, Alert, ActivityIndicator, Platform, StyleSheet } from 'react-native';
+import * as PlacesPkg from 'react-native-google-places-autocomplete';
 import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
-
-function getGooglePlacesAutocompleteComponent() {
-  if (Platform.OS !== 'web') return null;
-  try {
-    const placesModule = require('react-native-google-places-autocomplete');
-    // Try all known export shapes — check each is actually a function/component
-    const candidates = [
-      placesModule?.GooglePlacesAutocomplete,
-      placesModule?.default?.GooglePlacesAutocomplete,
-      placesModule?.default,
-    ];
-    for (const candidate of candidates) {
-      if (typeof candidate === 'function') return candidate;
-    }
-    return null;
-  } catch (_) {
-    return null;
-  }
-}
 
 let nativeConfig = null;
 function getNativeConfig() {
@@ -93,13 +75,17 @@ export function EditProfileScreen({ navigation }) {
   const [maxTravelKm, setMaxTravelKm] = useState('');
   const [ndisNumber, setNdisNumber] = useState('');
 
-  // Resolve once at module level so the reference is stable across renders
-  const GooglePlacesAutocompleteComponent = useRef(getGooglePlacesAutocompleteComponent()).current;
   const placesRef = useRef(null);
+  const PlacesAutocompleteComponent = (
+    PlacesPkg?.GooglePlacesAutocomplete ||
+    PlacesPkg?.default?.GooglePlacesAutocomplete ||
+    PlacesPkg?.default ||
+    null
+  );
 
   const googleKey = getGooglePlacesBrowserKey();
   const isWeb = Platform.OS === 'web';
-  const canUsePlacesAutocomplete = isWeb && typeof GooglePlacesAutocompleteComponent === 'function';
+  const canUsePlacesAutocomplete = isWeb && !!PlacesAutocompleteComponent;
   const placesQueryKey = googleKey || (isWeb ? 'web-proxy-key' : '');
 
   const loadProfile = useCallback(async () => {
@@ -209,7 +195,7 @@ export function EditProfileScreen({ navigation }) {
         <Field label="Last Name" value={lastName} onChangeText={setLastName} placeholder="Last name" />
         <Field label="Phone" value={phone} onChangeText={setPhone} placeholder="Phone number" keyboardType="phone-pad" />
 
-        <View style={{ marginBottom: Spacing.md, zIndex: 20, position: 'relative' }}>
+        <View style={{ marginBottom: Spacing.md, zIndex: 2000, position: 'relative' }}>
           <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>Address</Text>
           {!canUsePlacesAutocomplete ? (
             <>
@@ -230,13 +216,13 @@ export function EditProfileScreen({ navigation }) {
                 placeholderTextColor={Colors.text.muted}
               />
               <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs, marginTop: Spacing.xs }}>
-                {!GooglePlacesAutocompleteComponent
+                {!PlacesAutocompleteComponent
                   ? 'Address suggestions are unavailable on this build. You can still type address manually.'
                   : 'Address suggestions need GOOGLE_MAPS_BROWSER_KEY in your web env (.env or .env.local), then restart npm run web.'}
               </Text>
             </>
           ) : (
-            <GooglePlacesAutocompleteComponent
+            <PlacesAutocompleteComponent
               ref={placesRef}
               placeholder="Start typing street, suburb, or city"
               onPress={(data) => {
@@ -268,35 +254,43 @@ export function EditProfileScreen({ navigation }) {
                 textInputContainer: { backgroundColor: 'transparent' },
                 textInput: {
                   backgroundColor: Colors.surfaceSecondary,
-                  borderWidth: 2,
+                  borderWidth: 1.5,
                   borderColor: Colors.border,
                   borderRadius: Radius.md,
                   paddingVertical: Spacing.sm,
                   paddingHorizontal: Spacing.md,
                   fontSize: Typography.fontSize.base,
                   color: Colors.text.primary,
-                  height: 48,
+                  height: 46,
                 },
                 listView: {
                   position: 'absolute',
                   top: 52,
                   left: 0,
                   right: 0,
-                  zIndex: 9999,
+                  zIndex: 99999,
                   elevation: 10,
                   backgroundColor: Colors.surface,
                   borderWidth: 1,
                   borderColor: Colors.border,
                   borderRadius: Radius.md,
-                  marginTop: Spacing.xs,
-                  maxHeight: 220,
+                  marginTop: 6,
+                  maxHeight: 240,
+                  overflow: 'hidden',
+                  overflowY: 'auto',
+                  ...Shadows.md,
                 },
                 row: {
                   backgroundColor: Colors.surface,
-                  padding: Spacing.md,
+                  paddingVertical: Spacing.sm,
+                  paddingHorizontal: Spacing.md,
                 },
                 separator: { height: StyleSheet.hairlineWidth, backgroundColor: Colors.borderLight },
-                description: { fontSize: Typography.fontSize.base, color: Colors.text.primary },
+                description: {
+                  fontSize: Typography.fontSize.sm,
+                  lineHeight: 20,
+                  color: Colors.text.primary,
+                },
               }}
               textInputProps={{
                 placeholderTextColor: Colors.text.muted,
@@ -317,7 +311,7 @@ export function EditProfileScreen({ navigation }) {
         )}
       </View>
 
-      <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.lg, ...Shadows.sm }}>
+      <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.lg, ...Shadows.sm, position: 'relative', zIndex: -9999 }}>
         <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.md }}>
           Account Information
         </Text>
