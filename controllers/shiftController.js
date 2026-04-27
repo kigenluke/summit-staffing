@@ -14,6 +14,17 @@ const createNotification = async (userId, title, body, type = 'general', data = 
   }
 };
 
+const toRad = (deg) => (Number(deg) * Math.PI) / 180;
+const distanceMeters = (lat1, lon1, lat2, lon2) => {
+  const R = 6371000;
+  const dLat = toRad(Number(lat2) - Number(lat1));
+  const dLon = toRad(Number(lon2) - Number(lon1));
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
+
 const getShiftTimeOfDay = (isoTime) => {
   const d = new Date(isoTime);
   if (Number.isNaN(d.getTime())) return null;
@@ -31,12 +42,27 @@ const getAvailableShifts = async (req, res) => {
     const offset = (page - 1) * limit;
 
     const shiftTypeFilter = String(req.query.shiftType || '').trim().toLowerCase();
+    const isWorker = req.user?.role === 'worker';
+
+    let workerTravel = null;
+    if (isWorker) {
+      const workerRes = await pool.query(
+        `SELECT latitude, longitude, max_travel_km
+         FROM workers
+         WHERE user_id = $1
+         LIMIT 1`,
+        [req.user.userId]
+      );
+      workerTravel = workerRes.rows[0] || null;
+    }
 
     const { rows } = await pool.query(
       `SELECT s.*,
               u.email AS participant_email,
               COALESCE(p.first_name, '') AS participant_first_name,
               COALESCE(p.last_name, '') AS participant_last_name,
+              p.latitude AS participant_latitude,
+              p.longitude AS participant_longitude,
               (SELECT COUNT(*) FROM shift_applications sa WHERE sa.shift_id = s.id) AS application_count
        FROM shifts s
        JOIN users u ON u.id = s.participant_id
@@ -47,16 +73,37 @@ const getAvailableShifts = async (req, res) => {
       [limit, offset]
     );
 
-    const filteredRows = ['am', 'pm', 'night'].includes(shiftTypeFilter)
-      ? rows.filter((shift) => getShiftTimeOfDay(shift.start_time) === shiftTypeFilter)
-      : rows;
+    const hasWorkerTravelFilter = Boolean(
+      isWorker &&
+      workerTravel &&
+      workerTravel.latitude != null &&
+      workerTravel.longitude != null &&
+      Number(workerTravel.max_travel_km) > 0
+    );
+
+    const filteredRows = rows.filter((shift) => {
+      const shiftTypeMatch = ['am', 'pm', 'night'].includes(shiftTypeFilter)
+        ? getShiftTimeOfDay(shift.start_time) === shiftTypeFilter
+        : true;
+      if (!shiftTypeMatch) return false;
+
+      if (!hasWorkerTravelFilter) return true;
+      if (shift.participant_latitude == null || shift.participant_longitude == null) return true;
+
+      const meters = distanceMeters(
+        workerTravel.latitude,
+        workerTravel.longitude,
+        shift.participant_latitude,
+        shift.participant_longitude
+      );
+      return meters <= Number(workerTravel.max_travel_km) * 1000;
+    });
 
     const countRes = await pool.query(`SELECT COUNT(*) FROM shifts WHERE status = 'open'`);
     const total = ['am', 'pm', 'night'].includes(shiftTypeFilter)
       ? filteredRows.length
       : parseInt(countRes.rows[0].count, 10);
 
-    const isWorker = req.user?.role === 'worker';
     const shifts = filteredRows.map((shift) => {
       if (!isWorker) return shift;
       return {

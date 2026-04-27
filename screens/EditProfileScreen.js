@@ -5,7 +5,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, Text, ScrollView, TextInput, Pressable, Alert, ActivityIndicator, Platform, StyleSheet } from 'react-native';
 import * as PlacesPkg from 'react-native-google-places-autocomplete';
 import { useAuthStore } from '../store/authStore.js';
-import { api } from '../services/api.js';
+import { api, ApiConfig } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 
 /** Same browser key as Google Cloud / Railway GOOGLE_MAPS_BROWSER_KEY — not sent to athletic-heart API. */
@@ -70,8 +70,11 @@ export function EditProfileScreen({ navigation }) {
 
   const googleKey = getGooglePlacesBrowserKey();
   const isWeb = Platform.OS === 'web';
-  const canUsePlacesAutocomplete = isWeb && !!PlacesAutocompleteComponent;
-  const placesQueryKey = googleKey || (isWeb ? 'web-proxy-key' : '');
+  const placesProxyBaseUrl = isWeb
+    ? (typeof window !== 'undefined' ? window.location.origin : '')
+    : String(ApiConfig?.baseURL || 'https://athletic-heart-backend-production.up.railway.app').replace(/\/$/, '');
+  const canUsePlacesAutocomplete = !!PlacesAutocompleteComponent && !!placesProxyBaseUrl;
+  const placesQueryKey = googleKey || 'places-proxy-key';
 
   const loadProfile = useCallback(async () => {
     try {
@@ -106,10 +109,9 @@ export function EditProfileScreen({ navigation }) {
     }
   }, [loading, address]);
 
-  const placesRequestUrl =
-    Platform.OS === 'web' && typeof window !== 'undefined'
-      ? { url: `${window.location.origin}/__places-proxy`, useOnPlatform: 'web' }
-      : undefined;
+  const placesRequestUrl = canUsePlacesAutocomplete
+    ? { url: `${placesProxyBaseUrl}/__places-proxy`, useOnPlatform: 'all' }
+    : undefined;
 
   const saveProfile = async () => {
     setSaving(true);
@@ -203,7 +205,7 @@ export function EditProfileScreen({ navigation }) {
               <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs, marginTop: Spacing.xs }}>
                 {!PlacesAutocompleteComponent
                   ? 'Address suggestions are unavailable on this build. You can still type address manually.'
-                  : 'Address suggestions need GOOGLE_MAPS_BROWSER_KEY in your web env (.env or .env.local), then restart npm run web.'}
+                  : 'Start typing to see address suggestions.'}
               </Text>
             </>
           ) : (
@@ -215,12 +217,12 @@ export function EditProfileScreen({ navigation }) {
                 if (placesRef.current?.blur) placesRef.current.blur();
               }}
               onFail={(err) => {
-                if (isWeb) {
-                  Alert.alert(
-                    'Address Search',
-                    'Set GOOGLE_MAPS_BROWSER_KEY in .env or .env.local and restart npm run web.',
-                  );
-                }
+                Alert.alert(
+                  'Address Search',
+                  isWeb
+                    ? 'Address suggestions are temporarily unavailable. Check GOOGLE_MAPS_BROWSER_KEY and retry.'
+                    : 'Address suggestions are temporarily unavailable on mobile. Please try again or type address manually.',
+                );
               }}
               query={{
                 key: placesQueryKey,

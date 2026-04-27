@@ -1,16 +1,30 @@
 /**
  * Summit Staffing – Find a worker (workers browse shifts) / My shifts (participants).
  */
-import React, { useEffect, useState, useCallback, useLayoutEffect, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useLayoutEffect, useRef, useMemo } from 'react';
 import {
   View, Text, FlatList, Pressable, RefreshControl, Alert, Modal,
-  TextInput, ScrollView, ActivityIndicator, Platform,
+  TextInput, ScrollView, ActivityIndicator, Platform, NativeModules,
 } from 'react-native';
 import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { SERVICE_TYPES } from '../constants/serviceTypes.js';
-const DateTimePicker = Platform.OS !== 'web' ? require('@react-native-community/datetimepicker').default : null;
+let DateTimePicker = null;
+if (Platform.OS !== 'web') {
+  try {
+    const hasNativePickerModule = Boolean(
+      NativeModules?.RNCDatePicker ||
+      NativeModules?.RNDateTimePicker ||
+      NativeModules?.RNDateTimePickerAndroid,
+    );
+    if (hasNativePickerModule) {
+      DateTimePicker = require('@react-native-community/datetimepicker').default;
+    }
+  } catch (_) {
+    DateTimePicker = null;
+  }
+}
 
 const SERVICE_ICONS = {
   // 'Personal Care': '🧴',
@@ -1271,6 +1285,15 @@ export function AvailableShiftsScreen({ navigation }) {
   const [acceptingApplicationId, setAcceptingApplicationId] = useState(null);
   const [workerShiftTypeFilter, setWorkerShiftTypeFilter] = useState('all');
 
+  const getShiftTypeForLocalTime = useCallback((isoTime) => {
+    const d = new Date(isoTime);
+    if (Number.isNaN(d.getTime())) return 'all';
+    const h = d.getHours();
+    if (h >= 5 && h < 12) return 'am';
+    if (h >= 12 && h < 20) return 'pm';
+    return 'night';
+  }, []);
+
   useLayoutEffect(() => {
     const screenTitle = isWorker ? 'Available shifts' : isParticipant ? 'My shifts' : 'Shifts';
     navigation.setOptions({
@@ -1308,7 +1331,7 @@ export function AvailableShiftsScreen({ navigation }) {
     try {
       if (isWorker) {
         const [shiftsRes, paymentsRes] = await Promise.all([
-          api.get(`/api/shifts${workerShiftTypeFilter !== 'all' ? `?shiftType=${workerShiftTypeFilter}` : ''}`),
+          api.get('/api/shifts'),
           api.get('/api/payments/history'),
         ]);
         if (shiftsRes.data?.ok) setShifts(shiftsRes.data.shifts || []);
@@ -1326,6 +1349,11 @@ export function AvailableShiftsScreen({ navigation }) {
     } catch (e) { }
     setLoading(false);
   }, [isWorker, isParticipant, workerShiftTypeFilter]);
+
+  const visibleShifts = useMemo(() => {
+    if (!isWorker || workerShiftTypeFilter === 'all') return shifts;
+    return shifts.filter((s) => getShiftTypeForLocalTime(s.start_time) === workerShiftTypeFilter);
+  }, [shifts, isWorker, workerShiftTypeFilter, getShiftTypeForLocalTime]);
 
   useEffect(() => { loadShifts(); }, [loadShifts]);
 
@@ -1404,7 +1432,7 @@ export function AvailableShiftsScreen({ navigation }) {
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
       <FlatList
-        data={shifts}
+        data={visibleShifts}
         keyExtractor={(item) => item.id}
         contentContainerStyle={{ padding: Spacing.md, paddingBottom: Spacing.xxl }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
