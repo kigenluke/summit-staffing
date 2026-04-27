@@ -10,6 +10,7 @@ import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { SERVICE_TYPES } from '../constants/serviceTypes.js';
+const DateTimePicker = Platform.OS !== 'web' ? require('@react-native-community/datetimepicker').default : null;
 
 const SERVICE_ICONS = {
   // 'Personal Care': '🧴',
@@ -185,6 +186,12 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
   const [fallbackHour, setFallbackHour] = useState('09');
   const [fallbackMinute, setFallbackMinute] = useState('00');
   const [fallbackPeriod, setFallbackPeriod] = useState('AM');
+  const [showNativeTimePicker, setShowNativeTimePicker] = useState(false);
+  const [nativePickerValue, setNativePickerValue] = useState(() => {
+    const d = new Date();
+    d.setHours(9, 0, 0, 0);
+    return d;
+  });
   const [timeTarget, setTimeTarget] = useState({ scope: 'common', field: 'start', index: 0 });
   const [step, setStep] = useState('workers');
   const [activeWorkerIndex, setActiveWorkerIndex] = useState(0);
@@ -275,6 +282,17 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
     return `${hour}:${minute}:00`;
   };
 
+  const toPickerDate = (timeStr) => {
+    const mins = parseTimeToMinutes(timeStr);
+    const d = new Date();
+    if (mins == null) {
+      d.setHours(9, 0, 0, 0);
+      return d;
+    }
+    d.setHours(Math.floor(mins / 60), mins % 60, 0, 0);
+    return d;
+  };
+
   const openTimePickerFor = (scope, field, index = 0) => {
     let current = '';
     if (scope === 'common') {
@@ -287,6 +305,11 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
       if (scope === 'common' && field === 'start') {
         commonStartWebRef.current?.showPicker?.();
       }
+      return;
+    }
+    if (DateTimePicker) {
+      setNativePickerValue(toPickerDate(current));
+      setShowNativeTimePicker(true);
       return;
     }
     const parts = toPickerParts(current);
@@ -875,6 +898,27 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
                   </Pressable>
                 </View>
               </>
+            )}
+
+            {Platform.OS !== 'web' && showNativeTimePicker && DateTimePicker && (
+              <DateTimePicker
+                value={nativePickerValue}
+                mode="time"
+                is24Hour={false}
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={(event, selectedTime) => {
+                  setShowNativeTimePicker(false);
+                  if (!selectedTime) return;
+                  applyPickedTimeValue(from24hToAmPm(
+                    `${String(selectedTime.getHours()).padStart(2, '0')}:${String(selectedTime.getMinutes()).padStart(2, '0')}`,
+                  ));
+                  if (timeTarget.scope === 'common') {
+                    setCommonShiftPreset('');
+                  } else {
+                    setWorkerShiftPresets((prev) => prev.map((item, idx) => (idx === timeTarget.index ? '' : item)));
+                  }
+                }}
+              />
             )}
 
             {showFallbackTimeModal && (

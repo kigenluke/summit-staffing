@@ -8,33 +8,18 @@ import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 
-let nativeConfig = null;
-function getNativeConfig() {
-  if (nativeConfig !== null) return nativeConfig;
-  try {
-    const mod = require('react-native-config');
-    nativeConfig = mod?.default || mod || {};
-  } catch (_) {
-    nativeConfig = {};
-  }
-  return nativeConfig;
-}
-
 /** Same browser key as Google Cloud / Railway GOOGLE_MAPS_BROWSER_KEY — not sent to athletic-heart API. */
 function getGooglePlacesBrowserKey() {
   if (typeof process !== 'undefined' && process.env) {
     const processKey = (
+      process.env.GOOGLE_MAPS_BROWSER_KEY ||
+      process.env.GOOGLE_MAPS_API_KEY ||
       process.env.EXPO_PUBLIC_GOOGLE_MAPS_BROWSER_KEY ||
       process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
       ''
     );
     if (processKey) return processKey;
   }
-  const cfg = getNativeConfig();
-  if (cfg?.GOOGLE_MAPS_BROWSER_KEY) return cfg.GOOGLE_MAPS_BROWSER_KEY;
-  if (cfg?.GOOGLE_MAPS_API_KEY) return cfg.GOOGLE_MAPS_API_KEY;
-  if (cfg?.EXPO_PUBLIC_GOOGLE_MAPS_BROWSER_KEY) return cfg.EXPO_PUBLIC_GOOGLE_MAPS_BROWSER_KEY;
-  if (cfg?.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY) return cfg.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
   return '';
 }
 
