@@ -352,6 +352,7 @@ const updateWorker = async (req, res) => {
       'latitude',
       'longitude',
       'hourly_rate',
+      'weekly_earnings_goal',
       'monthly_earnings_target',
       'max_travel_km',
       'bio',
@@ -379,7 +380,30 @@ const updateWorker = async (req, res) => {
 
     return res.status(200).json({ ok: true, worker: updated.rows[0] });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: 'Failed to update worker' });
+    // Surface a short debug hint in non-production to speed up local dev.
+    const details = process.env.NODE_ENV !== 'production'
+      ? String(err?.message || '').slice(0, 300)
+      : undefined;
+    return res.status(500).json({ ok: false, error: 'Failed to update worker', details });
+  }
+};
+
+const updateMe = async (req, res) => {
+  try {
+    if (respondValidation(req, res)) return;
+    if (!req.user?.userId) return res.status(401).json({ ok: false, error: 'Unauthorized' });
+
+    const workerRes = await pool.query('SELECT id FROM workers WHERE user_id = $1 LIMIT 1', [req.user.userId]);
+    if (workerRes.rowCount === 0) {
+      return res.status(404).json({ ok: false, error: 'Worker not found' });
+    }
+    req.params.id = workerRes.rows[0].id;
+    return updateWorker(req, res);
+  } catch (err) {
+    const details = process.env.NODE_ENV !== 'production'
+      ? String(err?.message || '').slice(0, 300)
+      : undefined;
+    return res.status(500).json({ ok: false, error: 'Failed to update worker', details });
   }
 };
 
@@ -730,6 +754,7 @@ module.exports = {
   getMe,
   setupWorkerProfile,
   updateWorker,
+  updateMe,
   uploadProfilePhoto,
   uploadDocument,
   uploadDocumentsBulk,

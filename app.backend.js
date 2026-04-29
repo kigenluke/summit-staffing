@@ -21,6 +21,8 @@ const userRoutes = require('./routes/users');
 const shiftRoutes = require('./routes/shifts');
 const notificationRoutes = require('./routes/notifications');
 const placesRoutes = require('./routes/places');
+const incidentsRoutes = require('./routes/incidents');
+const complaintsRoutes = require('./routes/complaints');
 
 const allowedOrigins = [
   'http://localhost:3000',
@@ -120,6 +122,8 @@ app.use('/api/shifts', shiftRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/places', placesRoutes);
 app.use('/__places-proxy', placesRoutes);
+app.use('/api/incidents', incidentsRoutes);
+app.use('/api/complaints', complaintsRoutes);
 
 // Explicit preflight handler for CORS
 app.options('*', cors());

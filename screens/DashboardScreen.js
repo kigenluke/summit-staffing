@@ -3,6 +3,7 @@
  */
 import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, ScrollView, Pressable, RefreshControl, ActivityIndicator, Linking, Platform, Alert } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
@@ -39,17 +40,22 @@ export function DashboardScreen({ navigation }) {
   const [workerPendingAmount, setWorkerPendingAmount] = useState(0);
   const [workerEarnedThisWeek, setWorkerEarnedThisWeek] = useState(0);
   const [nextShift, setNextShift] = useState(null);
+  const [weeklyGoal, setWeeklyGoal] = useState(null);
+  const [weeklyGoalLoading, setWeeklyGoalLoading] = useState(false);
 
   const isWorker = user?.role === 'worker';
-  const weeklyGoal = 600;
 
   const loadData = useCallback(async () => {
     const role = user?.role;
     const fetchFirstName = async () => {
       try {
         if (role === 'worker') {
+          setWeeklyGoalLoading(true);
           const { data } = await api.get('/api/workers/me');
           const n = data?.worker?.first_name;
+          const goal = data?.worker?.weekly_earnings_goal;
+          setWeeklyGoal(goal == null ? null : Number(goal));
+          setWeeklyGoalLoading(false);
           return n != null && String(n).trim() ? String(n).trim() : null;
         }
         if (role === 'participant') {
@@ -58,6 +64,7 @@ export function DashboardScreen({ navigation }) {
           return n != null && String(n).trim() ? String(n).trim() : null;
         }
       } catch (_) {}
+      if (role === 'worker') setWeeklyGoalLoading(false);
       return null;
     };
 
@@ -129,6 +136,14 @@ export function DashboardScreen({ navigation }) {
   }, [loadData]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // Refresh dashboard when returning to this screen (e.g. after setting weekly goal).
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+      return () => {};
+    }, [loadData])
+  );
 
   const openDirections = async (booking) => {
     if (!booking) return;
@@ -300,25 +315,54 @@ export function DashboardScreen({ navigation }) {
       {isWorker && (
         <>
           <Card style={{ marginBottom: Spacing.md }}>
-            <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, fontWeight: Typography.fontWeight.semibold }}>
-              Weekly Goal
-            </Text>
-            <Text style={{ fontSize: Typography.fontSize.xl, color: Colors.text.primary, fontWeight: Typography.fontWeight.bold, marginTop: 4 }}>
-              ${workerEarnedThisWeek.toFixed(0)} / ${weeklyGoal}
-            </Text>
-            <View style={{ height: 10, backgroundColor: Colors.surfaceSecondary, borderRadius: Radius.full, marginTop: Spacing.sm }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, fontWeight: Typography.fontWeight.semibold }}>
+                Weekly Goal
+              </Text>
+              <Pressable onPress={() => navigation.navigate('EarningsDashboard')}>
+                <Text style={{ color: Colors.primary, fontWeight: Typography.fontWeight.semibold }}>Set goal</Text>
+              </Pressable>
+            </View>
+
+            <View style={{ position: 'relative', marginTop: 6 }}>
+              {weeklyGoalLoading && (
+                <View style={{ marginBottom: 8 }}>
+                  <ActivityIndicator size="small" color={Colors.primary} />
+                </View>
+              )}
+
               <View
                 style={{
-                  height: '100%',
-                  width: `${Math.min((workerEarnedThisWeek / weeklyGoal) * 100, 100)}%`,
-                  backgroundColor: Colors.status.success,
-                  borderRadius: Radius.full,
+                  opacity: weeklyGoalLoading ? 0.45 : 1,
+                  ...(Platform.OS === 'web' ? { filter: weeklyGoalLoading ? 'blur(2px)' : 'none' } : null),
                 }}
-              />
+              >
+                {Number(weeklyGoal) > 0 ? (
+                  <>
+                    <Text style={{ fontSize: Typography.fontSize.xl, color: Colors.text.primary, fontWeight: Typography.fontWeight.bold, marginTop: 4 }}>
+                      ${workerEarnedThisWeek.toFixed(0)} / ${Number(weeklyGoal).toFixed(0)}
+                    </Text>
+                    <View style={{ height: 10, backgroundColor: Colors.surfaceSecondary, borderRadius: Radius.full, marginTop: Spacing.sm }}>
+                      <View
+                        style={{
+                          height: '100%',
+                          width: `${Math.min((workerEarnedThisWeek / Number(weeklyGoal)) * 100, 100)}%`,
+                          backgroundColor: Colors.status.success,
+                          borderRadius: Radius.full,
+                        }}
+                      />
+                    </View>
+                    <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: Spacing.sm }}>
+                      ${Math.max(Number(weeklyGoal) - workerEarnedThisWeek, 0).toFixed(0)} more to reach goal!
+                    </Text>
+                  </>
+                ) : (
+                  <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: Spacing.sm }}>
+                    No weekly goal set yet. Tap “Set goal” to add one.
+                  </Text>
+                )}
+              </View>
             </View>
-            <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: Spacing.sm }}>
-              ${Math.max(weeklyGoal - workerEarnedThisWeek, 0).toFixed(0)} more to reach goal!
-            </Text>
           </Card>
 
           <Card style={{ marginBottom: Spacing.lg }}>

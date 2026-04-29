@@ -2,7 +2,7 @@
  * Summit Staffing – Search/Browse Workers Screen
  */
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, ScrollView, Pressable, TextInput, RefreshControl, ActivityIndicator, FlatList } from 'react-native';
+import { View, Text, ScrollView, Pressable, TextInput, RefreshControl, ActivityIndicator, FlatList, Linking, Platform } from 'react-native';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { getServiceTypeSuggestions } from '../constants/serviceTypes.js';
@@ -183,6 +183,21 @@ export function SearchWorkersScreen({ navigation }) {
   });
   const vendorsMissingCategory = mode === 'vendor' && baseFiltered.some((w) => !w.has_vendor_category);
   const vendorsMissingDocs = mode === 'vendor' && baseFiltered.some((w) => !w.has_vendor_documents);
+  const isAmbulanceCategory = mode === 'vendor' && vendorCategoryFilter === 'Ambulance Services';
+
+  const callAmbulance = useCallback(async () => {
+    const telUrl = 'tel:000';
+    try {
+      const canOpen = await Linking.canOpenURL(telUrl);
+      if (canOpen) {
+        await Linking.openURL(telUrl);
+        return;
+      }
+    } catch (_) {}
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.location.href = telUrl;
+    }
+  }, []);
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
@@ -297,28 +312,53 @@ export function SearchWorkersScreen({ navigation }) {
           )}
           ListEmptyComponent={
             <View style={{ padding: Spacing.xl, alignItems: 'center' }}>
-              <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.semibold, color: Colors.text.primary }}>
-                {mode === 'vendor' ? 'No vendors found near you' : 'No workers found'}
-              </Text>
-              <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: Spacing.xs, textAlign: 'center' }}>
-                {mode === 'vendor'
-                  ? 'Vendors appear once they add vendor category and vendor documentation.'
-                  : 'Workers will appear here once they register and set up their profiles.'}
-              </Text>
-              {mode === 'vendor' && !locationAvailable && (
-                <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.status.warning, marginTop: Spacing.xs, textAlign: 'center' }}>
-                  Your location is not set, so nearby sorting may be limited.
-                </Text>
-              )}
-              {mode === 'vendor' && vendorsMissingCategory && (
-                <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.status.error, marginTop: Spacing.xs, textAlign: 'center' }}>
-                  No vendor category is added for nearby profiles.
-                </Text>
-              )}
-              {mode === 'vendor' && vendorsMissingDocs && (
-                <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.status.error, marginTop: 4, textAlign: 'center' }}>
-                  No vendor documentation is added for nearby profiles.
-                </Text>
+              {isAmbulanceCategory ? (
+                <>
+                  <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.semibold, color: Colors.text.primary, textAlign: 'center' }}>
+                    Call 000 for an emergency
+                  </Text>
+                  <Pressable
+                    onPress={callAmbulance}
+                    style={({ pressed }) => ({
+                      marginTop: Spacing.md,
+                      backgroundColor: Colors.status.error,
+                      borderRadius: Radius.md,
+                      paddingVertical: Spacing.sm,
+                      paddingHorizontal: Spacing.lg,
+                      opacity: pressed ? 0.85 : 1,
+                    })}
+                  >
+                    <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>
+                      Call Ambulance
+                    </Text>
+                  </Pressable>
+                </>
+              ) : (
+                <>
+                  <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.semibold, color: Colors.text.primary }}>
+                    {mode === 'vendor' ? 'No nearby vendors' : 'No workers found'}
+                  </Text>
+                  <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: Spacing.xs, textAlign: 'center' }}>
+                    {mode === 'vendor'
+                      ? 'Try another category or update location.'
+                      : 'Try a different search.'}
+                  </Text>
+                  {mode === 'vendor' && !locationAvailable && (
+                    <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.status.warning, marginTop: Spacing.xs, textAlign: 'center' }}>
+                      Set your location to see nearby results.
+                    </Text>
+                  )}
+                  {mode === 'vendor' && vendorsMissingCategory && (
+                    <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.status.error, marginTop: Spacing.xs, textAlign: 'center' }}>
+                      Nearby vendors have no matching category yet.
+                    </Text>
+                  )}
+                  {mode === 'vendor' && vendorsMissingDocs && (
+                    <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.status.error, marginTop: 4, textAlign: 'center' }}>
+                      Nearby vendors are missing docs.
+                    </Text>
+                  )}
+                </>
               )}
             </View>
           }

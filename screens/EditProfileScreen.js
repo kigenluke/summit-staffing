@@ -55,12 +55,15 @@ export function EditProfileScreen({ navigation }) {
   const [lastName, setLastName] = useState('');
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
+  const [latitude, setLatitude] = useState(null);
+  const [longitude, setLongitude] = useState(null);
   const [bio, setBio] = useState('');
   const [hourlyRate, setHourlyRate] = useState('');
   const [maxTravelKm, setMaxTravelKm] = useState('');
   const [ndisNumber, setNdisNumber] = useState('');
 
   const placesRef = useRef(null);
+  const lastSelectedAddressRef = useRef('');
   const PlacesAutocompleteComponent = (
     PlacesPkg?.GooglePlacesAutocomplete ||
     PlacesPkg?.default?.GooglePlacesAutocomplete ||
@@ -88,6 +91,8 @@ export function EditProfileScreen({ navigation }) {
           setLastName(p.last_name || '');
           setPhone(p.phone || '');
           setAddress(p.address || '');
+          setLatitude(p.latitude != null ? Number(p.latitude) : null);
+          setLongitude(p.longitude != null ? Number(p.longitude) : null);
           if (isWorker) {
             setBio(p.bio || '');
             setHourlyRate(p.hourly_rate ? String(p.hourly_rate) : '');
@@ -122,8 +127,25 @@ export function EditProfileScreen({ navigation }) {
         setSaving(false);
         return;
       }
-      const endpoint = isWorker ? `/api/workers/${profileId}` : `/api/participants/${profileId}`;
+      const endpoint = isWorker ? '/api/workers/me' : `/api/participants/${profileId}`;
       const body = { first_name: firstName, last_name: lastName, phone, address };
+
+      // Preserve geo coords when user edits other fields only.
+      // (Some address-input re-renders can temporarily clear latitude/longitude state.)
+      const originalLat = profile?.latitude != null ? Number(profile.latitude) : null;
+      const originalLng = profile?.longitude != null ? Number(profile.longitude) : null;
+      const addressChanged = (profile?.address || '') !== (address || '');
+
+      if (!addressChanged) {
+        body.latitude = originalLat;
+        body.longitude = originalLng;
+      } else if (latitude != null && longitude != null) {
+        body.latitude = latitude;
+        body.longitude = longitude;
+      } else {
+        body.latitude = null;
+        body.longitude = null;
+      }
       if (isWorker) {
         body.bio = bio;
         body.hourly_rate = parseFloat(hourlyRate) || 0;
@@ -212,8 +234,31 @@ export function EditProfileScreen({ navigation }) {
             <PlacesAutocompleteComponent
               ref={placesRef}
               placeholder="Start typing street, suburb, or city"
-              onPress={(data) => {
-                setAddress(data.description || '');
+              onPress={async (data, details) => {
+                const selectedAddress = data.description || data.formatted_address || '';
+                lastSelectedAddressRef.current = selectedAddress;
+                setAddress(selectedAddress);
+                let lat = details?.geometry?.location?.lat;
+                let lng = details?.geometry?.location?.lng;
+
+                if ((typeof lat !== 'number' || typeof lng !== 'number') && data?.place_id) {
+                  try {
+                    const detailsPath = `/api/places/details?place_id=${encodeURIComponent(
+                      data.place_id
+                    )}&language=en`;
+                    const { data: detailsRes } = await api.get(detailsPath);
+                    lat = detailsRes?.result?.geometry?.location?.lat;
+                    lng = detailsRes?.result?.geometry?.location?.lng;
+                  } catch (_) {}
+                }
+
+                if (typeof lat === 'number' && typeof lng === 'number') {
+                  setLatitude(lat);
+                  setLongitude(lng);
+                } else {
+                  setLatitude(null);
+                  setLongitude(null);
+                }
                 if (placesRef.current?.blur) placesRef.current.blur();
               }}
               onFail={(err) => {
@@ -229,7 +274,7 @@ export function EditProfileScreen({ navigation }) {
                 language: 'en',
               }}
               requestUrl={placesRequestUrl}
-              fetchDetails={false}
+              fetchDetails
               debounce={300}
               minLength={2}
               enablePoweredByContainer={false}
@@ -281,6 +326,14 @@ export function EditProfileScreen({ navigation }) {
               }}
               textInputProps={{
                 placeholderTextColor: Colors.text.muted,
+                onChangeText: (txt) => {
+                  setAddress(txt);
+                  // Keep coordinates when value is exactly the selected suggestion text.
+                  if (txt === lastSelectedAddressRef.current) return;
+                  // Manual typing may no longer map to selected place => clear coords.
+                  setLatitude(null);
+                  setLongitude(null);
+                },
               }}
             />
           )}

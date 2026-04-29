@@ -55,7 +55,7 @@ const pickErrorMessage = (err) => {
 
 const computeCommissionBreakdown = (amount) => {
   const total = Number(amount || 0);
-  const commission = Number((total * 0.1).toFixed(2));
+  const commission = Number((total * 0.15).toFixed(2));
   const workerPayout = Number((total - commission).toFixed(2));
   return { total, commission, workerPayout };
 };
@@ -391,7 +391,7 @@ const createPaymentIntentHandler = async (req, res) => {
       }
     });
 
-    const commission = Number((amount * 0.1).toFixed(2));
+    const commission = Number((amount * 0.15).toFixed(2));
     const workerPayout = Number((amount - commission).toFixed(2));
 
     await pool.query(

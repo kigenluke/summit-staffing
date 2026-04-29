@@ -34,7 +34,7 @@ const getShiftTimeOfDay = (isoTime) => {
   return 'night';
 };
 
-// ── GET /api/shifts  (available / open shifts with pagination) ───
+// ── GET /api/shifts  (worker: open + assigned; participant: open listing) ───
 const getAvailableShifts = async (req, res) => {
   try {
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
@@ -56,6 +56,16 @@ const getAvailableShifts = async (req, res) => {
       workerTravel = workerRes.rows[0] || null;
     }
 
+    // Workers should still see "their" assigned shift with full details after selection.
+    // For workers: include open shifts + filled shifts assigned to them.
+    // For participants: this endpoint is only used for "available shifts" browsing; keep it to open shifts.
+    const queryParams = [limit, offset];
+    let whereClause = `s.status = 'open'`;
+    if (isWorker) {
+      queryParams.push(req.user.userId);
+      whereClause = `(s.status = 'open' OR (s.status = 'filled' AND s.filled_by_worker_id = $3))`;
+    }
+
     const { rows } = await pool.query(
       `SELECT s.*,
               u.email AS participant_email,
@@ -67,10 +77,12 @@ const getAvailableShifts = async (req, res) => {
        FROM shifts s
        JOIN users u ON u.id = s.participant_id
        LEFT JOIN participants p ON p.user_id = s.participant_id
-       WHERE s.status = 'open'
-       ORDER BY s.created_at DESC
+       WHERE ${whereClause}
+       ORDER BY
+         CASE WHEN s.status = 'filled' THEN 0 ELSE 1 END,
+         s.created_at DESC
        LIMIT $1 OFFSET $2`,
-      [limit, offset]
+      queryParams
     );
 
     const hasWorkerTravelFilter = Boolean(
@@ -81,39 +93,65 @@ const getAvailableShifts = async (req, res) => {
       Number(workerTravel.max_travel_km) > 0
     );
 
-    const filteredRows = rows.filter((shift) => {
-      const shiftTypeMatch = ['am', 'pm', 'night'].includes(shiftTypeFilter)
-        ? getShiftTimeOfDay(shift.start_time) === shiftTypeFilter
-        : true;
-      if (!shiftTypeMatch) return false;
+    const annotatedRows = rows
+      .filter((shift) => {
+        const shiftTypeMatch = ['am', 'pm', 'night'].includes(shiftTypeFilter)
+          ? getShiftTimeOfDay(shift.start_time) === shiftTypeFilter
+          : true;
+        return shiftTypeMatch;
+      })
+      .map((shift) => {
+        if (!hasWorkerTravelFilter) return { ...shift, _distance_m: null, _within_range: true };
+        // If worker enabled travel filter but participant location coords are missing,
+        // treat as out-of-range by default (can be viewed via "See anyway", but not applied).
+        if (shift.participant_latitude == null || shift.participant_longitude == null) {
+          return { ...shift, _distance_m: null, _within_range: false, _location_missing: true };
+        }
+        const meters = distanceMeters(
+          workerTravel.latitude,
+          workerTravel.longitude,
+          shift.participant_latitude,
+          shift.participant_longitude
+        );
+        const within = meters <= Number(workerTravel.max_travel_km) * 1000;
+        return { ...shift, _distance_m: meters, _within_range: within, _location_missing: false };
+      });
 
-      if (!hasWorkerTravelFilter) return true;
-      if (shift.participant_latitude == null || shift.participant_longitude == null) return true;
+    const total = annotatedRows.length;
 
-      const meters = distanceMeters(
-        workerTravel.latitude,
-        workerTravel.longitude,
-        shift.participant_latitude,
-        shift.participant_longitude
-      );
-      return meters <= Number(workerTravel.max_travel_km) * 1000;
-    });
-
-    const countRes = await pool.query(`SELECT COUNT(*) FROM shifts WHERE status = 'open'`);
-    const total = ['am', 'pm', 'night'].includes(shiftTypeFilter)
-      ? filteredRows.length
-      : parseInt(countRes.rows[0].count, 10);
-
-    const shifts = filteredRows.map((shift) => {
+    const shifts = annotatedRows.map((shift) => {
       if (!isWorker) return shift;
+      const isAssignedToMe = shift.status === 'filled' && shift.filled_by_worker_id === req.user.userId;
+      const withinTravelRange = Boolean(shift._within_range);
+      const distanceKm = shift._distance_m == null ? null : Number((Number(shift._distance_m) / 1000).toFixed(1));
       return {
         id: shift.id,
         title: shift.title,
-        start_time: shift.start_time,
-        end_time: shift.end_time,
-        hourly_rate: shift.hourly_rate,
         location: shift.location,
         status: shift.status,
+        participant_first_name: shift.participant_first_name || '',
+        participant_last_name: shift.participant_last_name || '',
+        is_assigned_to_me: isAssignedToMe,
+        within_travel_range: withinTravelRange,
+        distance_km: distanceKm,
+        location_missing: Boolean(shift._location_missing),
+        travel_filter_enabled: hasWorkerTravelFilter,
+        max_travel_km: hasWorkerTravelFilter ? Number(workerTravel.max_travel_km) : null,
+
+        // Before acceptance: keep the listing minimal (UI decides what to show).
+        // After acceptance: return full details (safe for the assigned worker).
+        ...(isAssignedToMe ? {
+          start_time: shift.start_time,
+          end_time: shift.end_time,
+          hourly_rate: shift.hourly_rate,
+          description: shift.description,
+          service_type: shift.service_type,
+          participant_email: shift.participant_email,
+        } : {
+          start_time: shift.start_time,
+          end_time: shift.end_time,
+          hourly_rate: shift.hourly_rate,
+        }),
       };
     });
 
@@ -349,20 +387,41 @@ const acceptApplication = async (req, res) => {
     const totalAmount = (hours * parseFloat(shift.hourly_rate)).toFixed(2);
 
     // Get participant and worker profile IDs
-    const participantRes = await pool.query('SELECT id FROM participants WHERE user_id = $1', [shift.participant_id]);
+    const participantRes = await pool.query(
+      'SELECT id, latitude, longitude, address FROM participants WHERE user_id = $1',
+      [shift.participant_id]
+    );
     const workerRes = await pool.query('SELECT id FROM workers WHERE user_id = $1', [application.worker_id]);
 
     if (participantRes.rowCount > 0 && workerRes.rowCount > 0) {
+      const participant = participantRes.rows[0];
+      const bookingLat = participant.latitude != null ? Number(participant.latitude) : null;
+      const bookingLng = participant.longitude != null ? Number(participant.longitude) : null;
+      const bookingAddress = shift.location || participant.address || null;
       await pool.query(
-        `INSERT INTO bookings (participant_id, worker_id, service_type, start_time, end_time, status, location_address, total_amount, hourly_rate)
-         VALUES ($1, $2, $3, $4, $5, 'confirmed', $6, $7, $8)`,
+        `INSERT INTO bookings (
+           participant_id,
+           worker_id,
+           service_type,
+           start_time,
+           end_time,
+           status,
+           location_address,
+           location_lat,
+           location_lng,
+           total_amount,
+           hourly_rate
+         )
+         VALUES ($1, $2, $3, $4, $5, 'confirmed', $6, $7, $8, $9, $10)`,
         [
-          participantRes.rows[0].id,
+          participant.id,
           workerRes.rows[0].id,
           shift.service_type,
           shift.start_time,
           shift.end_time,
-          shift.location,
+          bookingAddress,
+          bookingLat,
+          bookingLng,
           totalAmount,
           shift.hourly_rate,
         ]

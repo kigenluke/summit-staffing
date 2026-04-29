@@ -2,7 +2,7 @@
  * Summit Staffing – Bookings Screen
  */
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, FlatList, Pressable, RefreshControl, ActivityIndicator, Alert, Platform } from 'react-native';
+import { View, Text, FlatList, Pressable, RefreshControl, ActivityIndicator, Alert, Modal } from 'react-native';
 import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
@@ -23,6 +23,7 @@ export function BookingsScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState('all');
+  const [deleteConfirmBookingId, setDeleteConfirmBookingId] = useState(null);
   const isWorker = user?.role === 'worker';
 
   const loadBookings = useCallback(async () => {
@@ -44,11 +45,34 @@ export function BookingsScreen({ navigation }) {
     setRefreshing(false);
   }, [loadBookings]);
 
-  const renderBooking = ({ item: b }) => (
-    <Pressable
-      onPress={() => navigation.navigate('BookingDetail', { bookingId: b.id })}
-      style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.sm, ...Shadows.md }}
-    >
+  const deleteOldShift = useCallback(async (bookingId) => {
+    const { error } = await api.put(`/api/bookings/${bookingId}/cancel`);
+    if (error) {
+      Alert.alert('Error', error.message || 'Failed to delete old shift');
+      return;
+    }
+    Alert.alert('Deleted', 'Old shift deleted successfully.');
+    loadBookings();
+  }, [loadBookings]);
+
+  const openDeleteConfirm = useCallback((bookingId) => {
+    setDeleteConfirmBookingId(bookingId);
+  }, []);
+
+  const closeDeleteConfirm = useCallback(() => {
+    setDeleteConfirmBookingId(null);
+  }, []);
+
+  const renderBooking = ({ item: b }) => {
+    const isPastPendingOrConfirmed = (b.status === 'pending' || b.status === 'confirmed')
+      && b.end_time
+      && (new Date(b.end_time).getTime() < Date.now());
+
+    return (
+      <Pressable
+        onPress={() => navigation.navigate('BookingDetail', { bookingId: b.id })}
+        style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.sm, ...Shadows.md }}
+      >
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
         <View style={{ flex: 1 }}>
           <Text style={{ fontSize: Typography.fontSize.base, fontWeight: Typography.fontWeight.semibold, color: Colors.text.primary }}>
@@ -67,8 +91,34 @@ export function BookingsScreen({ navigation }) {
           </Text>
         </View>
       </View>
-    </Pressable>
-  );
+
+      {isPastPendingOrConfirmed && (
+          <Pressable
+            onPress={(e) => {
+              if (e?.stopPropagation) e.stopPropagation();
+              openDeleteConfirm(b.id);
+            }}
+            style={({ pressed }) => ({
+              marginTop: Spacing.xs,
+              backgroundColor: Colors.status.error,
+              borderRadius: Radius.md,
+              paddingVertical: 6,
+              paddingHorizontal: 10,
+              minHeight: 28,
+              alignSelf: 'flex-start',
+              minWidth: 120,
+              alignItems: 'center',
+              opacity: pressed ? 0.85 : 1,
+            })}
+          >
+            <Text style={{ color: Colors.text.white, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.bold }}>
+              Delete Old Shift
+            </Text>
+          </Pressable>
+      )}
+      </Pressable>
+    );
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
@@ -122,6 +172,55 @@ export function BookingsScreen({ navigation }) {
           }
         />
       )}
+
+      <Modal
+        visible={!!deleteConfirmBookingId}
+        transparent
+        animationType="fade"
+        onRequestClose={closeDeleteConfirm}
+      >
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'center', padding: Spacing.lg }}>
+          <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.md }}>
+            <Text style={{ color: Colors.text.primary, fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, marginBottom: Spacing.xs }}>
+              Delete old shift
+            </Text>
+            <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, marginBottom: Spacing.md }}>
+              Are you sure you want to delete this old shift?
+            </Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
+              <Pressable
+                onPress={closeDeleteConfirm}
+                style={({ pressed }) => ({
+                  paddingVertical: Spacing.xs,
+                  paddingHorizontal: Spacing.md,
+                  borderRadius: Radius.md,
+                  backgroundColor: Colors.surfaceSecondary,
+                  marginRight: Spacing.xs,
+                  opacity: pressed ? 0.85 : 1,
+                })}
+              >
+                <Text style={{ color: Colors.text.secondary, fontWeight: Typography.fontWeight.semibold }}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={async () => {
+                  const id = deleteConfirmBookingId;
+                  closeDeleteConfirm();
+                  if (id) await deleteOldShift(id);
+                }}
+                style={({ pressed }) => ({
+                  paddingVertical: Spacing.xs,
+                  paddingHorizontal: Spacing.md,
+                  borderRadius: Radius.md,
+                  backgroundColor: Colors.status.error,
+                  opacity: pressed ? 0.85 : 1,
+                })}
+              >
+                <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Delete</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }

@@ -182,6 +182,7 @@ CREATE TABLE IF NOT EXISTS workers (
   latitude NUMERIC(9,6),
   longitude NUMERIC(9,6),
   hourly_rate NUMERIC(10,2),
+  weekly_earnings_goal NUMERIC(10,2),
   monthly_earnings_target NUMERIC(10,2),
   max_travel_km NUMERIC(6,2),
   bio TEXT,
@@ -195,6 +196,7 @@ CREATE TABLE IF NOT EXISTS workers (
   CONSTRAINT workers_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   CONSTRAINT workers_abn_digits_chk CHECK (abn ~ '^[0-9]{11}$'),
   CONSTRAINT workers_hourly_rate_nonneg_chk CHECK (hourly_rate IS NULL OR hourly_rate >= 0),
+  CONSTRAINT workers_weekly_earnings_goal_nonneg_chk CHECK (weekly_earnings_goal IS NULL OR weekly_earnings_goal >= 0),
   CONSTRAINT workers_monthly_earnings_target_nonneg_chk CHECK (monthly_earnings_target IS NULL OR monthly_earnings_target >= 0),
   CONSTRAINT workers_max_travel_km_nonneg_chk CHECK (max_travel_km IS NULL OR max_travel_km >= 0),
   CONSTRAINT workers_latitude_range_chk CHECK (latitude IS NULL OR (latitude >= -90 AND latitude <= 90)),
@@ -240,6 +242,12 @@ END $$;
 
 DO $$
 BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'workers' AND column_name = 'weekly_earnings_goal'
+  ) THEN
+    ALTER TABLE workers ADD COLUMN weekly_earnings_goal NUMERIC(10,2);
+  END IF;
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns
     WHERE table_name = 'workers' AND column_name = 'monthly_earnings_target'
@@ -641,5 +649,40 @@ CREATE TABLE IF NOT EXISTS notifications (
 
 CREATE INDEX IF NOT EXISTS notifications_user_read_idx ON notifications (user_id, read);
 CREATE INDEX IF NOT EXISTS notifications_user_created_idx ON notifications (user_id, created_at DESC);
+
+-- ============================================================
+-- Worker Incidents & Complaints
+-- ============================================================
+CREATE TABLE IF NOT EXISTS worker_incidents (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  worker_id UUID NOT NULL,
+  incident_name TEXT NOT NULL,
+  incident_details TEXT,
+  image_urls TEXT[] DEFAULT '{}'::text[],
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT worker_incidents_worker_fk FOREIGN KEY (worker_id) REFERENCES workers(id) ON DELETE CASCADE
+);
+
+-- Triage / IMS fields (added for 2026 audit-ready incident handling)
+ALTER TABLE worker_incidents ADD COLUMN IF NOT EXISTS triage_category TEXT;
+ALTER TABLE worker_incidents ADD COLUMN IF NOT EXISTS called_000 BOOLEAN DEFAULT FALSE;
+ALTER TABLE worker_incidents ADD COLUMN IF NOT EXISTS is_reportable BOOLEAN DEFAULT FALSE;
+ALTER TABLE worker_incidents ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'normal';
+ALTER TABLE worker_incidents ADD COLUMN IF NOT EXISTS incident_status TEXT DEFAULT 'received';
+ALTER TABLE worker_incidents ADD COLUMN IF NOT EXISTS admin_handover_at TIMESTAMPTZ;
+
+CREATE INDEX IF NOT EXISTS worker_incidents_worker_id_idx ON worker_incidents (worker_id);
+CREATE INDEX IF NOT EXISTS worker_incidents_created_at_idx ON worker_incidents (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS worker_complaints (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  worker_id UUID NOT NULL,
+  complaint_details TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT worker_complaints_worker_fk FOREIGN KEY (worker_id) REFERENCES workers(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS worker_complaints_worker_id_idx ON worker_complaints (worker_id);
+CREATE INDEX IF NOT EXISTS worker_complaints_created_at_idx ON worker_complaints (created_at DESC);
 
 COMMIT;

@@ -88,10 +88,14 @@ export default defineConfig(({ mode }) => {
     ...loadEnv(mode, __dirname, 'VITE_'),
     ...loadEnv(mode, __dirname, 'GOOGLE_'),
   };
+  const DEFAULT_API_TARGET =
+    mode === 'development'
+      ? 'http://localhost:3000'
+      : 'https://athletic-heart-backend-production.up.railway.app';
   const RAILWAY_API_TARGET =
     env.VITE_PROXY_TARGET ||
     process.env.VITE_PROXY_TARGET ||
-    'https://athletic-heart-backend-production.up.railway.app';
+    DEFAULT_API_TARGET;
 
   return {
     root: '.',

@@ -49,6 +49,28 @@ router.get(
 
 router.get('/me', [auth, checkWorker], workerController.getMe);
 
+// Update current worker (no workerId needed)
+router.put(
+  '/me',
+  [
+    auth,
+    checkWorker,
+    body('first_name').optional({ nullable: true }).isString(),
+    body('last_name').optional({ nullable: true }).isString(),
+    body('phone').optional({ nullable: true }).isString(),
+    body('address').optional({ nullable: true }).isString(),
+    body('latitude').optional({ nullable: true }).isFloat({ min: -90, max: 90 }).toFloat(),
+    body('longitude').optional({ nullable: true }).isFloat({ min: -180, max: 180 }).toFloat(),
+    body('hourly_rate').optional({ nullable: true }).isFloat({ min: 0 }).toFloat(),
+    body('weekly_earnings_goal').optional({ nullable: true }).isFloat({ min: 0 }).toFloat(),
+    body('monthly_earnings_target').optional({ nullable: true }).isFloat({ min: 0 }).toFloat(),
+    body('max_travel_km').optional({ nullable: true }).isFloat({ min: 0, max: 500 }).toFloat(),
+    body('bio').optional({ nullable: true }).isString(),
+    body('profile_image_url').optional({ nullable: true }).isString()
+  ],
+  workerController.updateMe
+);
+
 router.post(
   '/setup',
   [auth, checkWorker, body('first_name').optional({ nullable: true }).isString(), body('last_name').optional({ nullable: true }).isString(), body('abn').optional({ nullable: true }).isString()],
@@ -70,6 +92,7 @@ router.put(
     body('latitude').optional({ nullable: true }).isFloat({ min: -90, max: 90 }).toFloat(),
     body('longitude').optional({ nullable: true }).isFloat({ min: -180, max: 180 }).toFloat(),
     body('hourly_rate').optional({ nullable: true }).isFloat({ min: 0 }).toFloat(),
+    body('weekly_earnings_goal').optional({ nullable: true }).isFloat({ min: 0 }).toFloat(),
     body('monthly_earnings_target').optional({ nullable: true }).isFloat({ min: 0 }).toFloat(),
     body('max_travel_km').optional({ nullable: true }).isFloat({ min: 0, max: 500 }).toFloat(),
     body('bio').optional({ nullable: true }).isString(),

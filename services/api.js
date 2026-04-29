@@ -7,16 +7,23 @@ import { Platform } from 'react-native';
 import { getState, logout } from '../store/authStore.js';
 
 function resolveBaseURL() {
-  // Vite dev (npm run web): always use same-origin /api so Vite proxy handles CORS.
-  try {
-    const isViteDev = eval("typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV");
-    if (isViteDev) return '';
-  } catch (_) {}
+  // Web dev: prefer same-origin /api so Vite proxy handles CORS.
+  // Avoid eval() because some environments block it.
+  if (Platform.OS === 'web') {
+    try {
+      const host = typeof window !== 'undefined' ? window.location.hostname : '';
+      if (host === 'localhost' || host === '127.0.0.1') return '';
+    } catch (_) {}
+  }
 
   // Vite web builds
   try {
-    const viteURL = eval("typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL");
-    if (viteURL) return viteURL;
+    // import.meta is safe in Vite builds; if absent, this throws and we fall back.
+    // eslint-disable-next-line no-undef
+    if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) {
+      // eslint-disable-next-line no-undef
+      return import.meta.env.VITE_API_URL;
+    }
   } catch (_) {}
 
   // Expo / React Native env
@@ -67,12 +74,21 @@ export async function request(method, path, body = null, options = {}) {
   const url = path.startsWith('http') ? path : `${ApiConfig.baseURL.replace(/\/$/, '')}${path}`;;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), ApiConfig.timeout);
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
 
   try {
     const res = await fetch(url, {
       method,
-      headers: getHeaders(options.headers),
-      body: body != null ? JSON.stringify(body) : undefined,
+      headers: (() => {
+        const h = getHeaders(options.headers);
+        // For multipart uploads, browser/React Native sets boundary automatically.
+        if (isFormData) {
+          delete h['Content-Type'];
+          delete h['content-type'];
+        }
+        return h;
+      })(),
+      body: body != null ? (isFormData ? body : JSON.stringify(body)) : undefined,
       signal: controller.signal,
       ...options,
     });

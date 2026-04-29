@@ -336,8 +336,8 @@ const generatePDF = async (req, res) => {
     const serviceDateTime = `${new Date(row.start_time).toLocaleString()} - ${new Date(row.end_time).toLocaleString()}`;
 
     const totalAmount = Number(row.total || 0);
-    const workerAmount = Number((totalAmount * 0.9).toFixed(2));
-    const platformFee = Number((totalAmount * 0.1).toFixed(2));
+    const workerAmount = Number((totalAmount * 0.85).toFixed(2));
+    const platformFee = Number((totalAmount * 0.15).toFixed(2));
 
     const pdf = await generateInvoicePDF({
       invoice_number: row.invoice_number,
@@ -414,8 +414,8 @@ const sendInvoiceEmailHandler = async (req, res) => {
 
     if (!pdfBuffer) {
       const totalAmount2 = Number(row.total || 0);
-      const workerAmount2 = Number((totalAmount2 * 0.9).toFixed(2));
-      const platformFee2 = Number((totalAmount2 * 0.1).toFixed(2));
+      const workerAmount2 = Number((totalAmount2 * 0.85).toFixed(2));
+      const platformFee2 = Number((totalAmount2 * 0.15).toFixed(2));
 
       const pdf = await generateInvoicePDF({
         invoice_number: row.invoice_number,

@@ -2,7 +2,7 @@
  * Summit Staffing – Booking Detail Screen
  * Shows full booking info, clock in/out (worker), leave review (participant), invoice/payment
  */
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, Text, ScrollView, Pressable, Alert, TextInput, ActivityIndicator, Platform, Linking } from 'react-native';
 import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
@@ -14,6 +14,17 @@ const STATUS_COLORS = {
   in_progress: Colors.primary,
   completed: Colors.primaryDark,
   cancelled: Colors.status.error,
+};
+
+const distanceMeters = (lat1, lon1, lat2, lon2) => {
+  const toRad = (deg) => (Number(deg) * Math.PI) / 180;
+  const R = 6371000;
+  const dLat = toRad(Number(lat2) - Number(lat1));
+  const dLon = toRad(Number(lon2) - Number(lon1));
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
 };
 
 const InfoRow = ({ label, value, icon }) => (
@@ -44,6 +55,12 @@ export function BookingDetailScreen({ route, navigation }) {
   const [incidentDetails, setIncidentDetails] = useState('');
   const [submittingReview, setSubmittingReview] = useState(false);
   const [showReview, setShowReview] = useState(false);
+  const [geoStatus, setGeoStatus] = useState('');
+  const [currentGps, setCurrentGps] = useState(null);
+
+  const autoClockOutIntervalRef = useRef(null);
+  const clockInBusyRef = useRef(false);
+  const clockOutBusyRef = useRef(false);
 
   const loadBooking = useCallback(async () => {
     try {
@@ -98,27 +115,186 @@ export function BookingDetailScreen({ route, navigation }) {
     ]);
   };
 
+  const getCurrentGps = useCallback(async () => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation?.getCurrentPosition) {
+      throw new Error('Geolocation is not available. Please enable location permissions.');
+    }
+
+    return await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const lat = pos?.coords?.latitude;
+          const lng = pos?.coords?.longitude;
+          if (typeof lat !== 'number' || typeof lng !== 'number') {
+            reject(new Error('Could not read GPS coordinates.'));
+            return;
+          }
+          resolve({ lat, lng });
+        },
+        (err) => reject(err || new Error('Could not fetch GPS location.')),
+        {
+          enableHighAccuracy: true,
+          timeout: 15000,
+          maximumAge: 8000,
+        },
+      );
+    });
+  }, []);
+
+  const tryClockIn = useCallback(
+    async (mode) => {
+      if (clockInBusyRef.current) return;
+      if (!bookingId) return;
+      if (clockInBusyRef.current) return;
+
+      clockInBusyRef.current = true;
+      try {
+        const { lat, lng } = await getCurrentGps();
+        const { error } = await api.post(`/api/bookings/${bookingId}/clock-in`, { lat, lng });
+        if (error) {
+          if (mode !== 'auto') Alert.alert('Error', error.message);
+          else setGeoStatus(error.message);
+          return;
+        }
+
+        setGeoStatus('');
+        if (mode === 'manual') Alert.alert('Success', 'Clocked in!');
+        loadBooking();
+      } catch (e) {
+        if (mode !== 'auto') Alert.alert('Error', e?.message || 'Failed to clock in');
+        else setGeoStatus(e?.message || 'Waiting for GPS…');
+      } finally {
+        clockInBusyRef.current = false;
+      }
+    },
+    [bookingId, getCurrentGps, loadBooking],
+  );
+
+  const tryClockOut = useCallback(
+    async (mode) => {
+      if (clockOutBusyRef.current) return;
+      if (!bookingId) return;
+
+      clockOutBusyRef.current = true;
+      try {
+        const { lat, lng } = await getCurrentGps();
+        const useScheduledEndTime = mode === 'auto';
+        const { error } = await api.post(`/api/bookings/${bookingId}/clock-out`, {
+          lat,
+          lng,
+          useScheduledEndTime,
+          mode,
+        });
+
+        if (error) {
+          if (mode !== 'auto') Alert.alert('Error', error.message);
+          else setGeoStatus(error.message);
+          return;
+        }
+
+        setGeoStatus('');
+        if (mode === 'manual') Alert.alert('Success', 'Clocked out!');
+        loadBooking();
+      } catch (e) {
+        if (mode !== 'auto') Alert.alert('Error', e?.message || 'Failed to clock out');
+        else setGeoStatus(e?.message || 'Waiting for GPS…');
+      } finally {
+        clockOutBusyRef.current = false;
+      }
+    },
+    [bookingId, getCurrentGps, loadBooking],
+  );
+
   const handleClockIn = () => {
+    if (!canManualClockIn) {
+      Alert.alert('Clock In unavailable', clockInDisabledReason || 'Clock-in is not available yet.');
+      return;
+    }
     Alert.alert('Clock In', 'Clock in to this booking?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Clock In', onPress: async () => {
-        const { error } = await api.post(`/api/bookings/${bookingId}/clock-in`, { lat: -33.8688, lng: 151.2093 });
-        if (error) Alert.alert('Error', error.message);
-        else { Alert.alert('Success', 'Clocked in!'); loadBooking(); }
-      }},
+      {
+        text: 'Clock In',
+        onPress: async () => {
+          await tryClockIn('manual');
+        },
+      },
     ]);
   };
 
   const handleClockOut = () => {
     Alert.alert('Clock Out', 'Clock out of this booking?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Clock Out', onPress: async () => {
-        const { error } = await api.post(`/api/bookings/${bookingId}/clock-out`, { lat: -33.8688, lng: 151.2093 });
-        if (error) Alert.alert('Error', error.message);
-        else { Alert.alert('Success', 'Clocked out!'); loadBooking(); }
-      }},
+      {
+        text: 'Clock Out',
+        onPress: async () => {
+          await tryClockOut('manual');
+        },
+      },
     ]);
   };
+
+  // Keep refreshing worker GPS while booking is confirmed to decide whether Clock In can be enabled.
+  useEffect(() => {
+    if (!isWorker) return;
+    const shouldTrack = booking?.status === 'confirmed' && !booking?.timesheet?.clock_in_time;
+    if (!shouldTrack) return;
+
+    let alive = true;
+    let timer = null;
+    const tick = async () => {
+      try {
+        const gps = await getCurrentGps();
+        if (alive) setCurrentGps(gps);
+      } catch (_) {
+        if (alive) setCurrentGps(null);
+      }
+    };
+    tick();
+    timer = setInterval(tick, 15000);
+
+    return () => {
+      alive = false;
+      if (timer) clearInterval(timer);
+    };
+  }, [isWorker, booking?.status, booking?.timesheet?.clock_in_time, getCurrentGps]);
+
+  // Auto clock-out: when end_time is reached, clock out automatically (GPS validated on server).
+  useEffect(() => {
+    if (!isWorker) return;
+
+    const shouldAutoOut = booking?.status === 'in_progress' && !booking?.timesheet?.clock_out_time;
+    if (!shouldAutoOut) {
+      if (autoClockOutIntervalRef.current) clearInterval(autoClockOutIntervalRef.current);
+      autoClockOutIntervalRef.current = null;
+      return;
+    }
+
+    if (autoClockOutIntervalRef.current) clearInterval(autoClockOutIntervalRef.current);
+
+    const endMs = booking?.end_time ? new Date(booking.end_time).getTime() : null;
+    setGeoStatus('Auto clock-out will run at the end time…');
+
+    const maxRetryAfterEndMs = 10 * 60 * 1000; // retry up to 10 minutes
+    const tick = async () => {
+      if (!endMs) return;
+      if (Date.now() < endMs) return;
+      if (Date.now() > endMs + maxRetryAfterEndMs) {
+        setGeoStatus('Auto clock-out window ended.');
+        if (autoClockOutIntervalRef.current) clearInterval(autoClockOutIntervalRef.current);
+        autoClockOutIntervalRef.current = null;
+        return;
+      }
+      await tryClockOut('auto');
+    };
+
+    tick();
+    autoClockOutIntervalRef.current = setInterval(tick, 15000);
+
+    return () => {
+      if (autoClockOutIntervalRef.current) clearInterval(autoClockOutIntervalRef.current);
+      autoClockOutIntervalRef.current = null;
+    };
+  }, [isWorker, booking?.status, booking?.timesheet?.clock_out_time, booking?.end_time, tryClockOut]);
 
   const handleReview = async () => {
     if (incidentReported && incidentDetails.trim().length < 5) {
@@ -188,6 +364,41 @@ export function BookingDetailScreen({ route, navigation }) {
   const canMarkComplete = isWorker && b.status === 'in_progress' && !!ts?.clock_out_time;
 
   const isPendingAcceptance = isWorker && (b.status === 'pending' || b.status === 'confirmed');
+  const bookingHasGps = b.location_lat != null && b.location_lng != null;
+  const startMs = b.start_time ? new Date(b.start_time).getTime() : null;
+  const nowMs = Date.now();
+  const isStartTimeReached = startMs != null ? nowMs >= startMs : false;
+  const workerDistanceM = bookingHasGps && currentGps
+    ? distanceMeters(currentGps.lat, currentGps.lng, b.location_lat, b.location_lng)
+    : null;
+  const isWithinClockInRadius = workerDistanceM != null ? workerDistanceM <= 100 : false;
+  const canManualClockIn = isWorker
+    && b.status === 'confirmed'
+    && isStartTimeReached
+    && bookingHasGps
+    && isWithinClockInRadius;
+
+  const clockInDisabledReason = (() => {
+    if (!(isWorker && b.status === 'confirmed')) return '';
+    if (!bookingHasGps) return 'Booking location is not set.';
+    if (!isStartTimeReached) {
+      return `Clock-in will be enabled at ${new Date(b.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`;
+    }
+    if (workerDistanceM == null) return 'Enable location access to clock in.';
+    if (!isWithinClockInRadius) return `You must be within 100m to clock in. Current distance: ${Math.round(workerDistanceM)}m.`;
+    return '';
+  })();
+  const statusMessage = (isWorker && b.status === 'confirmed')
+    ? clockInDisabledReason
+    : geoStatus;
+  const canWorkerCancelPast = isWorker
+    && (b.status === 'pending' || b.status === 'confirmed')
+    && b.end_time
+    && (new Date(b.end_time).getTime() < nowMs);
+  const canParticipantCancelPast = !isWorker
+    && (b.status === 'pending' || b.status === 'confirmed')
+    && b.end_time
+    && (new Date(b.end_time).getTime() < nowMs);
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: Colors.background }} contentContainerStyle={{ padding: Spacing.lg, paddingBottom: Spacing.xxl }}>
@@ -199,6 +410,14 @@ export function BookingDetailScreen({ route, navigation }) {
           </Text>
         </View>
       </View>
+
+      {!!statusMessage && (
+        <View style={{ marginBottom: Spacing.md, paddingHorizontal: Spacing.lg }}>
+          <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.medium }}>
+            {statusMessage}
+          </Text>
+        </View>
+      )}
 
       {/* Booking Details */}
       <Section title=" Booking Details">
@@ -239,9 +458,27 @@ export function BookingDetailScreen({ route, navigation }) {
       )}
 
       {isWorker && b.status === 'confirmed' && (
-        <Pressable onPress={handleClockIn} style={({ pressed }) => ({ backgroundColor: Colors.status.success, paddingVertical: Spacing.md, borderRadius: Radius.md, alignItems: 'center', marginBottom: Spacing.md, opacity: pressed ? 0.8 : 1 })}>
-          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold, fontSize: Typography.fontSize.lg }}> Clock In</Text>
-        </Pressable>
+        <>
+          <Pressable
+            onPress={handleClockIn}
+            disabled={!canManualClockIn}
+            style={({ pressed }) => ({
+              backgroundColor: canManualClockIn ? Colors.status.success : Colors.text.muted,
+              paddingVertical: Spacing.md,
+              borderRadius: Radius.md,
+              alignItems: 'center',
+              marginBottom: Spacing.xs,
+              opacity: pressed ? 0.8 : 1,
+            })}
+          >
+            <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold, fontSize: Typography.fontSize.lg }}> Clock In</Text>
+          </Pressable>
+          {workerDistanceM != null && (
+            <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs, marginBottom: Spacing.md, textAlign: 'center' }}>
+              Distance to booking: {Math.round(workerDistanceM)}m
+            </Text>
+          )}
+        </>
       )}
 
       {isWorker && b.status === 'in_progress' && (
@@ -256,9 +493,25 @@ export function BookingDetailScreen({ route, navigation }) {
         </Pressable>
       )}
 
-      {(b.status === 'pending' || b.status === 'confirmed') && !isWorker && (
+      {canParticipantCancelPast && (
         <Pressable onPress={() => handleAction('cancel')} style={({ pressed }) => ({ backgroundColor: Colors.status.error, paddingVertical: Spacing.md, borderRadius: Radius.md, alignItems: 'center', marginBottom: Spacing.md, opacity: pressed ? 0.8 : 1 })}>
-          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Cancel Booking</Text>
+          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Delete Old Shift</Text>
+        </Pressable>
+      )}
+
+      {canWorkerCancelPast && (
+        <Pressable
+          onPress={() => handleAction('cancel')}
+          style={({ pressed }) => ({
+            backgroundColor: Colors.status.error,
+            paddingVertical: Spacing.md,
+            borderRadius: Radius.md,
+            alignItems: 'center',
+            marginBottom: Spacing.md,
+            opacity: pressed ? 0.8 : 1,
+          })}
+        >
+          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Delete Old Shift</Text>
         </Pressable>
       )}
 

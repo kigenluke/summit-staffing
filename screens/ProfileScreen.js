@@ -2,8 +2,8 @@
  * Summit Staffing – Profile Screen (Redesigned)
  * Sidebar-style menu layout with profile header, menu sections, and sign out.
  */
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, ScrollView, Pressable, Alert, RefreshControl, ActivityIndicator, Platform, Image } from 'react-native';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { View, Text, ScrollView, Pressable, Alert, RefreshControl, ActivityIndicator, Platform, Image, Modal } from 'react-native';
 import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
@@ -65,6 +65,19 @@ export function ProfileScreen({ navigation }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [profileImage, setProfileImage] = useState(null);
   const [deletingAccount, setDeletingAccount] = useState(false);
+  const [incidentMenuOpen, setIncidentMenuOpen] = useState(false);
+  const [confirmModal, setConfirmModal] = useState({ visible: false, title: '', message: '', confirmText: 'Confirm', destructive: false });
+  const confirmActionRef = useRef(null);
+
+  const openConfirm = useCallback(({ title, message, confirmText = 'Confirm', destructive = false, onConfirm }) => {
+    confirmActionRef.current = typeof onConfirm === 'function' ? onConfirm : null;
+    setConfirmModal({ visible: true, title, message, confirmText, destructive });
+  }, []);
+
+  const closeConfirm = useCallback(() => {
+    confirmActionRef.current = null;
+    setConfirmModal((p) => ({ ...p, visible: false }));
+  }, []);
 
   const safeNavigate = useCallback((routeName) => {
     try {
@@ -140,9 +153,13 @@ export function ProfileScreen({ navigation }) {
 
   const handleSignOut = () => {
     if (Platform.OS === 'web') {
-      if (typeof window !== 'undefined' && window.confirm('Are you sure you want to sign out?')) {
-        logout();
-      }
+      openConfirm({
+        title: 'Sign Out',
+        message: 'Are you sure you want to sign out?',
+        confirmText: 'Sign Out',
+        destructive: true,
+        onConfirm: logout,
+      });
     } else {
       Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
         { text: 'Cancel', style: 'cancel' },
@@ -174,11 +191,21 @@ export function ProfileScreen({ navigation }) {
     const title = 'Delete Account';
     const message = 'This permanently deletes your account and associated data. This action cannot be undone.';
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      const firstConfirm = window.confirm(`${title}\n\n${message}`);
-      if (!firstConfirm) return;
-      const secondConfirm = window.confirm('Final confirmation: delete account permanently?');
-      if (!secondConfirm) return;
-      deleteAccountNow();
+      openConfirm({
+        title,
+        message,
+        confirmText: 'Continue',
+        destructive: true,
+        onConfirm: () => {
+          openConfirm({
+            title: 'Final confirmation',
+            message: 'Delete account permanently? This cannot be undone.',
+            confirmText: 'Delete Permanently',
+            destructive: true,
+            onConfirm: deleteAccountNow,
+          });
+        },
+      });
       return;
     }
     Alert.alert(title, message, [
@@ -213,11 +240,12 @@ export function ProfileScreen({ navigation }) {
   }
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: Colors.background }}
-      contentContainerStyle={{ padding: Spacing.lg, paddingBottom: Spacing.xxl }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
-    >
+    <>
+      <ScrollView
+        style={{ flex: 1, backgroundColor: Colors.background }}
+        contentContainerStyle={{ padding: Spacing.lg, paddingBottom: Spacing.xxl }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
+      >
       {/* Profile Header Card */}
       <View style={{
         backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg,
@@ -262,9 +290,26 @@ export function ProfileScreen({ navigation }) {
 
       {/* Sections with 2 items each; Edit Profile + Payment Details together for participants */}
       <MenuSection>
-        <MenuItem label="Notifications" badge={unreadCount} disabled={restricted} onPress={() => safeNavigate('Notifications')} />
+        <MenuItem label="Notifications" badge={unreadCount} disabled={false} onPress={() => safeNavigate('Notifications')} />
         <MenuItem label="Inbox" disabled={restricted} onPress={() => safeNavigate('Messages')} />
       </MenuSection>
+
+      {isWorker && (
+        <MenuSection>
+          <MenuItem
+            label="Incident & Complain reports"
+            disabled={false}
+            onPress={() => setIncidentMenuOpen((p) => !p)}
+          />
+
+          {incidentMenuOpen && (
+            <View style={{ paddingLeft: Spacing.md }}>
+              <MenuItem label="Report an Incident" onPress={() => safeNavigate('AddIncident')} />
+              <MenuItem label="Add Complain" onPress={() => safeNavigate('AddComplaint')} />
+            </View>
+          )}
+        </MenuSection>
+      )}
 
       <MenuSection>
         <MenuItem label="Edit Profile" onPress={() => safeNavigate('EditProfile')} />
@@ -292,7 +337,7 @@ export function ProfileScreen({ navigation }) {
 
       {isWorker && (
         <MenuSection>
-          <MenuItem label="Manage Worker Profile" disabled={restricted} onPress={() => safeNavigate('WorkerManage')} />
+          <MenuItem label="Manage Worker Profile" disabled={false} onPress={() => safeNavigate('WorkerManage')} />
           <MenuItem label="Invoices" disabled={restricted} onPress={() => safeNavigate('Invoices')} />
         </MenuSection>
       )}
@@ -390,6 +435,61 @@ export function ProfileScreen({ navigation }) {
           Deleting your account permanently removes your profile, bookings, and related data.
         </Text>
       </View>
-    </ScrollView>
+      </ScrollView>
+
+      {/* Web-only confirm modal (avoid browser confirm/alert) */}
+      {Platform.OS === 'web' && (
+        <Modal visible={confirmModal.visible} transparent animationType="fade" onRequestClose={closeConfirm}>
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', padding: Spacing.lg }}>
+            <View style={{ width: '100%', maxWidth: 520, backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, borderWidth: 1, borderColor: Colors.border, ...Shadows.sm }}>
+              <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>
+                {confirmModal.title || 'Confirm'}
+              </Text>
+              <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: Spacing.sm, whiteSpace: 'pre-wrap' }}>
+                {confirmModal.message || ''}
+              </Text>
+
+              <View style={{ flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.md }}>
+                <Pressable
+                  onPress={closeConfirm}
+                  style={({ pressed }) => ({
+                    flex: 1,
+                    backgroundColor: Colors.surfaceSecondary,
+                    borderWidth: 1,
+                    borderColor: Colors.border,
+                    borderRadius: Radius.md,
+                    paddingVertical: Spacing.sm,
+                    alignItems: 'center',
+                    opacity: pressed ? 0.85 : 1,
+                  })}
+                >
+                  <Text style={{ color: Colors.text.secondary, fontWeight: Typography.fontWeight.semibold }}>Cancel</Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={() => {
+                    const fn = confirmActionRef.current;
+                    closeConfirm();
+                    try { fn?.(); } catch (_) {}
+                  }}
+                  style={({ pressed }) => ({
+                    flex: 1,
+                    backgroundColor: confirmModal.destructive ? Colors.status.error : Colors.primary,
+                    borderRadius: Radius.md,
+                    paddingVertical: Spacing.sm,
+                    alignItems: 'center',
+                    opacity: pressed ? 0.85 : 1,
+                  })}
+                >
+                  <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>
+                    {confirmModal.confirmText || 'Confirm'}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+    </>
   );
 }

@@ -110,7 +110,7 @@ const createBooking = async (req, res) => {
     const end = new Date(end_time);
     const scheduledHours = hoursBetween(start, end);
     const totalAmount = Number((rate * scheduledHours).toFixed(2));
-    const commissionAmount = Number((totalAmount * 0.1).toFixed(2));
+    const commissionAmount = Number((totalAmount * 0.15).toFixed(2));
 
     const bookingRes = await pool.query(
       `INSERT INTO bookings (
@@ -411,7 +411,10 @@ const cancelBooking = async (req, res) => {
       await client.query('BEGIN');
 
       const bookingRes = await client.query(
-        `SELECT b.*, p.user_id AS participant_user_id, w.user_id AS worker_user_id
+        `SELECT b.*,
+                p.user_id AS participant_user_id,
+                w.user_id AS worker_user_id,
+                (b.end_time < now()) AS is_past_shift
          FROM bookings b
          JOIN participants p ON p.id = b.participant_id
          JOIN workers w ON w.id = b.worker_id
@@ -430,6 +433,16 @@ const cancelBooking = async (req, res) => {
       if (!canCancel) {
         await client.query('ROLLBACK');
         return res.status(403).json({ ok: false, error: 'Forbidden' });
+      }
+
+      const isWorkerUser = req.user.userId === booking.worker_user_id;
+      const isParticipantUser = req.user.userId === booking.participant_user_id;
+      if (isWorkerUser || isParticipantUser) {
+        const isPastShift = Boolean(booking.is_past_shift);
+        if (!isPastShift) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ ok: false, error: 'Only past shifts can be deleted' });
+        }
       }
 
       if (booking.status === 'in_progress') {
@@ -493,6 +506,11 @@ const clockIn = async (req, res) => {
         return res.status(400).json({ ok: false, error: 'Invalid booking status transition' });
       }
 
+      const startAt = booking.start_time ? new Date(booking.start_time) : null;
+      const now = new Date();
+      // Guard rail: if an early clock-in request comes in, cap recorded time at shift start.
+      const effectiveClockInTime = (startAt && now < startAt) ? startAt : now;
+
       if (booking.location_lat === null || booking.location_lng === null) {
         await client.query('ROLLBACK');
         return res.status(400).json({ ok: false, error: 'Booking location is not set' });
@@ -513,15 +531,15 @@ const clockIn = async (req, res) => {
       if (timesheetRes.rowCount === 0) {
         await client.query(
           `INSERT INTO booking_timesheets (booking_id, clock_in_time, clock_in_lat, clock_in_lng)
-           VALUES ($1, now(), $2, $3)`,
-          [id, Number(lat), Number(lng)]
+           VALUES ($1, $2, $3, $4)`,
+          [id, effectiveClockInTime, Number(lat), Number(lng)]
         );
       } else {
         await client.query(
           `UPDATE booking_timesheets
-           SET clock_in_time = now(), clock_in_lat = $2, clock_in_lng = $3
+           SET clock_in_time = $2, clock_in_lat = $3, clock_in_lng = $4
            WHERE booking_id = $1`,
-          [id, Number(lat), Number(lng)]
+          [id, effectiveClockInTime, Number(lat), Number(lng)]
         );
       }
 
@@ -552,6 +570,7 @@ const clockOut = async (req, res) => {
 
     const { id } = req.params;
     const { lat, lng } = req.body;
+    const useScheduledEndTime = req.body?.useScheduledEndTime === true || req.body?.mode === 'auto';
 
     const worker = await getWorkerForUser(req.user.userId);
     if (!worker) return res.status(403).json({ ok: false, error: 'Forbidden' });
@@ -608,7 +627,9 @@ const clockOut = async (req, res) => {
       }
 
       const clockInTime = new Date(timesheetRes.rows[0].clock_in_time);
-      const clockOutTime = new Date();
+      const clockOutTime = useScheduledEndTime && booking?.end_time
+        ? new Date(booking.end_time)
+        : new Date();
       const actualHours = Number(hoursBetween(clockInTime, clockOutTime).toFixed(2));
 
       await client.query(
@@ -623,7 +644,7 @@ const clockOut = async (req, res) => {
 
       const rate = Number(booking.hourly_rate ?? booking.worker_hourly_rate ?? 0);
       const totalAmount = Number((rate * actualHours).toFixed(2));
-      const commissionAmount = Number((totalAmount * 0.1).toFixed(2));
+      const commissionAmount = Number((totalAmount * 0.15).toFixed(2));
 
       const updatedBooking = await client.query(
         'UPDATE bookings SET total_amount = $2, commission_amount = $3, updated_at = now() WHERE id = $1 RETURNING *',

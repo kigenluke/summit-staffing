@@ -6,10 +6,12 @@ import {
   View, Text, FlatList, Pressable, RefreshControl, Alert, Modal,
   TextInput, ScrollView, ActivityIndicator, Platform, NativeModules,
 } from 'react-native';
+import * as PlacesPkg from 'react-native-google-places-autocomplete';
 import { useAuthStore } from '../store/authStore.js';
-import { api } from '../services/api.js';
+import { api, ApiConfig } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { SERVICE_TYPES } from '../constants/serviceTypes.js';
+import { NavChevron } from '../components/NavChevron.js';
 let DateTimePicker = null;
 if (Platform.OS !== 'web') {
   try {
@@ -51,6 +53,19 @@ const getServiceColor = (type) => {
   return map[type] || Colors.primary;
 };
 
+function getGooglePlacesBrowserKey() {
+  if (typeof process !== 'undefined' && process.env) {
+    return (
+      process.env.GOOGLE_MAPS_BROWSER_KEY ||
+      process.env.GOOGLE_MAPS_API_KEY ||
+      process.env.EXPO_PUBLIC_GOOGLE_MAPS_BROWSER_KEY ||
+      process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
+      ''
+    );
+  }
+  return '';
+}
+
 // ── Mini Calendar Component ────────────────────────────────────────────────────
 function MiniCalendar({ selectedDate, onSelect }) {
   const today = new Date();
@@ -83,13 +98,13 @@ function MiniCalendar({ selectedDate, onSelect }) {
     <View style={{ backgroundColor: Colors.surfaceSecondary, borderRadius: Radius.md, padding: Spacing.md, marginBottom: Spacing.md }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.sm }}>
         <Pressable onPress={goBack} disabled={!canGoBack} style={{ padding: Spacing.sm, opacity: canGoBack ? 1 : 0.3 }}>
-          <Text style={{ fontSize: 18, color: Colors.primary, fontWeight: '700' }}>{'<'}</Text>
+          <NavChevron direction="left" color={Colors.primary} size={18} />
         </Pressable>
         <Text style={{ fontSize: Typography.fontSize.base, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>
           {monthNames[viewMonth]} {viewYear}
         </Text>
         <Pressable onPress={goForward} style={{ padding: Spacing.sm }}>
-          <Text style={{ fontSize: 18, color: Colors.primary, fontWeight: '700' }}>{'>'}</Text>
+          <NavChevron direction="right" color={Colors.primary} size={18} />
         </Pressable>
       </View>
       <View style={{ flexDirection: 'row' }}>
@@ -188,9 +203,13 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
   const [endTime, setEndTime] = useState('');
   const [commonShiftPreset, setCommonShiftPreset] = useState('');
   const [location, setLocation] = useState('');
+  const [locationLat, setLocationLat] = useState(null);
+  const [locationLng, setLocationLng] = useState(null);
+  const [locationFocused, setLocationFocused] = useState(false);
   const [description, setDescription] = useState('');
   const [saving, setSaving] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
+  const [participantProfileId, setParticipantProfileId] = useState(null);
 
   const [workersCount, setWorkersCount] = useState('1');
   const [sameShift, setSameShift] = useState(true);
@@ -215,9 +234,39 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
   const [paidBreak, setPaidBreak] = useState(false);
   const [breakPay, setBreakPay] = useState('');
 
+  const placesRef = useRef(null);
+  const PlacesAutocompleteComponent = (
+    PlacesPkg?.GooglePlacesAutocomplete ||
+    PlacesPkg?.default?.GooglePlacesAutocomplete ||
+    PlacesPkg?.default ||
+    null
+  );
+  const googleKey = getGooglePlacesBrowserKey();
+  const isWeb = Platform.OS === 'web';
+  const placesProxyBaseUrl = isWeb
+    ? (typeof window !== 'undefined' ? window.location.origin : '')
+    : String(ApiConfig?.baseURL || 'https://athletic-heart-backend-production.up.railway.app').replace(/\/$/, '');
+  const canUsePlacesAutocomplete = !!PlacesAutocompleteComponent && !!placesProxyBaseUrl;
+  const placesQueryKey = googleKey || 'places-proxy-key';
+  const placesRequestUrl = canUsePlacesAutocomplete
+    ? { url: `${placesProxyBaseUrl}/__places-proxy`, useOnPlatform: 'all' }
+    : undefined;
+
+  useEffect(() => {
+    if (!visible) return;
+    // Load participant profile id so we can store lat/lng (needed for worker distance filter).
+    (async () => {
+      try {
+        const { data } = await api.get('/api/participants/me');
+        if (data?.ok && data?.participant?.id) setParticipantProfileId(data.participant.id);
+      } catch (_) {}
+    })();
+  }, [visible]);
+
   const reset = () => {
     setTitle(''); setServiceType(''); setHourlyRate(''); setDate('');
     setStartTime(''); setEndTime(''); setLocation(''); setDescription('');
+    setLocationLat(null); setLocationLng(null);
     setCommonShiftPreset('');
     setShowServicePicker(false); setShowCalendar(false);
     setWorkersCount('1');
@@ -494,6 +543,16 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
 
     setSaving(true);
     try {
+      // Best-effort: store participant coords so workers can filter by distance.
+      if (participantProfileId && locationLat != null && locationLng != null) {
+        try {
+          await api.put(`/api/participants/${participantProfileId}`, {
+            address: location,
+            latitude: locationLat,
+            longitude: locationLng,
+          });
+        } catch (_) {}
+      }
       const { error } = await api.post('/api/shifts', {
         title,
         service_type: serviceType,
@@ -617,7 +676,111 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
       {showCalendar && <MiniCalendar selectedDate={date} onSelect={(d) => { setDate(d); setShowCalendar(false); }} />}
 
       <Text style={labelStyle}>Location *</Text>
-      <TextInput style={inputStyle} value={location} onChangeText={setLocation} />
+      {!canUsePlacesAutocomplete ? (
+        <TextInput style={inputStyle} value={location} onChangeText={setLocation} />
+      ) : (
+        <View
+          style={[
+            inputStyle,
+            {
+              paddingVertical: 0,
+              paddingHorizontal: 0,
+              overflow: 'visible',
+              zIndex: 4000,
+              ...(Platform.OS === 'web' ? { position: 'relative', marginBottom: locationFocused ? 8 : 0 } : null),
+            },
+          ]}
+        >
+          <PlacesAutocompleteComponent
+            ref={placesRef}
+            placeholder="Start typing street, suburb, or city"
+            fetchDetails
+            minLength={3}
+            debounce={450}
+            onPress={async (data, details) => {
+              const desc = data?.description || data?.formatted_address || '';
+              setLocation(desc);
+              let lat = details?.geometry?.location?.lat;
+              let lng = details?.geometry?.location?.lng;
+
+              if ((typeof lat !== 'number' || typeof lng !== 'number') && data?.place_id) {
+                try {
+                  const detailsPath = `/api/places/details?place_id=${encodeURIComponent(
+                    data.place_id
+                  )}&language=en`;
+                  const { data: detailsRes } = await api.get(detailsPath);
+                  lat = detailsRes?.result?.geometry?.location?.lat;
+                  lng = detailsRes?.result?.geometry?.location?.lng;
+                } catch (_) {}
+              }
+
+              if (typeof lat === 'number' && typeof lng === 'number') {
+                setLocationLat(lat);
+                setLocationLng(lng);
+              } else {
+                setLocationLat(null);
+                setLocationLng(null);
+              }
+              if (placesRef.current?.blur) placesRef.current.blur();
+            }}
+            query={{
+              key: placesQueryKey,
+              language: 'en',
+            }}
+            requestUrl={placesRequestUrl}
+            styles={{
+              container: { flex: 1 },
+              textInput: {
+                backgroundColor: 'transparent',
+                borderWidth: 0,
+                paddingVertical: Spacing.sm,
+                paddingHorizontal: Spacing.md,
+                fontSize: Typography.fontSize.base,
+                color: Colors.text.primary,
+                marginBottom: 0,
+              },
+              listView: {
+                ...(Platform.OS === 'web'
+                  ? { position: 'relative', top: 0, left: 0, right: 0, marginTop: 0 }
+                  : { position: 'absolute', top: 44, left: 0, right: 0 }),
+                backgroundColor: '#FFFFFF',
+                borderWidth: 1,
+                borderColor: Colors.border,
+                borderRadius: Radius.md,
+                maxHeight: 220,
+                overflow: 'auto',
+                zIndex: 3000,
+                ...Shadows.sm,
+              },
+              row: {
+                padding: Spacing.md,
+                backgroundColor: '#FFFFFF',
+              },
+              description: { color: Colors.text.primary, fontSize: Typography.fontSize.sm },
+              separator: { height: 1, backgroundColor: Colors.borderLight },
+            }}
+            listViewDisplayed={locationFocused ? 'auto' : false}
+            keyboardShouldPersistTaps="handled"
+            isRowScrollable
+            enablePoweredByContainer={false}
+            textInputProps={{
+              value: location,
+              onFocus: () => setLocationFocused(true),
+              onBlur: () => {
+                // Delay so click/tap on a suggestion still works.
+                setTimeout(() => setLocationFocused(false), 120);
+              },
+              onChangeText: (t) => {
+                setLocation(t);
+                setLocationLat(null);
+                setLocationLng(null);
+                if (!locationFocused) setLocationFocused(true);
+              },
+              placeholderTextColor: Colors.text.muted,
+            }}
+          />
+        </View>
+      )}
 
       <Text style={labelStyle}>Description</Text>
       <TextInput style={[inputStyle, { height: 80, textAlignVertical: 'top' }]} value={description} onChangeText={setDescription} multiline />
@@ -1187,6 +1350,13 @@ function ShiftCard({ shift, onApply, isWorker, isParticipant, onOpenApplications
   const breakMinutes = breakMeta ? breakMeta[1] : null;
   const breakIsPaid = breakMeta ? (breakMeta[2] || '').toLowerCase() === 'yes' : false;
   const breakPay = breakMeta && breakMeta[3] ? parseFloat(breakMeta[3]) : 0;
+  const workerAssigned = Boolean(shift?.is_assigned_to_me);
+  const participantName =
+    (shift?.participant_first_name || shift?.participant_last_name)
+      ? `${shift.participant_first_name || ''} ${shift.participant_last_name || ''}`.trim()
+      : (shift?.participant_email ? String(shift.participant_email).split('@')[0] : 'Participant');
+  const shouldShowFullForWorker = workerAssigned;
+  const canWorkerApply = isWorker && shift.status === 'open' && (shift.within_travel_range !== false);
 
   const cardContent = (
     <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.sm, ...Shadows.md }}>
@@ -1205,13 +1375,22 @@ function ShiftCard({ shift, onApply, isWorker, isParticipant, onOpenApplications
         {shift.title}
       </Text>
 
-      <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>
-        {startDate.toLocaleDateString()} • {startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} – {endDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ({hours}h)
-      </Text>
+      {/* Worker: show only key info until selected/assigned */}
+      {isWorker && !shouldShowFullForWorker ? (
+        <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: Spacing.sm }}>
+          {participantName}
+        </Text>
+      ) : (
+        <>
+          <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>
+            {startDate.toLocaleDateString()} • {startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} – {endDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ({hours}h)
+          </Text>
 
-      <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>
-        ${parseFloat(shift.hourly_rate).toFixed(2)}/hr • ~${(parseFloat(shift.hourly_rate) * parseFloat(hours)).toFixed(2)} total
-      </Text>
+          <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>
+            ${parseFloat(shift.hourly_rate).toFixed(2)}/hr • ~${(parseFloat(shift.hourly_rate) * parseFloat(hours)).toFixed(2)} total
+          </Text>
+        </>
+      )}
       {!isWorker && breakMinutes && (
         <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>
           Break: {breakMinutes} min • Paid: {breakIsPaid ? `Yes ($${breakPay.toFixed(2)})` : 'No'}
@@ -1228,16 +1407,34 @@ function ShiftCard({ shift, onApply, isWorker, isParticipant, onOpenApplications
         </Text>
       )}
 
-      {isWorker && (
+      {isWorker && shift.status === 'open' && (
         <Pressable
-          onPress={() => onApply(shift)}
+          onPress={() => {
+            if (!canWorkerApply) return;
+            onApply(shift);
+          }}
+          disabled={!canWorkerApply}
           style={({ pressed }) => ({
-            backgroundColor: Colors.primary, paddingVertical: Spacing.sm, borderRadius: Radius.md,
-            alignItems: 'center', opacity: pressed ? 0.8 : 1,
+            backgroundColor: canWorkerApply ? Colors.primary : Colors.surfaceSecondary,
+            paddingVertical: Spacing.sm,
+            borderRadius: Radius.md,
+            alignItems: 'center',
+            opacity: !canWorkerApply ? 0.6 : (pressed ? 0.8 : 1),
           })}
         >
-          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Apply for Shift</Text>
+          <Text style={{ color: canWorkerApply ? Colors.text.white : Colors.text.secondary, fontWeight: Typography.fontWeight.semibold }}>
+            {canWorkerApply ? 'Apply for Shift' : 'Out of range'}
+          </Text>
         </Pressable>
+      )}
+      {isWorker && workerAssigned && (
+        <View style={{ marginTop: Spacing.xs }}>
+          <View style={{ backgroundColor: `${Colors.status.success}22`, borderRadius: Radius.full, paddingVertical: 6, paddingHorizontal: Spacing.sm, alignSelf: 'flex-start' }}>
+            <Text style={{ color: Colors.status.success, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.semibold }}>
+              Assigned to you
+            </Text>
+          </View>
+        </View>
       )}
       {isParticipant && (
         <Pressable
@@ -1284,6 +1481,24 @@ export function AvailableShiftsScreen({ navigation }) {
   const [applicationsLoading, setApplicationsLoading] = useState(false);
   const [acceptingApplicationId, setAcceptingApplicationId] = useState(null);
   const [workerShiftTypeFilter, setWorkerShiftTypeFilter] = useState('all');
+  const [showAwayShifts, setShowAwayShifts] = useState(false);
+  const [confirmModal, setConfirmModal] = useState({
+    visible: false,
+    title: '',
+    message: '',
+    confirmText: 'Confirm',
+  });
+  const confirmActionRef = useRef(null);
+
+  const openConfirm = useCallback(({ title, message, confirmText = 'Confirm', onConfirm }) => {
+    confirmActionRef.current = typeof onConfirm === 'function' ? onConfirm : null;
+    setConfirmModal({ visible: true, title, message, confirmText });
+  }, []);
+
+  const closeConfirm = useCallback(() => {
+    confirmActionRef.current = null;
+    setConfirmModal((p) => ({ ...p, visible: false }));
+  }, []);
 
   const getShiftTypeForLocalTime = useCallback((isoTime) => {
     const d = new Date(isoTime);
@@ -1310,7 +1525,7 @@ export function AvailableShiftsScreen({ navigation }) {
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           style={{ paddingLeft: 4, paddingVertical: 8, flexDirection: 'row', alignItems: 'center' }}
         >
-          <Text style={{ color: Colors.text.white, fontSize: 17, fontWeight: '600' }}>← Back</Text>
+          <NavChevron direction="left" color={Colors.text.white} size={22} />
         </Pressable>
       ),
       headerRight: isParticipant
@@ -1350,10 +1565,27 @@ export function AvailableShiftsScreen({ navigation }) {
     setLoading(false);
   }, [isWorker, isParticipant, workerShiftTypeFilter]);
 
-  const visibleShifts = useMemo(() => {
-    if (!isWorker || workerShiftTypeFilter === 'all') return shifts;
-    return shifts.filter((s) => getShiftTypeForLocalTime(s.start_time) === workerShiftTypeFilter);
-  }, [shifts, isWorker, workerShiftTypeFilter, getShiftTypeForLocalTime]);
+  const { nearShifts, awayShifts, visibleShifts } = useMemo(() => {
+    if (!isWorker) {
+      const list = workerShiftTypeFilter === 'all'
+        ? shifts
+        : shifts.filter((s) => getShiftTypeForLocalTime(s.start_time) === workerShiftTypeFilter);
+      return { nearShifts: list, awayShifts: [], visibleShifts: list };
+    }
+
+    const travelEnabled = shifts.some((s) => s?.travel_filter_enabled);
+    const base = workerShiftTypeFilter === 'all'
+      ? shifts
+      : shifts.filter((s) => getShiftTypeForLocalTime(s.start_time) === workerShiftTypeFilter);
+
+    if (!travelEnabled) {
+      return { nearShifts: base, awayShifts: [], visibleShifts: base };
+    }
+
+    const near = base.filter((s) => s?.within_travel_range !== false);
+    const away = base.filter((s) => s?.within_travel_range === false);
+    return { nearShifts: near, awayShifts: away, visibleShifts: showAwayShifts ? [...near, ...away] : near };
+  }, [shifts, isWorker, workerShiftTypeFilter, getShiftTypeForLocalTime, showAwayShifts]);
 
   useEffect(() => { loadShifts(); }, [loadShifts]);
 
@@ -1366,7 +1598,12 @@ export function AvailableShiftsScreen({ navigation }) {
   const handleApply = (shift) => {
     const confirmAction = () => applyForShift(shift.id);
     if (Platform.OS === 'web') {
-      if (window.confirm(`Apply for "${shift.title}"?`)) confirmAction();
+      openConfirm({
+        title: 'Apply for shift',
+        message: `Apply for "${shift.title}"?\n\nRate: $${parseFloat(shift.hourly_rate).toFixed(2)}/hr\nTime: ${new Date(shift.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${new Date(shift.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}\nLocation: ${shift.location}`,
+        confirmText: 'Apply',
+        onConfirm: confirmAction,
+      });
     } else {
       Alert.alert(
         'Apply for Shift',
@@ -1379,7 +1616,13 @@ export function AvailableShiftsScreen({ navigation }) {
   const applyForShift = async (shiftId) => {
     const { error } = await api.post(`/api/shifts/${shiftId}/apply`, { message: 'I am interested in this shift.' });
     if (error) Alert.alert('Error', error.message || 'Failed to apply');
-    else { Alert.alert('Applied!', 'Your application has been submitted.'); loadShifts(); }
+    else {
+      Alert.alert(
+        'Application Pending',
+        'Aapki shift booking pending me hai. Employer accept karega to shift aapko assign ho jayegi.'
+      );
+      loadShifts();
+    }
   };
 
   const openApplicants = async (shift) => {
@@ -1416,9 +1659,12 @@ export function AvailableShiftsScreen({ navigation }) {
     };
 
     if (Platform.OS === 'web') {
-      if (typeof window !== 'undefined' && window.confirm(`Select ${application.worker_first_name || application.worker_email || 'this worker'} for "${selectedShift.title}"?`)) {
-        doAccept();
-      }
+      openConfirm({
+        title: 'Select worker',
+        message: `Select ${application.worker_first_name || application.worker_email || 'this worker'} for "${selectedShift.title}"?`,
+        confirmText: 'Select',
+        onConfirm: doAccept,
+      });
       return;
     }
 
@@ -1525,6 +1771,32 @@ export function AvailableShiftsScreen({ navigation }) {
                   View breakdown →
                 </Text>
               </Pressable>
+            )}
+            {isWorker && awayShifts.length > 0 && !showAwayShifts && (
+              <View style={{ marginBottom: Spacing.md, marginTop: Spacing.sm, padding: Spacing.md, borderRadius: Radius.lg, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border }}>
+                <Text style={{ color: Colors.text.primary, fontWeight: Typography.fontWeight.semibold, marginBottom: 4 }}>
+                  Some shifts are away from you
+                </Text>
+                <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm }}>
+                  {awayShifts.length} shift(s) are outside your travel distance. You can view them, but you can’t apply.
+                </Text>
+                <Pressable
+                  onPress={() => setShowAwayShifts(true)}
+                  style={({ pressed }) => ({
+                    alignSelf: 'flex-start',
+                    marginTop: Spacing.sm,
+                    paddingHorizontal: Spacing.md,
+                    paddingVertical: 8,
+                    borderRadius: Radius.full,
+                    backgroundColor: `${Colors.primary}22`,
+                    opacity: pressed ? 0.85 : 1,
+                  })}
+                >
+                  <Text style={{ color: Colors.primary, fontWeight: Typography.fontWeight.semibold }}>
+                    See anyway
+                  </Text>
+                </Pressable>
+              </View>
             )}
             <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary }}>
               {isParticipant
@@ -1640,6 +1912,58 @@ export function AvailableShiftsScreen({ navigation }) {
           </View>
         </View>
       </Modal>
+
+      {/* Web-only confirm modal (avoid browser alert/confirm) */}
+      {Platform.OS === 'web' && (
+        <Modal visible={confirmModal.visible} transparent animationType="fade" onRequestClose={closeConfirm}>
+          <View style={fallbackOverlay}>
+            <View style={[fallbackCard, { maxWidth: 520 }]}>
+              <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>
+                {confirmModal.title || 'Confirm'}
+              </Text>
+              <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: Spacing.sm, whiteSpace: 'pre-wrap' }}>
+                {confirmModal.message || ''}
+              </Text>
+              <View style={{ flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.md }}>
+                <Pressable
+                  onPress={closeConfirm}
+                  style={({ pressed }) => ({
+                    flex: 1,
+                    backgroundColor: Colors.surfaceSecondary,
+                    borderWidth: 1,
+                    borderColor: Colors.border,
+                    borderRadius: Radius.md,
+                    paddingVertical: Spacing.sm,
+                    alignItems: 'center',
+                    opacity: pressed ? 0.85 : 1,
+                  })}
+                >
+                  <Text style={{ color: Colors.text.secondary, fontWeight: Typography.fontWeight.semibold }}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    const fn = confirmActionRef.current;
+                    closeConfirm();
+                    try { fn?.(); } catch (_) {}
+                  }}
+                  style={({ pressed }) => ({
+                    flex: 1,
+                    backgroundColor: Colors.primary,
+                    borderRadius: Radius.md,
+                    paddingVertical: Spacing.sm,
+                    alignItems: 'center',
+                    opacity: pressed ? 0.85 : 1,
+                  })}
+                >
+                  <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>
+                    {confirmModal.confirmText || 'Confirm'}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
     </View>
   );
 }

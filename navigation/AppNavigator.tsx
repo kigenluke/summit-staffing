@@ -27,6 +27,8 @@ import { EarningsDashboard } from '../screens/EarningsDashboard.js';
 import { BudgetScreen } from '../screens/BudgetScreen.js';
 import { TrainingScreen } from '../screens/TrainingScreen.js';
 import { EditProfileScreen } from '../screens/EditProfileScreen.js';
+import { AddIncidentScreen } from '../screens/AddIncidentScreen.js';
+import { AddComplaintScreen } from '../screens/AddComplaintScreen.js';
 import { Colors } from '../constants/theme.js';
 import { WorkerGateProvider } from '../context/WorkerGateContext.js';
 
@@ -88,6 +90,8 @@ export function AppNavigator() {
       <Stack.Screen name="BudgetDashboard" component={BudgetScreen} options={{ title: 'Budget Dashboard' }} />
       <Stack.Screen name="Training" component={TrainingScreen} options={{ title: 'My Training' }} />
       <Stack.Screen name="EditProfile" component={EditProfileScreen} options={{ title: 'Edit Profile' }} />
+      <Stack.Screen name="AddIncident" component={AddIncidentScreen} options={{ title: 'Incident Report' }} />
+      <Stack.Screen name="AddComplaint" component={AddComplaintScreen} options={{ title: 'Complaint Report' }} />
     </Stack.Navigator>
     </WorkerGateProvider>
   );
