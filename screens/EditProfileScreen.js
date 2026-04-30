@@ -57,6 +57,7 @@ export function EditProfileScreen({ navigation }) {
   const [address, setAddress] = useState('');
   const [latitude, setLatitude] = useState(null);
   const [longitude, setLongitude] = useState(null);
+  const [placesUnavailable, setPlacesUnavailable] = useState(false);
   const [bio, setBio] = useState('');
   const [hourlyRate, setHourlyRate] = useState('');
   const [maxTravelKm, setMaxTravelKm] = useState('');
@@ -227,7 +228,9 @@ export function EditProfileScreen({ navigation }) {
               <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs, marginTop: Spacing.xs }}>
                 {!PlacesAutocompleteComponent
                   ? 'Address suggestions are unavailable on this build. You can still type address manually.'
-                  : 'Start typing to see address suggestions.'}
+                  : placesUnavailable
+                    ? 'Address suggestions are temporarily unavailable. You can still type address manually.'
+                    : 'Start typing to see address suggestions.'}
               </Text>
             </>
           ) : (
@@ -255,26 +258,23 @@ export function EditProfileScreen({ navigation }) {
                 if (typeof lat === 'number' && typeof lng === 'number') {
                   setLatitude(lat);
                   setLongitude(lng);
+                  setPlacesUnavailable(false);
                 } else {
                   setLatitude(null);
                   setLongitude(null);
                 }
                 if (placesRef.current?.blur) placesRef.current.blur();
               }}
-              onFail={(err) => {
-                Alert.alert(
-                  'Address Search',
-                  isWeb
-                    ? 'Address suggestions are temporarily unavailable. Check GOOGLE_MAPS_BROWSER_KEY and retry.'
-                    : 'Address suggestions are temporarily unavailable on mobile. Please try again or type address manually.',
-                );
+              onFail={() => {
+                // Avoid disruptive popups on transient network/key hiccups.
+                setPlacesUnavailable(true);
               }}
               query={{
                 key: placesQueryKey,
                 language: 'en',
               }}
               requestUrl={placesRequestUrl}
-              fetchDetails
+              fetchDetails={false}
               debounce={300}
               minLength={2}
               enablePoweredByContainer={false}

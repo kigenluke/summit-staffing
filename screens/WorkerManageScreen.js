@@ -3,13 +3,27 @@
  * Skills, Documents, Availability, all from Profile tab
  */
 import React, { useEffect, useState, useCallback, useMemo, createElement } from 'react';
-import { View, Text, ScrollView, Pressable, TextInput, Alert, ActivityIndicator, RefreshControl, Platform } from 'react-native';
+import { View, Text, ScrollView, Pressable, TextInput, Alert, ActivityIndicator, RefreshControl, Platform, NativeModules, Modal } from 'react-native';
 import { api } from '../services/api.js';
 import { useAuthStore } from '../store/authStore.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { SERVICE_TYPES } from '../constants/serviceTypes.js';
 import { VENDOR_CATEGORIES } from '../constants/vendorCategories.js';
-const DateTimePicker = Platform.OS !== 'web' ? require('@react-native-community/datetimepicker').default : null;
+let DateTimePicker = null;
+if (Platform.OS !== 'web') {
+  try {
+    const hasNativePickerModule = Boolean(
+      NativeModules?.RNCDatePicker ||
+      NativeModules?.RNDateTimePicker ||
+      NativeModules?.RNDateTimePickerAndroid,
+    );
+    if (hasNativePickerModule) {
+      DateTimePicker = require('@react-native-community/datetimepicker').default;
+    }
+  } catch (_) {
+    DateTimePicker = null;
+  }
+}
 
 const DAY_OPTIONS = [
   { key: 'monday', label: 'Monday', dayIndex: 1 },
@@ -125,6 +139,10 @@ export function WorkerManageScreen({ route, navigation }) {
     return d;
   });
   const [showNativeTimePicker, setShowNativeTimePicker] = useState(false);
+  const [showFallbackTimeModal, setShowFallbackTimeModal] = useState(false);
+  const [fallbackHour, setFallbackHour] = useState('9');
+  const [fallbackMinute, setFallbackMinute] = useState('00');
+  const [fallbackPeriod, setFallbackPeriod] = useState('AM');
   const [webPickerHour, setWebPickerHour] = useState('9');
   const [webPickerMinute, setWebPickerMinute] = useState('00');
   const [webPickerPeriod, setWebPickerPeriod] = useState('AM');
@@ -356,6 +374,14 @@ export function WorkerManageScreen({ route, navigation }) {
       setTimePickerTarget({ dayIndex, field });
       return;
     }
+    if (!DateTimePicker) {
+      const parsed = to12Hour(currentValue);
+      setFallbackHour(parsed.hour);
+      setFallbackMinute(parsed.minute);
+      setFallbackPeriod(parsed.period);
+      setShowFallbackTimeModal(true);
+      return;
+    }
     const normalized = normalizeTime24(currentValue, field === 'start_time' ? '09:00' : '17:00');
     const [h, m] = normalized.split(':').map(Number);
     const d = new Date();
@@ -363,6 +389,13 @@ export function WorkerManageScreen({ route, navigation }) {
     setNativePickerValue(d);
     setTimePickerTarget({ dayIndex, field });
     setShowNativeTimePicker(true);
+  };
+
+  const applyFallbackTime = () => {
+    if (!timePickerTarget) return;
+    const value24 = to24Hour(fallbackHour, fallbackMinute, fallbackPeriod);
+    updateDayTime(timePickerTarget.dayIndex, timePickerTarget.field, value24);
+    setShowFallbackTimeModal(false);
   };
 
   const saveAvailability = async () => {
@@ -944,6 +977,88 @@ export function WorkerManageScreen({ route, navigation }) {
             }}
           />
         )}
+        <Modal
+          visible={showFallbackTimeModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowFallbackTimeModal(false)}
+        >
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: Spacing.lg }}>
+            <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.md }}>
+              <Text style={{ color: Colors.text.primary, fontSize: Typography.fontSize.base, fontWeight: Typography.fontWeight.semibold, marginBottom: Spacing.sm }}>
+                Select time
+              </Text>
+              <View style={{ flexDirection: 'row', gap: Spacing.xs }}>
+                <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                  {Array.from({ length: 12 }, (_, idx) => String(idx + 1)).map((h) => (
+                    <Pressable
+                      key={`h-${h}`}
+                      onPress={() => setFallbackHour(h)}
+                      style={{
+                        minWidth: 34,
+                        paddingVertical: 6,
+                        paddingHorizontal: 8,
+                        borderRadius: Radius.md,
+                        borderWidth: 1,
+                        borderColor: fallbackHour === h ? Colors.primary : Colors.border,
+                        backgroundColor: fallbackHour === h ? `${Colors.primary}22` : Colors.surfaceSecondary,
+                        alignItems: 'center',
+                      }}
+                    >
+                      <Text style={{ color: fallbackHour === h ? Colors.primary : Colors.text.secondary, fontSize: Typography.fontSize.xs }}>{h}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+              <View style={{ marginTop: Spacing.sm, flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                {['00', '15', '30', '45'].map((m) => (
+                  <Pressable
+                    key={`m-${m}`}
+                    onPress={() => setFallbackMinute(m)}
+                    style={{
+                      minWidth: 40,
+                      paddingVertical: 6,
+                      paddingHorizontal: 8,
+                      borderRadius: Radius.md,
+                      borderWidth: 1,
+                      borderColor: fallbackMinute === m ? Colors.primary : Colors.border,
+                      backgroundColor: fallbackMinute === m ? `${Colors.primary}22` : Colors.surfaceSecondary,
+                      alignItems: 'center',
+                    }}
+                  >
+                    <Text style={{ color: fallbackMinute === m ? Colors.primary : Colors.text.secondary, fontSize: Typography.fontSize.xs }}>{m}</Text>
+                  </Pressable>
+                ))}
+                {['AM', 'PM'].map((p) => (
+                  <Pressable
+                    key={`p-${p}`}
+                    onPress={() => setFallbackPeriod(p)}
+                    style={{
+                      minWidth: 52,
+                      paddingVertical: 6,
+                      paddingHorizontal: 8,
+                      borderRadius: Radius.md,
+                      borderWidth: 1,
+                      borderColor: fallbackPeriod === p ? Colors.primary : Colors.border,
+                      backgroundColor: fallbackPeriod === p ? `${Colors.primary}22` : Colors.surfaceSecondary,
+                      alignItems: 'center',
+                    }}
+                  >
+                    <Text style={{ color: fallbackPeriod === p ? Colors.primary : Colors.text.secondary, fontSize: Typography.fontSize.xs }}>{p}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: Spacing.sm, marginTop: Spacing.md }}>
+                <Pressable onPress={() => setShowFallbackTimeModal(false)}>
+                  <Text style={{ color: Colors.text.muted }}>Cancel</Text>
+                </Pressable>
+                <Pressable onPress={applyFallbackTime}>
+                  <Text style={{ color: Colors.primary, fontWeight: Typography.fontWeight.semibold }}>Set Time</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </Section>
     </ScrollView>
   );

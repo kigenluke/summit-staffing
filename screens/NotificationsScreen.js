@@ -4,7 +4,7 @@
  * mark-as-read, mark-all-read, and long-press to delete.
  */
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, FlatList, RefreshControl, Pressable, Alert, Platform } from 'react-native';
+import { View, Text, FlatList, RefreshControl, Pressable, Alert, Platform, ActivityIndicator } from 'react-native';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 
@@ -98,6 +98,11 @@ export function NotificationsScreen({ navigation }) {
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
+      {loading ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+        </View>
+      ) : (
       <FlatList
         data={notifications}
         keyExtractor={(item) => item.id}
@@ -145,6 +150,7 @@ export function NotificationsScreen({ navigation }) {
           </View>
         }
       />
+      )}
     </View>
   );
 }

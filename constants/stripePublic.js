@@ -11,10 +11,10 @@
 
 function readVite() {
   try {
-    // eslint-disable-next-line no-undef
-    if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_STRIPE_PUBLISHABLE_KEY) {
-      return String(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
-    }
+    // Keep import.meta access inside Function string so Metro/Hermes parsing does not fail.
+    const getter = new Function('try { return import.meta?.env?.VITE_STRIPE_PUBLISHABLE_KEY; } catch (_) { return ""; }');
+    const key = getter();
+    if (key) return String(key);
   } catch (_) {}
   return '';
 }

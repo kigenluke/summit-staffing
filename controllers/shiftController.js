@@ -302,6 +302,10 @@ const applyForShift = async (req, res) => {
     if (shift.status !== 'open') {
       return res.status(400).json({ ok: false, error: 'Shift is no longer open for applications' });
     }
+    const shiftStartMs = shift?.start_time ? new Date(shift.start_time).getTime() : NaN;
+    if (!Number.isFinite(shiftStartMs) || shiftStartMs <= Date.now()) {
+      return res.status(400).json({ ok: false, error: 'This shift has already started or expired' });
+    }
 
     // Can't apply to own shift
     if (shift.participant_id === userId) {

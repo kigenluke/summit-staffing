@@ -6,12 +6,29 @@ const pool = require('../config/database');
 
 const sendPushNotification = async (userId, title, body, data = {}) => {
   try {
-    // Always create an in-app notification record
-    await pool.query(
-      `INSERT INTO notifications (user_id, title, body, type, data)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [userId, title, body, data.type || 'general', JSON.stringify(data)]
+    const type = data.type || 'general';
+    const payloadJson = JSON.stringify(data || {});
+    // Avoid accidental duplicates when caller already inserted an in-app row
+    // right before triggering push for the same event.
+    const dupRes = await pool.query(
+      `SELECT id
+       FROM notifications
+       WHERE user_id = $1
+         AND title = $2
+         AND COALESCE(body, '') = COALESCE($3, '')
+         AND type = $4
+         AND COALESCE(data, '{}'::jsonb) = $5::jsonb
+         AND created_at >= now() - interval '2 minutes'
+       LIMIT 1`,
+      [userId, title, body || null, type, payloadJson]
     );
+    if (dupRes.rowCount === 0) {
+      await pool.query(
+        `INSERT INTO notifications (user_id, title, body, type, data)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [userId, title, body, type, payloadJson]
+      );
+    }
   } catch (dbErr) {
     console.error('Failed to save in-app notification:', dbErr.message);
   }

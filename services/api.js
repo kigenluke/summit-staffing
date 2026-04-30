@@ -6,6 +6,16 @@
 import { Platform } from 'react-native';
 import { getState, logout } from '../store/authStore.js';
 
+function readViteEnv(key) {
+  try {
+    // Keep import.meta access inside Function string so Metro/Hermes parsing does not fail.
+    const getter = new Function('k', 'try { return import.meta?.env?.[k]; } catch (_) { return undefined; }');
+    return getter(key);
+  } catch (_) {
+    return undefined;
+  }
+}
+
 function resolveBaseURL() {
   // Web dev: prefer same-origin /api so Vite proxy handles CORS.
   // Avoid eval() because some environments block it.
@@ -17,14 +27,8 @@ function resolveBaseURL() {
   }
 
   // Vite web builds
-  try {
-    // import.meta is safe in Vite builds; if absent, this throws and we fall back.
-    // eslint-disable-next-line no-undef
-    if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) {
-      // eslint-disable-next-line no-undef
-      return import.meta.env.VITE_API_URL;
-    }
-  } catch (_) {}
+  const viteApiUrl = readViteEnv('VITE_API_URL');
+  if (viteApiUrl) return String(viteApiUrl);
 
   // Expo / React Native env
   if (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_API_URL) {

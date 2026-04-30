@@ -215,10 +215,6 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
   const [sameShift, setSameShift] = useState(true);
   const [workerShifts, setWorkerShifts] = useState([{ start: '', end: '' }]);
   const [workerShiftPresets, setWorkerShiftPresets] = useState(['']);
-  const [showFallbackTimeModal, setShowFallbackTimeModal] = useState(false);
-  const [fallbackHour, setFallbackHour] = useState('09');
-  const [fallbackMinute, setFallbackMinute] = useState('00');
-  const [fallbackPeriod, setFallbackPeriod] = useState('AM');
   const [showNativeTimePicker, setShowNativeTimePicker] = useState(false);
   const [nativePickerValue, setNativePickerValue] = useState(() => {
     const d = new Date();
@@ -375,11 +371,10 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
       setShowNativeTimePicker(true);
       return;
     }
-    const parts = toPickerParts(current);
-    setFallbackHour(parts.hour);
-    setFallbackMinute(parts.minute);
-    setFallbackPeriod(parts.period);
-    setShowFallbackTimeModal(true);
+    Alert.alert(
+      'Time picker unavailable',
+      'Native date/time picker is missing in this build. Please reinstall the latest app build.'
+    );
   };
 
   const applyPickedTimeValue = (value) => {
@@ -393,17 +388,6 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
         ? { ...item, [timeTarget.field]: value }
         : item
     )));
-  };
-
-  const applyFallbackTime = () => {
-    const value = `${parseInt(fallbackHour, 10)}:${fallbackMinute} ${fallbackPeriod}`;
-    applyPickedTimeValue(value);
-    if (timeTarget.scope === 'common') {
-      setCommonShiftPreset('');
-    } else {
-      setWorkerShiftPresets((prev) => prev.map((item, idx) => (idx === timeTarget.index ? '' : item)));
-    }
-    setShowFallbackTimeModal(false);
   };
 
   const applyShiftPreset = (presetKey, scope = 'common', index = 0) => {
@@ -694,7 +678,7 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
           <PlacesAutocompleteComponent
             ref={placesRef}
             placeholder="Start typing street, suburb, or city"
-            fetchDetails
+            fetchDetails={false}
             minLength={3}
             debounce={450}
             onPress={async (data, details) => {
@@ -1098,58 +1082,6 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
               />
             )}
 
-            {showFallbackTimeModal && (
-              <Modal visible={showFallbackTimeModal} transparent animationType="fade">
-                <View style={fallbackOverlay}>
-                  <View style={fallbackCard}>
-                    <Text style={sectionHintText}>Select Time</Text>
-                    <View style={{ flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.sm }}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={miniLabelStyle}>Hour</Text>
-                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                          {Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0')).map((h) => (
-                            <Pressable key={h} onPress={() => setFallbackHour(h)} style={[hourChip, fallbackHour === h ? hourChipActive : null]}>
-                              <Text style={[toggleBtnText, fallbackHour === h ? toggleBtnTextActive : null]}>{h}</Text>
-                            </Pressable>
-                          ))}
-                        </View>
-                      </View>
-                    </View>
-                    <View style={{ flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.md }}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={miniLabelStyle}>Minute</Text>
-                        <View style={{ flexDirection: 'row', gap: 6 }}>
-                          {['00', '15', '30', '45'].map((m) => (
-                            <Pressable key={m} onPress={() => setFallbackMinute(m)} style={[hourChip, fallbackMinute === m ? hourChipActive : null]}>
-                              <Text style={[toggleBtnText, fallbackMinute === m ? toggleBtnTextActive : null]}>{m}</Text>
-                            </Pressable>
-                          ))}
-                        </View>
-                      </View>
-                      <View style={{ width: 120 }}>
-                        <Text style={miniLabelStyle}>AM/PM</Text>
-                        <View style={{ flexDirection: 'row', gap: 6 }}>
-                          {['AM', 'PM'].map((p) => (
-                            <Pressable key={p} onPress={() => setFallbackPeriod(p)} style={[hourChip, fallbackPeriod === p ? hourChipActive : null]}>
-                              <Text style={[toggleBtnText, fallbackPeriod === p ? toggleBtnTextActive : null]}>{p}</Text>
-                            </Pressable>
-                          ))}
-                        </View>
-                      </View>
-                    </View>
-                    <View style={stepActions}>
-                      <Pressable style={ghostBtn} onPress={() => setShowFallbackTimeModal(false)}>
-                        <Text style={ghostBtnText}>Cancel</Text>
-                      </Pressable>
-                      <Pressable style={nextBtn} onPress={applyFallbackTime}>
-                        <Text style={nextBtnText}>Apply</Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                </View>
-              </Modal>
-            )}
-
           </ScrollView>
         </View>
       </View>
@@ -1345,6 +1277,7 @@ const fallbackCard = {
 function ShiftCard({ shift, onApply, isWorker, isParticipant, onOpenApplications }) {
   const startDate = new Date(shift.start_time);
   const endDate = new Date(shift.end_time);
+  const isShiftExpired = startDate.getTime() <= Date.now();
   const hours = ((endDate - startDate) / (1000 * 60 * 60)).toFixed(1);
   const breakMeta = (shift.description || '').match(/Break:\s*(\d+)\s*min\s*\|\s*Paid break:\s*(Yes|No)(?:\s*\|\s*Break pay:\s*\$([0-9.]+))?/i);
   const breakMinutes = breakMeta ? breakMeta[1] : null;
@@ -1356,7 +1289,10 @@ function ShiftCard({ shift, onApply, isWorker, isParticipant, onOpenApplications
       ? `${shift.participant_first_name || ''} ${shift.participant_last_name || ''}`.trim()
       : (shift?.participant_email ? String(shift.participant_email).split('@')[0] : 'Participant');
   const shouldShowFullForWorker = workerAssigned;
-  const canWorkerApply = isWorker && shift.status === 'open' && (shift.within_travel_range !== false);
+  const canWorkerApply = isWorker
+    && shift.status === 'open'
+    && !isShiftExpired
+    && (shift.within_travel_range !== false);
 
   const cardContent = (
     <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.sm, ...Shadows.md }}>
@@ -1423,7 +1359,7 @@ function ShiftCard({ shift, onApply, isWorker, isParticipant, onOpenApplications
           })}
         >
           <Text style={{ color: canWorkerApply ? Colors.text.white : Colors.text.secondary, fontWeight: Typography.fontWeight.semibold }}>
-            {canWorkerApply ? 'Apply for Shift' : 'Out of range'}
+            {canWorkerApply ? 'Apply for Shift' : (isShiftExpired ? 'Expired shift' : 'Out of range')}
           </Text>
         </Pressable>
       )}
@@ -1619,7 +1555,7 @@ export function AvailableShiftsScreen({ navigation }) {
     else {
       Alert.alert(
         'Application Pending',
-        'Aapki shift booking pending me hai. Employer accept karega to shift aapko assign ho jayegi.'
+        'Your shift application is pending. It will be assigned to you once the employer accepts it.'
       );
       loadShifts();
     }
