@@ -42,11 +42,17 @@ const buttonStyle = (pressed) => ({
 export function RegisterScreen({ navigation, route }) {
   const roleFromRoute = route.params?.role;
   const isProvideSupportFlow = roleFromRoute === 'worker';
-  const initialRole = roleFromRoute === 'worker' ? 'worker' : 'participant';
+  const isCoordinatorFlow = roleFromRoute === 'coordinator';
+  const initialRole = roleFromRoute === 'worker'
+    ? 'worker'
+    : roleFromRoute === 'coordinator'
+      ? 'coordinator'
+      : 'participant';
   const [role, setRole] = useState(initialRole);
   const [workAs, setWorkAs] = useState('individual');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [abn, setAbn] = useState('');
@@ -117,10 +123,10 @@ export function RegisterScreen({ navigation, route }) {
           Sign up
         </Text>
         <Text style={{ fontSize: Typography.fontSize.base, color: Colors.text.secondary, marginBottom: Spacing.lg }}>
-          {isProvideSupportFlow ? 'Create your worker account' : 'Join as a worker or participant'}
+          {isProvideSupportFlow ? 'Create your worker account' : 'Join as a participant, worker, or coordinator'}
         </Text>
 
-        {!isProvideSupportFlow && (
+        {!isProvideSupportFlow && !isCoordinatorFlow && (
           <>
             <Text style={{ fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.medium, color: Colors.text.primary, marginBottom: Spacing.sm }}>
               I am a
@@ -156,6 +162,22 @@ export function RegisterScreen({ navigation, route }) {
               >
                 <Text style={{ color: role === 'worker' ? Colors.text.white : Colors.text.primary, fontWeight: Typography.fontWeight.semibold }}>
                   Worker
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setRole('coordinator')}
+                style={{
+                  flex: 1,
+                  paddingVertical: Spacing.md,
+                  borderRadius: Radius.md,
+                  backgroundColor: role === 'coordinator' ? Colors.primary : Colors.surface,
+                  borderWidth: 1,
+                  borderColor: role === 'coordinator' ? Colors.primary : Colors.border,
+                  alignItems: 'center',
+                }}
+              >
+                <Text style={{ color: role === 'coordinator' ? Colors.text.white : Colors.text.primary, fontWeight: Typography.fontWeight.semibold }}>
+                  Coordinator
                 </Text>
               </Pressable>
             </View>
@@ -251,7 +273,33 @@ export function RegisterScreen({ navigation, route }) {
         <TextInput style={[inputStyle, { marginBottom: Spacing.md }]} placeholder="you@example.com" placeholderTextColor={Colors.text.muted} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" editable={!isLoading} />
 
         <Text style={labelStyle}>Password (min 8 characters)</Text>
-        <TextInput style={[inputStyle, { marginBottom: Spacing.md }]} placeholder="••••••••" placeholderTextColor={Colors.text.muted} value={password} onChangeText={setPassword} secureTextEntry editable={!isLoading} />
+        <View style={{ position: 'relative', marginBottom: Spacing.md }}>
+          <TextInput
+            style={[inputStyle, { paddingRight: 52, marginBottom: 0 }]}
+            placeholder="••••••••"
+            placeholderTextColor={Colors.text.muted}
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry={!showPassword}
+            editable={!isLoading}
+          />
+          <Pressable
+            onPress={() => setShowPassword((prev) => !prev)}
+            style={({ pressed }) => ({
+              position: 'absolute',
+              right: 12,
+              top: 0,
+              bottom: 0,
+              justifyContent: 'center',
+              opacity: pressed ? 0.7 : 1,
+            })}
+            hitSlop={8}
+          >
+            <Text style={{ color: Colors.primary, fontWeight: Typography.fontWeight.semibold, fontSize: Typography.fontSize.sm }}>
+              {showPassword ? 'Hide' : 'Show'}
+            </Text>
+          </Pressable>
+        </View>
 
         <Text style={labelStyle}>First name</Text>
         <TextInput style={[inputStyle, { marginBottom: Spacing.md }]} placeholder="First name" placeholderTextColor={Colors.text.muted} value={firstName} onChangeText={setFirstName} editable={!isLoading} />

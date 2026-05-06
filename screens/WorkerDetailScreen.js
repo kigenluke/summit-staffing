@@ -3,19 +3,12 @@
  */
 import React, { useState } from 'react';
 import { createElement } from 'react';
-import { View, Text, ScrollView, Pressable, Alert, TextInput, Platform, NativeModules } from 'react-native';
+import { View, Text, ScrollView, Pressable, Alert, TextInput, Platform } from 'react-native';
 import { api } from '../services/api.js';
 let DateTimePicker = null;
 if (Platform.OS !== 'web') {
   try {
-    const hasNativePickerModule = Boolean(
-      NativeModules?.RNCDatePicker ||
-      NativeModules?.RNDateTimePicker ||
-      NativeModules?.RNDateTimePickerAndroid,
-    );
-    if (hasNativePickerModule) {
-      DateTimePicker = require('@react-native-community/datetimepicker').default;
-    }
+    DateTimePicker = require('@react-native-community/datetimepicker').default;
   } catch (_) {
     DateTimePicker = null;
   }

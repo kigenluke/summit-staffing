@@ -60,6 +60,27 @@ export function SignUpRoleChoice({ navigation }) {
         </Text>
       </Pressable>
 
+      <Pressable
+        onPress={() => navigation.navigate('Register', { role: 'coordinator' })}
+        style={({ pressed }) => ({
+          paddingVertical: Spacing.lg,
+          paddingHorizontal: Spacing.lg,
+          borderRadius: Radius.md,
+          backgroundColor: Colors.surface,
+          borderWidth: 1,
+          borderColor: Colors.border,
+          marginTop: Spacing.md,
+          opacity: pressed ? 0.9 : 1,
+        })}
+      >
+        <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.semibold, color: Colors.text.primary }}>
+          I am a coordinator
+        </Text>
+        <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: 4 }}>
+          Request access to manage participant accounts
+        </Text>
+      </Pressable>
+
       <Pressable onPress={() => navigation.navigate('Login')} style={{ marginTop: Spacing.xl, alignItems: 'center' }}>
         <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm }}>
           Already have an account? <Text style={{ color: Colors.primary, fontWeight: Typography.fontWeight.semibold }}>Sign in</Text>

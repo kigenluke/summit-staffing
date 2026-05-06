@@ -70,6 +70,22 @@ export function NotificationsScreen({ navigation }) {
     } catch (e) {}
   };
 
+  const approveCoordinatorRequest = async (notification) => {
+    const requestId = notification?.data?.requestId;
+    if (!requestId) return;
+    try {
+      const { data, error } = await api.post(`/api/coordinator/requests/${requestId}/approve`);
+      if (error || !data?.ok) {
+        Alert.alert('Approval failed', error?.message || data?.error || 'Could not approve request');
+        return;
+      }
+      await markAsRead(notification.id);
+      Alert.alert('Approved', 'Coordinator access approved successfully.');
+    } catch (_) {
+      Alert.alert('Approval failed', 'Could not approve request');
+    }
+  };
+
   const handleLongPress = (item) => {
     if (Platform.OS === 'web') {
       if (typeof window !== 'undefined' && window.confirm('Delete this notification?')) {
@@ -133,6 +149,24 @@ export function NotificationsScreen({ navigation }) {
                 </View>
                 {n.body ? (
                   <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: 2 }}>{n.body}</Text>
+                ) : null}
+                {n.type === 'coordinator_access_request' && !n.read ? (
+                  <Pressable
+                    onPress={() => approveCoordinatorRequest(n)}
+                    style={({ pressed }) => ({
+                      marginTop: Spacing.sm,
+                      alignSelf: 'flex-start',
+                      backgroundColor: Colors.primary,
+                      borderRadius: Radius.md,
+                      paddingVertical: 8,
+                      paddingHorizontal: 12,
+                      opacity: pressed ? 0.85 : 1,
+                    })}
+                  >
+                    <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>
+                      Approve
+                    </Text>
+                  </Pressable>
                 ) : null}
                 <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: 4 }}>
                   {getRelativeTime(n.created_at)}

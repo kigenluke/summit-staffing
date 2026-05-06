@@ -7,7 +7,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN
-    CREATE TYPE user_role AS ENUM ('worker', 'participant', 'admin');
+    CREATE TYPE user_role AS ENUM ('worker', 'participant', 'admin', 'coordinator');
   END IF;
 
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'worker_verification_status') THEN
@@ -36,6 +36,13 @@ BEGIN
 
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'payment_status') THEN
     CREATE TYPE payment_status AS ENUM ('pending', 'succeeded', 'failed', 'refunded');
+  END IF;
+END$$;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN
+    ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'coordinator';
   END IF;
 END$$;
 
@@ -649,6 +656,33 @@ CREATE TABLE IF NOT EXISTS notifications (
 
 CREATE INDEX IF NOT EXISTS notifications_user_read_idx ON notifications (user_id, read);
 CREATE INDEX IF NOT EXISTS notifications_user_created_idx ON notifications (user_id, created_at DESC);
+
+-- ============================================================
+-- Coordinator <-> Participant Access Requests
+-- ============================================================
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'coordinator_access_status') THEN
+    CREATE TYPE coordinator_access_status AS ENUM ('pending', 'approved', 'rejected');
+  END IF;
+END$$;
+
+CREATE TABLE IF NOT EXISTS coordinator_participant_access (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  coordinator_user_id UUID NOT NULL,
+  participant_user_id UUID NOT NULL,
+  status coordinator_access_status NOT NULL DEFAULT 'pending',
+  requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  approved_at TIMESTAMPTZ,
+  rejected_at TIMESTAMPTZ,
+  CONSTRAINT coordinator_access_coordinator_fk FOREIGN KEY (coordinator_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT coordinator_access_participant_fk FOREIGN KEY (participant_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT coordinator_access_unique_pair UNIQUE (coordinator_user_id, participant_user_id)
+);
+
+CREATE INDEX IF NOT EXISTS coordinator_access_coordinator_idx ON coordinator_participant_access (coordinator_user_id, status);
+CREATE INDEX IF NOT EXISTS coordinator_access_participant_idx ON coordinator_participant_access (participant_user_id, status);
 
 -- ============================================================
 -- Worker Incidents & Complaints

@@ -4,7 +4,7 @@
 import React, { useEffect, useState, useCallback, useLayoutEffect, useRef, useMemo } from 'react';
 import {
   View, Text, FlatList, Pressable, RefreshControl, Alert, Modal,
-  TextInput, ScrollView, ActivityIndicator, Platform, NativeModules,
+  TextInput, ScrollView, ActivityIndicator, Platform,
 } from 'react-native';
 import * as PlacesPkg from 'react-native-google-places-autocomplete';
 import { useAuthStore } from '../store/authStore.js';
@@ -15,14 +15,7 @@ import { NavChevron } from '../components/NavChevron.js';
 let DateTimePicker = null;
 if (Platform.OS !== 'web') {
   try {
-    const hasNativePickerModule = Boolean(
-      NativeModules?.RNCDatePicker ||
-      NativeModules?.RNDateTimePicker ||
-      NativeModules?.RNDateTimePickerAndroid,
-    );
-    if (hasNativePickerModule) {
-      DateTimePicker = require('@react-native-community/datetimepicker').default;
-    }
+    DateTimePicker = require('@react-native-community/datetimepicker').default;
   } catch (_) {
     DateTimePicker = null;
   }

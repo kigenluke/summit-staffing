@@ -18,8 +18,8 @@ router.post(
     emailValidator,
     passwordValidator,
     body('role')
-      .isIn(['worker', 'participant', 'admin'])
-      .withMessage("Role must be one of: 'worker', 'participant', 'admin'"),
+      .isIn(['worker', 'participant', 'admin', 'coordinator'])
+      .withMessage("Role must be one of: 'worker', 'participant', 'admin', 'coordinator'"),
     body('abn')
       .optional({ nullable: true })
       .isLength({ min: 11, max: 11 })

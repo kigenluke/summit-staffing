@@ -6,6 +6,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Text, Pressable } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { DashboardScreen } from '../screens/DashboardScreen.js';
+import { CoordinatorDashboardScreen } from '../screens/CoordinatorDashboardScreen.js';
 import { SearchWorkersScreen } from '../screens/SearchWorkersScreen.js';
 import { BookingsScreen } from '../screens/BookingsScreen.js';
 import { MessagesScreen } from '../screens/MessagesScreen.js';
@@ -106,6 +107,7 @@ function AvailabilityHeaderLeft() {
 export function MainTabs() {
   const { user } = useAuthStore();
   const isWorker = user?.role === 'worker';
+  const isCoordinator = user?.role === 'coordinator';
 
   return (
     <Tab.Navigator
@@ -140,15 +142,21 @@ export function MainTabs() {
         ),
       })}
     >
-      <Tab.Screen name="Home" component={DashboardScreen} options={{ title: 'Summit Staffing' }} />
-      {!isWorker && (
+      <Tab.Screen
+        name="Home"
+        component={isCoordinator ? CoordinatorDashboardScreen : DashboardScreen}
+        options={{ title: isCoordinator ? 'Coordinator' : 'Summit Staffing' }}
+      />
+      {!isWorker && !isCoordinator && (
         <Tab.Screen
           name="Search"
           component={SearchWorkersScreen}
           options={{ title: 'Find Workers', headerLeft: () => <SearchHeaderLeft /> }}
         />
       )}
-      <Tab.Screen name="Bookings" component={BookingsScreen} options={{ title: 'Bookings', headerLeft: () => <BookingsHeaderLeft /> }} />
+      {!isCoordinator && (
+        <Tab.Screen name="Bookings" component={BookingsScreen} options={{ title: 'Bookings', headerLeft: () => <BookingsHeaderLeft /> }} />
+      )}
       {isWorker && (
         <Tab.Screen
           name="Availability"

@@ -3,7 +3,7 @@
  * Skills, Documents, Availability, all from Profile tab
  */
 import React, { useEffect, useState, useCallback, useMemo, createElement } from 'react';
-import { View, Text, ScrollView, Pressable, TextInput, Alert, ActivityIndicator, RefreshControl, Platform, NativeModules, Modal } from 'react-native';
+import { View, Text, ScrollView, Pressable, TextInput, Alert, ActivityIndicator, RefreshControl, Platform, Modal } from 'react-native';
 import { api } from '../services/api.js';
 import { useAuthStore } from '../store/authStore.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
@@ -12,14 +12,7 @@ import { VENDOR_CATEGORIES } from '../constants/vendorCategories.js';
 let DateTimePicker = null;
 if (Platform.OS !== 'web') {
   try {
-    const hasNativePickerModule = Boolean(
-      NativeModules?.RNCDatePicker ||
-      NativeModules?.RNDateTimePicker ||
-      NativeModules?.RNDateTimePickerAndroid,
-    );
-    if (hasNativePickerModule) {
-      DateTimePicker = require('@react-native-community/datetimepicker').default;
-    }
+    DateTimePicker = require('@react-native-community/datetimepicker').default;
   } catch (_) {
     DateTimePicker = null;
   }
