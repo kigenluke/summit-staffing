@@ -11,6 +11,97 @@ const respondValidation = (req, res) => {
   return false;
 };
 
+const getStats = async (req, res) => {
+  try {
+    const coordinatorUserId = req.user.userId;
+    const statsRes = await pool.query(
+      `SELECT
+         (SELECT COUNT(*)::int FROM users WHERE is_suspended = false) AS active_users,
+         (SELECT COUNT(*)::int FROM participants) AS total_participants,
+         (SELECT COUNT(*)::int FROM coordinator_participant_access
+           WHERE coordinator_user_id = $1 AND status = 'pending') AS pending_requests`,
+      [coordinatorUserId]
+    );
+    const row = statsRes.rows[0] || {};
+    return res.status(200).json({
+      ok: true,
+      stats: {
+        active_users: row.active_users ?? 0,
+        total_participants: row.total_participants ?? 0,
+        pending_requests: row.pending_requests ?? 0,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: 'Failed to fetch stats' });
+  }
+};
+
+const searchParticipantByEmail = async (req, res) => {
+  try {
+    if (respondValidation(req, res)) return;
+    const email = String(req.query.email || '').trim().toLowerCase();
+    if (!email || !email.includes('@')) {
+      return res.status(400).json({ ok: false, error: 'Valid email is required' });
+    }
+    const result = await pool.query(
+      `SELECT p.id, p.user_id, p.first_name, p.last_name, u.email
+       FROM participants p
+       JOIN users u ON u.id = p.user_id
+       WHERE lower(u.email) = lower($1)
+       LIMIT 1`,
+      [email]
+    );
+    if (result.rowCount === 0) {
+      return res.status(200).json({ ok: true, participant: null });
+    }
+    const p = result.rows[0];
+    return res.status(200).json({
+      ok: true,
+      participant: {
+        id: p.id,
+        user_id: p.user_id,
+        first_name: p.first_name,
+        last_name: p.last_name,
+        email: p.email,
+        display_name: `${p.first_name || ''} ${p.last_name || ''}`.trim() || p.email.split('@')[0],
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: 'Search failed' });
+  }
+};
+
+const listMyManagedParticipants = async (req, res) => {
+  try {
+    const coordinatorUserId = req.user.userId;
+    const result = await pool.query(
+      `SELECT
+         p.id,
+         p.user_id,
+         p.first_name,
+         p.last_name,
+         u.email
+       FROM coordinator_participant_access cpa
+       JOIN participants p ON p.user_id = cpa.participant_user_id
+       JOIN users u ON u.id = p.user_id
+       WHERE cpa.coordinator_user_id = $1 AND cpa.status = 'approved'
+       ORDER BY p.first_name NULLS LAST, p.last_name NULLS LAST`,
+      [coordinatorUserId]
+    );
+    const participants = result.rows.map((row) => ({
+      id: row.id,
+      user_id: row.user_id,
+      first_name: row.first_name,
+      last_name: row.last_name,
+      email: row.email,
+      display_name: `${row.first_name || ''} ${row.last_name || ''}`.trim() || row.email.split('@')[0],
+    }));
+    return res.status(200).json({ ok: true, participants });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: 'Failed to fetch managed participants' });
+  }
+};
+
 const listParticipants = async (req, res) => {
   try {
     if (respondValidation(req, res)) return;
@@ -69,25 +160,36 @@ const requestParticipantAccess = async (req, res) => {
       return res.status(403).json({ ok: false, error: 'Only coordinator can request access' });
     }
 
+    const coordName = `${coordinatorRes.rows[0].email.split('@')[0]}`;
+
     const upsertRes = await pool.query(
-      `INSERT INTO coordinator_participant_access (coordinator_user_id, participant_user_id, status, requested_at, approved_at, rejected_at)
-       VALUES ($1, $2, 'pending', now(), NULL, NULL)
+      `INSERT INTO coordinator_participant_access (
+         coordinator_user_id, participant_user_id, status, requested_at, approved_at, rejected_at, initiator
+       )
+       VALUES ($1, $2, 'pending', now(), NULL, NULL, 'coordinator')
        ON CONFLICT (coordinator_user_id, participant_user_id)
-       DO UPDATE SET status = 'pending', requested_at = now(), approved_at = NULL, rejected_at = NULL
+       DO UPDATE SET
+         status = 'pending',
+         requested_at = now(),
+         approved_at = NULL,
+         rejected_at = NULL,
+         initiator = 'coordinator'
        RETURNING id, status, requested_at`,
       [coordinatorUserId, participant.user_id]
     );
     const requestRow = upsertRes.rows[0];
 
+    const participantDisplay = `${participant.first_name || ''} ${participant.last_name || ''}`.trim() || 'Participant';
+
     await sendPushNotification(
       participant.user_id,
       'Coordinator access request',
-      `${coordinatorRes.rows[0].email} requested access to manage your account.`,
+      `${coordName} has requested to manage your account.`,
       {
         type: 'coordinator_access_request',
         requestId: requestRow.id,
         coordinatorUserId,
-        participantId: participant.id
+        participantId: participant.id,
       }
     );
 
@@ -96,8 +198,8 @@ const requestParticipantAccess = async (req, res) => {
       request: {
         id: requestRow.id,
         status: requestRow.status,
-        requested_at: requestRow.requested_at
-      }
+        requested_at: requestRow.requested_at,
+      },
     });
   } catch (err) {
     return res.status(500).json({ ok: false, error: 'Failed to send access request' });
@@ -112,6 +214,7 @@ const approveAccessRequest = async (req, res) => {
 
     const requestRes = await pool.query(
       `SELECT cpa.id, cpa.coordinator_user_id, cpa.participant_user_id, cpa.status,
+              COALESCE(cpa.initiator, 'coordinator') AS initiator,
               p.id AS participant_id, p.first_name, p.last_name
        FROM coordinator_participant_access cpa
        JOIN participants p ON p.user_id = cpa.participant_user_id
@@ -125,7 +228,10 @@ const approveAccessRequest = async (req, res) => {
 
     const accessRequest = requestRes.rows[0];
     if (accessRequest.participant_user_id !== participantUserId) {
-      return res.status(403).json({ ok: false, error: 'Only participant can approve this request' });
+      return res.status(403).json({ ok: false, error: 'Only this participant can approve this request' });
+    }
+    if (accessRequest.initiator !== 'coordinator') {
+      return res.status(400).json({ ok: false, error: 'This request is waiting for the coordinator to approve' });
     }
 
     const updatedRes = await pool.query(
@@ -139,11 +245,64 @@ const approveAccessRequest = async (req, res) => {
     await sendPushNotification(
       accessRequest.coordinator_user_id,
       'Access approved',
-      `Your request to manage ${accessRequest.first_name || 'participant'} ${accessRequest.last_name || ''}`.trim(),
+      `${accessRequest.first_name || 'Participant'} approved your request to manage their account.`,
       {
         type: 'coordinator_access_approved',
         requestId: accessRequest.id,
-        participantId: accessRequest.participant_id
+        participantId: accessRequest.participant_id,
+      }
+    );
+
+    return res.status(200).json({ ok: true, request: updatedRes.rows[0] });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: 'Failed to approve request' });
+  }
+};
+
+const approveParticipantInitiatedRequest = async (req, res) => {
+  try {
+    if (respondValidation(req, res)) return;
+    const coordinatorUserId = req.user.userId;
+    const { requestId } = req.params;
+
+    const requestRes = await pool.query(
+      `SELECT cpa.id, cpa.coordinator_user_id, cpa.participant_user_id, cpa.status,
+              COALESCE(cpa.initiator, 'coordinator') AS initiator,
+              p.id AS participant_id, p.first_name, p.last_name
+       FROM coordinator_participant_access cpa
+       JOIN participants p ON p.user_id = cpa.participant_user_id
+       WHERE cpa.id = $1
+       LIMIT 1`,
+      [requestId]
+    );
+    if (requestRes.rowCount === 0) {
+      return res.status(404).json({ ok: false, error: 'Request not found' });
+    }
+
+    const accessRequest = requestRes.rows[0];
+    if (accessRequest.coordinator_user_id !== coordinatorUserId) {
+      return res.status(403).json({ ok: false, error: 'Only this coordinator can approve this request' });
+    }
+    if (accessRequest.initiator !== 'participant') {
+      return res.status(400).json({ ok: false, error: 'This approval is only for participant-initiated requests' });
+    }
+
+    const updatedRes = await pool.query(
+      `UPDATE coordinator_participant_access
+       SET status = 'approved', approved_at = now(), rejected_at = NULL
+       WHERE id = $1
+       RETURNING id, status, approved_at`,
+      [requestId]
+    );
+
+    await sendPushNotification(
+      accessRequest.participant_user_id,
+      'Coordinator approved',
+      `Your coordinator can now help manage your account.`,
+      {
+        type: 'participant_access_approved',
+        requestId: accessRequest.id,
+        coordinatorUserId,
       }
     );
 
@@ -154,7 +313,11 @@ const approveAccessRequest = async (req, res) => {
 };
 
 module.exports = {
+  getStats,
+  searchParticipantByEmail,
+  listMyManagedParticipants,
   listParticipants,
   requestParticipantAccess,
-  approveAccessRequest
+  approveAccessRequest,
+  approveParticipantInitiatedRequest,
 };

@@ -30,6 +30,8 @@ import { EditProfileScreen } from '../screens/EditProfileScreen.js';
 import { AddIncidentScreen } from '../screens/AddIncidentScreen.js';
 import { AddComplaintScreen } from '../screens/AddComplaintScreen.js';
 import { CoordinatorParticipantManageScreen } from '../screens/CoordinatorParticipantManageScreen.js';
+import { CoordinatorSearchParticipantScreen } from '../screens/CoordinatorSearchParticipantScreen.js';
+import { ParticipantSearchCoordinatorScreen } from '../screens/ParticipantSearchCoordinatorScreen.js';
 import { Colors } from '../constants/theme.js';
 import { WorkerGateProvider } from '../context/WorkerGateContext.js';
 
@@ -94,6 +96,8 @@ export function AppNavigator() {
       <Stack.Screen name="AddIncident" component={AddIncidentScreen} options={{ title: 'Incident Report' }} />
       <Stack.Screen name="AddComplaint" component={AddComplaintScreen} options={{ title: 'Complaint Report' }} />
       <Stack.Screen name="CoordinatorParticipantManage" component={CoordinatorParticipantManageScreen} options={{ title: 'Manage Participant' }} />
+      <Stack.Screen name="CoordinatorSearchParticipant" component={CoordinatorSearchParticipantScreen} options={{ title: 'Request participant' }} />
+      <Stack.Screen name="ParticipantSearchCoordinator" component={ParticipantSearchCoordinatorScreen} options={{ title: 'Request coordinator' }} />
     </Stack.Navigator>
     </WorkerGateProvider>
   );

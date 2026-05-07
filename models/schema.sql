@@ -684,6 +684,17 @@ CREATE TABLE IF NOT EXISTS coordinator_participant_access (
 CREATE INDEX IF NOT EXISTS coordinator_access_coordinator_idx ON coordinator_participant_access (coordinator_user_id, status);
 CREATE INDEX IF NOT EXISTS coordinator_access_participant_idx ON coordinator_participant_access (participant_user_id, status);
 
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'coordinator_participant_access' AND column_name = 'initiator'
+  ) THEN
+    ALTER TABLE coordinator_participant_access
+      ADD COLUMN initiator TEXT NOT NULL DEFAULT 'coordinator';
+  END IF;
+END $$;
+
 -- ============================================================
 -- Worker Incidents & Complaints
 -- ============================================================

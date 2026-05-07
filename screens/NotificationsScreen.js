@@ -8,6 +8,19 @@ import { View, Text, FlatList, RefreshControl, Pressable, Alert, Platform, Activ
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 
+const getNotifData = (n) => {
+  let d = n?.data;
+  if (d == null) return {};
+  if (typeof d === 'string') {
+    try {
+      d = JSON.parse(d);
+    } catch {
+      return {};
+    }
+  }
+  return typeof d === 'object' && d !== null ? d : {};
+};
+
 const getRelativeTime = (dateStr) => {
   const now = new Date();
   const date = new Date(dateStr);
@@ -71,7 +84,7 @@ export function NotificationsScreen({ navigation }) {
   };
 
   const approveCoordinatorRequest = async (notification) => {
-    const requestId = notification?.data?.requestId;
+    const requestId = getNotifData(notification).requestId;
     if (!requestId) return;
     try {
       const { data, error } = await api.post(`/api/coordinator/requests/${requestId}/approve`);
@@ -81,6 +94,22 @@ export function NotificationsScreen({ navigation }) {
       }
       await markAsRead(notification.id);
       Alert.alert('Approved', 'Coordinator access approved successfully.');
+    } catch (_) {
+      Alert.alert('Approval failed', 'Could not approve request');
+    }
+  };
+
+  const approveParticipantCoordinatorRequest = async (notification) => {
+    const requestId = getNotifData(notification).requestId;
+    if (!requestId) return;
+    try {
+      const { data, error } = await api.post(`/api/coordinator/requests/${requestId}/approve-participant`);
+      if (error || !data?.ok) {
+        Alert.alert('Approval failed', error?.message || data?.error || 'Could not approve request');
+        return;
+      }
+      await markAsRead(notification.id);
+      Alert.alert('Approved', 'You can now help manage this participant account.');
     } catch (_) {
       Alert.alert('Approval failed', 'Could not approve request');
     }
@@ -153,6 +182,24 @@ export function NotificationsScreen({ navigation }) {
                 {n.type === 'coordinator_access_request' && !n.read ? (
                   <Pressable
                     onPress={() => approveCoordinatorRequest(n)}
+                    style={({ pressed }) => ({
+                      marginTop: Spacing.sm,
+                      alignSelf: 'flex-start',
+                      backgroundColor: Colors.primary,
+                      borderRadius: Radius.md,
+                      paddingVertical: 8,
+                      paddingHorizontal: 12,
+                      opacity: pressed ? 0.85 : 1,
+                    })}
+                  >
+                    <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>
+                      Approve
+                    </Text>
+                  </Pressable>
+                ) : null}
+                {n.type === 'participant_access_request' && !n.read ? (
+                  <Pressable
+                    onPress={() => approveParticipantCoordinatorRequest(n)}
                     style={({ pressed }) => ({
                       marginTop: Spacing.sm,
                       alignSelf: 'flex-start',

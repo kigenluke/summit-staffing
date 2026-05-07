@@ -56,6 +56,7 @@ const MenuSection = ({ children }) => (
 export function ProfileScreen({ navigation }) {
   const { user, logout } = useAuthStore();
   const isWorker = user?.role === 'worker';
+  const isCoordinator = user?.role === 'coordinator';
   const isAdmin = user?.role === 'admin';
   const { restricted, syncFromWorkerProfile } = useWorkerGate();
 
@@ -115,18 +116,22 @@ export function ProfileScreen({ navigation }) {
 
   const loadProfile = useCallback(async () => {
     try {
-      const endpoint = isWorker ? '/api/workers/me' : '/api/participants/me';
-      const { data } = await api.get(endpoint);
-      if (data?.ok) {
-        const p = isWorker ? data.worker : data.participant;
-        if (p) {
-          setProfile(p);
-          if (isWorker) syncFromWorkerProfile(p);
+      if (isCoordinator) {
+        setProfile(null);
+      } else {
+        const endpoint = isWorker ? '/api/workers/me' : '/api/participants/me';
+        const { data } = await api.get(endpoint);
+        if (data?.ok) {
+          const p = isWorker ? data.worker : data.participant;
+          if (p) {
+            setProfile(p);
+            if (isWorker) syncFromWorkerProfile(p);
+          }
         }
       }
     } catch (e) {}
     setLoading(false);
-  }, [isWorker]);
+  }, [isWorker, isCoordinator, syncFromWorkerProfile]);
 
   const loadUnreadCount = useCallback(async () => {
     try {
@@ -271,11 +276,11 @@ export function ProfileScreen({ navigation }) {
           {user?.email}
         </Text>
         <View style={{
-          backgroundColor: isWorker ? Colors.primary : Colors.status.info,
+          backgroundColor: isWorker ? Colors.primary : isCoordinator ? Colors.status.warning : Colors.status.info,
           paddingHorizontal: Spacing.md, paddingVertical: 4, borderRadius: Radius.full, marginTop: Spacing.sm,
         }}>
           <Text style={{ color: Colors.text.white, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.bold }}>
-            {isWorker ? 'WORKER' : 'PARTICIPANT'}
+            {isWorker ? 'WORKER' : isCoordinator ? 'COORDINATOR' : 'PARTICIPANT'}
           </Text>
         </View>
         {isWorker && profile?.verification_status && (

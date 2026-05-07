@@ -31,6 +31,18 @@ router.get(
 
 router.get('/me', [auth, checkParticipant], participantController.getMe);
 
+router.get(
+  '/search-coordinator',
+  [auth, checkParticipant, query('email').isEmail().normalizeEmail()],
+  participantController.searchCoordinatorByEmail
+);
+
+router.post(
+  '/request-coordinator',
+  [auth, checkParticipant, body('coordinatorUserId').isUUID()],
+  participantController.requestCoordinatorAccess
+);
+
 router.get('/:id', [auth, param('id').isUUID()], participantController.getParticipantById);
 
 router.put(

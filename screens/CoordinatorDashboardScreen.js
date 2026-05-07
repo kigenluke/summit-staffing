@@ -1,8 +1,52 @@
+/**
+ * Coordinator home: overview stats, request participant entry, managed list.
+ */
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, FlatList, Modal, Pressable, RefreshControl, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Radius, Shadows, Spacing, Typography } from '../constants/theme.js';
+
+const Card = ({ children, style }) => (
+  <View style={[{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.md }, style]}>
+    {children}
+  </View>
+);
+
+const StatCard = ({ label, value, color, onPress }) => {
+  const inner = (
+    <>
+      <Text style={{ fontSize: Typography.fontSize.xxl, fontWeight: Typography.fontWeight.bold, color: color || Colors.text.primary, marginBottom: 2 }}>
+        {value}
+      </Text>
+      <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: 2, textAlign: 'center' }}>{label}</Text>
+    </>
+  );
+  if (onPress) {
+    return (
+      <Pressable
+        onPress={onPress}
+        style={({ pressed }) => ({
+          flex: 1,
+          backgroundColor: Colors.surface,
+          borderRadius: Radius.md,
+          padding: Spacing.md,
+          alignItems: 'center',
+          ...Shadows.sm,
+          opacity: pressed ? 0.85 : 1,
+        })}
+      >
+        {inner}
+      </Pressable>
+    );
+  }
+  return (
+    <View style={{ flex: 1, backgroundColor: Colors.surface, borderRadius: Radius.md, padding: Spacing.md, alignItems: 'center', ...Shadows.sm }}>
+      {inner}
+    </View>
+  );
+};
 
 const getTimeGreeting = () => {
   const hour = new Date().getHours();
@@ -14,16 +58,22 @@ const getTimeGreeting = () => {
 export function CoordinatorDashboardScreen({ navigation }) {
   const { user } = useAuthStore();
   const [firstName, setFirstName] = useState('');
-  const [participants, setParticipants] = useState([]);
+  const [stats, setStats] = useState({ active_users: 0, total_participants: 0, pending_requests: 0 });
+  const [managed, setManaged] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [confirmModal, setConfirmModal] = useState({ visible: false, participant: null });
 
   const loadData = useCallback(async () => {
     try {
-      const listRes = await api.get('/api/coordinator/participants');
+      const [statsRes, managedRes] = await Promise.all([
+        api.get('/api/coordinator/stats'),
+        api.get('/api/coordinator/my-participants'),
+      ]);
       setFirstName((user?.email || '').split('@')[0] || '');
-      if (listRes?.data?.ok) {
-        setParticipants(listRes.data.participants || []);
+      if (statsRes?.data?.ok) {
+        setStats(statsRes.data.stats || { active_users: 0, total_participants: 0, pending_requests: 0 });
+      }
+      if (managedRes?.data?.ok) {
+        setManaged(managedRes.data.participants || []);
       }
     } catch (_) {}
   }, [user?.email]);
@@ -32,145 +82,139 @@ export function CoordinatorDashboardScreen({ navigation }) {
     loadData();
   }, [loadData]);
 
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+      return () => {};
+    }, [loadData])
+  );
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await loadData();
     setRefreshing(false);
   }, [loadData]);
 
-  const requestAccess = async (participant) => {
-    try {
-      const { data, error } = await api.post(`/api/coordinator/participants/${participant.id}/request`);
-      if (error || !data?.ok) {
-        Alert.alert('Request failed', error?.message || data?.error || 'Could not send request');
-        return;
-      }
-      setParticipants((prev) => prev.map((item) => (
-        item.id === participant.id ? { ...item, request_status: 'pending' } : item
-      )));
-    } catch (_) {
-      Alert.alert('Request failed', 'Could not send request');
-    }
+  const openManage = (participant) => {
+    navigation.navigate('CoordinatorParticipantManage', {
+      participant: {
+        id: participant.id,
+        user_id: participant.user_id,
+        first_name: participant.first_name,
+        last_name: participant.last_name,
+        email: participant.email,
+      },
+    });
   };
 
-  const openManage = (participant) => {
-    navigation.navigate('CoordinatorParticipantManage', { participant });
+  const goProfile = () => {
+    navigation.navigate('MainTabs', { screen: 'Profile' });
+  };
+
+  const goNotifications = () => {
+    navigation.navigate('Notifications');
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: Colors.background }}>
-      <FlatList
-        data={participants}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={{ padding: Spacing.lg, paddingBottom: Spacing.xxl }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
-        ListHeaderComponent={(
-          <View style={{
-            backgroundColor: Colors.primary,
-            borderRadius: Radius.lg,
-            padding: Spacing.lg,
-            marginBottom: Spacing.lg,
-            ...Shadows.md
-          }}
-          >
-            <Text style={{ color: Colors.text.white, fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.medium }}>
-              {getTimeGreeting()}
-            </Text>
-            <Text style={{ color: Colors.text.white, fontSize: Typography.fontSize.xxl, fontWeight: Typography.fontWeight.bold, marginTop: 4 }}>
-              {firstName || user?.email || 'Coordinator'}
-            </Text>
-            <Text style={{ color: 'rgba(255,255,255,0.85)', marginTop: 4 }}>
-              Coordinator Dashboard
-            </Text>
-          </View>
-        )}
-        renderItem={({ item }) => {
-          const status = item.request_status || 'none';
-          const isApproved = status === 'approved';
-          const isPending = status === 'pending';
-          const title = `${item.first_name || ''} ${item.last_name || ''}`.trim() || item.email || 'Participant';
-          return (
-            <View style={{
-              backgroundColor: Colors.surface,
-              borderRadius: Radius.lg,
-              padding: Spacing.md,
-              marginBottom: Spacing.sm,
-              ...Shadows.sm
-            }}
-            >
-              <Text style={{ color: Colors.text.primary, fontWeight: Typography.fontWeight.semibold, fontSize: Typography.fontSize.base }}>
-                {title}
-              </Text>
-              <Text style={{ color: Colors.text.secondary, marginTop: 2 }}>
-                {item.email || 'No email'}
-              </Text>
-              <Text style={{ color: Colors.text.muted, marginTop: 2 }}>
-                {item.phone || item.address || 'No additional details'}
-              </Text>
-              <View style={{ marginTop: Spacing.sm, alignItems: 'flex-start' }}>
-                {isApproved ? (
-                  <Pressable
-                    onPress={() => openManage(item)}
-                    style={({ pressed }) => ({
-                      backgroundColor: Colors.status.success,
-                      borderRadius: Radius.md,
-                      paddingVertical: 10,
-                      paddingHorizontal: 16,
-                      opacity: pressed ? 0.85 : 1,
-                    })}
-                  >
-                    <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Manage</Text>
-                  </Pressable>
-                ) : isPending ? (
-                  <View style={{ backgroundColor: Colors.surfaceSecondary, borderRadius: Radius.md, paddingVertical: 10, paddingHorizontal: 16 }}>
-                    <Text style={{ color: Colors.text.secondary, fontWeight: Typography.fontWeight.semibold }}>Pending</Text>
-                  </View>
-                ) : (
-                  <Pressable
-                    onPress={() => setConfirmModal({ visible: true, participant: item })}
-                    style={({ pressed }) => ({
-                      backgroundColor: Colors.primary,
-                      borderRadius: Radius.md,
-                      paddingVertical: 10,
-                      paddingHorizontal: 16,
-                      opacity: pressed ? 0.85 : 1,
-                    })}
-                  >
-                    <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Request</Text>
-                  </Pressable>
-                )}
-              </View>
-            </View>
-          );
-        }}
-      />
+    <ScrollView
+      style={{ flex: 1, backgroundColor: Colors.background }}
+      contentContainerStyle={{ padding: Spacing.lg, paddingBottom: 100 }}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
+    >
+      <Card style={{ marginBottom: Spacing.lg, backgroundColor: Colors.primary }}>
+        <Text style={{ fontSize: Typography.fontSize.lg, color: Colors.text.white, fontWeight: Typography.fontWeight.medium }}>
+          {getTimeGreeting()}
+        </Text>
+        <Text style={{ fontSize: Typography.fontSize.xxl, color: Colors.text.white, fontWeight: Typography.fontWeight.bold, marginTop: Spacing.xs }}>
+          {firstName || user?.email || 'Coordinator'}
+        </Text>
+        <Text style={{ fontSize: Typography.fontSize.sm, color: 'rgba(255,255,255,0.8)', marginTop: Spacing.xs }}>
+          Coordinator
+        </Text>
+      </Card>
 
-      <Modal visible={confirmModal.visible} transparent animationType="fade" onRequestClose={() => setConfirmModal({ visible: false, participant: null })}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'center', padding: Spacing.lg }}>
-          <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg }}>
-            <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>
-              Send request?
-            </Text>
-            <Text style={{ color: Colors.text.secondary, marginTop: Spacing.sm }}>
-              Participant approval ke baad aapko account manage access mil jayegi.
-            </Text>
-            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: Spacing.lg, gap: Spacing.sm }}>
-              <Pressable onPress={() => setConfirmModal({ visible: false, participant: null })}>
-                <Text style={{ color: Colors.text.secondary, fontWeight: Typography.fontWeight.semibold }}>Cancel</Text>
-              </Pressable>
+      <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.md }}>
+        Overview
+      </Text>
+      <View style={{ flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.sm }}>
+        <StatCard label="Active users" value={stats.active_users} color={Colors.primary} />
+        <StatCard label="Participants" value={stats.total_participants} color={Colors.status.success} />
+      </View>
+      <View style={{ flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.lg }}>
+        <StatCard
+          label="My profile"
+          value="Open"
+          color={Colors.primaryDark}
+          onPress={goProfile}
+        />
+        <StatCard
+          label="Pending requests"
+          value={stats.pending_requests}
+          color={Colors.status.warning}
+          onPress={goNotifications}
+        />
+      </View>
+
+      <Card style={{ marginBottom: Spacing.md }}>
+        <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>
+          Request participant
+        </Text>
+        <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: Spacing.xs }}>
+          Add a participant by email. They must approve your request before you can manage their profile.
+        </Text>
+        <Pressable
+          onPress={() => navigation.navigate('CoordinatorSearchParticipant')}
+          style={({ pressed }) => ({
+            marginTop: Spacing.md,
+            backgroundColor: Colors.primary,
+            borderRadius: Radius.md,
+            paddingVertical: Spacing.md,
+            alignItems: 'center',
+            opacity: pressed ? 0.85 : 1,
+          })}
+        >
+          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold, fontSize: Typography.fontSize.base }}>
+            Add participant
+          </Text>
+        </Pressable>
+      </Card>
+
+      {managed.length > 0 ? (
+        <Card>
+          <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.md }}>
+            Your participants
+          </Text>
+          {managed.map((p) => (
+            <View
+              key={p.id}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                paddingVertical: Spacing.sm,
+                borderBottomWidth: 1,
+                borderBottomColor: Colors.border,
+              }}
+            >
+              <Text style={{ fontSize: Typography.fontSize.base, color: Colors.text.primary, fontWeight: Typography.fontWeight.medium, flex: 1 }}>
+                {p.display_name}
+              </Text>
               <Pressable
-                onPress={async () => {
-                  const p = confirmModal.participant;
-                  setConfirmModal({ visible: false, participant: null });
-                  if (p) await requestAccess(p);
-                }}
+                onPress={() => openManage(p)}
+                style={({ pressed }) => ({
+                  backgroundColor: Colors.status.success,
+                  borderRadius: Radius.md,
+                  paddingVertical: 8,
+                  paddingHorizontal: 14,
+                  opacity: pressed ? 0.85 : 1,
+                })}
               >
-                <Text style={{ color: Colors.primary, fontWeight: Typography.fontWeight.bold }}>OK</Text>
+                <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold, fontSize: Typography.fontSize.sm }}>Manage</Text>
               </Pressable>
             </View>
-          </View>
-        </View>
-      </Modal>
-    </View>
+          ))}
+        </Card>
+      ) : null}
+    </ScrollView>
   );
 }

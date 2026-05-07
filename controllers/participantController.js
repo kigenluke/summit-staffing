@@ -3,6 +3,7 @@ const { validationResult } = require('express-validator');
 const pool = require('../config/database');
 const { uploadFile } = require('../services/s3Service');
 const { validateNDISNumber } = require('../utils/ndisValidator');
+const { sendPushNotification } = require('../services/notificationService');
 
 const respondValidation = (req, res) => {
   const errors = validationResult(req);
@@ -299,11 +300,111 @@ const verifyNDIS = async (req, res) => {
   }
 };
 
+const searchCoordinatorByEmail = async (req, res) => {
+  try {
+    if (respondValidation(req, res)) return;
+    const email = String(req.query.email || '').trim().toLowerCase();
+    if (!email || !email.includes('@')) {
+      return res.status(400).json({ ok: false, error: 'Valid email is required' });
+    }
+    const result = await pool.query(
+      `SELECT u.id AS user_id, u.email
+       FROM users u
+       WHERE u.role = 'coordinator' AND lower(u.email) = lower($1)
+       LIMIT 1`,
+      [email]
+    );
+    if (result.rowCount === 0) {
+      return res.status(200).json({ ok: true, coordinator: null });
+    }
+    const row = result.rows[0];
+    return res.status(200).json({
+      ok: true,
+      coordinator: {
+        user_id: row.user_id,
+        email: row.email,
+        display_name: row.email.split('@')[0],
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: 'Search failed' });
+  }
+};
+
+const requestCoordinatorAccess = async (req, res) => {
+  try {
+    if (respondValidation(req, res)) return;
+    const participantUserId = req.user.userId;
+    const { coordinatorUserId } = req.body;
+
+    if (!coordinatorUserId) {
+      return res.status(400).json({ ok: false, error: 'coordinatorUserId is required' });
+    }
+
+    const coordRes = await pool.query(
+      `SELECT id, email FROM users WHERE id = $1 AND role = 'coordinator' LIMIT 1`,
+      [coordinatorUserId]
+    );
+    if (coordRes.rowCount === 0) {
+      return res.status(404).json({ ok: false, error: 'Coordinator not found' });
+    }
+
+    const participant = await getParticipantForUser(participantUserId);
+    if (!participant) {
+      return res.status(404).json({ ok: false, error: 'Participant not found' });
+    }
+
+    const participantDisplay = `${participant.first_name || ''} ${participant.last_name || ''}`.trim() || participant.email.split('@')[0];
+
+    const upsertRes = await pool.query(
+      `INSERT INTO coordinator_participant_access (
+         coordinator_user_id, participant_user_id, status, requested_at, approved_at, rejected_at, initiator
+       )
+       VALUES ($1, $2, 'pending', now(), NULL, NULL, 'participant')
+       ON CONFLICT (coordinator_user_id, participant_user_id)
+       DO UPDATE SET
+         status = 'pending',
+         requested_at = now(),
+         approved_at = NULL,
+         rejected_at = NULL,
+         initiator = 'participant'
+       RETURNING id, status, requested_at`,
+      [coordinatorUserId, participantUserId]
+    );
+    const requestRow = upsertRes.rows[0];
+
+    await sendPushNotification(
+      coordinatorUserId,
+      'Participant access request',
+      `${participantDisplay} has requested that you manage their account.`,
+      {
+        type: 'participant_access_request',
+        requestId: requestRow.id,
+        participantUserId,
+        participantId: participant.id,
+      }
+    );
+
+    return res.status(200).json({
+      ok: true,
+      request: {
+        id: requestRow.id,
+        status: requestRow.status,
+        requested_at: requestRow.requested_at,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: 'Failed to send request' });
+  }
+};
+
 module.exports = {
   getParticipants,
   getParticipantById,
   getMe,
   updateParticipant,
   uploadProfilePhoto,
-  verifyNDIS
+  verifyNDIS,
+  searchCoordinatorByEmail,
+  requestCoordinatorAccess,
 };
