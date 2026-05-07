@@ -345,6 +345,17 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
     return d;
   };
 
+  const getShiftPresetFromStartTime = (timeStr) => {
+    const mins = parseTimeToMinutes(timeStr);
+    if (mins == null) return '';
+    // Morning: 6:00 AM - 1:59 PM
+    if (mins >= 6 * 60 && mins < 14 * 60) return 'morning';
+    // Evening: 2:00 PM - 7:59 PM
+    if (mins >= 14 * 60 && mins < 20 * 60) return 'evening';
+    // Night: 8:00 PM - 5:59 AM
+    return 'night';
+  };
+
   const openTimePickerFor = (scope, field, index = 0) => {
     let current = '';
     if (scope === 'common') {
@@ -759,8 +770,15 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
         </View>
       )}
 
-      <Text style={labelStyle}>Description</Text>
-      <TextInput style={[inputStyle, { height: 80, textAlignVertical: 'top' }]} value={description} onChangeText={setDescription} multiline />
+      <Text style={labelStyle}>Task note / description</Text>
+      <TextInput
+        style={[inputStyle, { height: 80, textAlignVertical: 'top' }]}
+        value={description}
+        onChangeText={setDescription}
+        placeholder="Add task details for workers..."
+        placeholderTextColor={Colors.text.muted}
+        multiline
+      />
 
       <Text style={labelStyle}>Do you want to add break?</Text>
       <View style={{ flexDirection: 'row', gap: Spacing.sm }}>
@@ -916,7 +934,8 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
                       value={to24hString(workerShifts[activeWorkerIndex]?.start)}
                       onChange={(e) => {
                         const picked = from24hToAmPm(e.target.value);
-                        setWorkerShiftPresets((prev) => prev.map((item, idx) => (idx === activeWorkerIndex ? '' : item)));
+                        const autoPreset = getShiftPresetFromStartTime(picked);
+                        setWorkerShiftPresets((prev) => prev.map((item, idx) => (idx === activeWorkerIndex ? autoPreset : item)));
                         setWorkerShifts((prev) => prev.map((item, idx) => (
                           idx === activeWorkerIndex ? { ...item, start: picked } : item
                         )));
@@ -940,7 +959,6 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
                       value={to24hString(workerShifts[activeWorkerIndex]?.end)}
                       onChange={(e) => {
                         const picked = from24hToAmPm(e.target.value);
-                        setWorkerShiftPresets((prev) => prev.map((item, idx) => (idx === activeWorkerIndex ? '' : item)));
                         setWorkerShifts((prev) => prev.map((item, idx) => (
                           idx === activeWorkerIndex ? { ...item, end: picked } : item
                         )));
@@ -999,7 +1017,7 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
                           value={to24hString(startTime)}
                           onChange={(e) => {
                             const picked = from24hToAmPm(e.target.value);
-                            setCommonShiftPreset('');
+                            setCommonShiftPreset(getShiftPresetFromStartTime(picked));
                             setStartTime(picked);
                           }}
                           style={webTimeInput}
@@ -1020,7 +1038,6 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
                           step={900}
                           value={to24hString(endTime)}
                           onChange={(e) => {
-                            setCommonShiftPreset('');
                             setEndTime(from24hToAmPm(e.target.value));
                           }}
                           style={webTimeInput}
@@ -1063,13 +1080,19 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
                 onChange={(event, selectedTime) => {
                   setShowNativeTimePicker(false);
                   if (!selectedTime) return;
-                  applyPickedTimeValue(from24hToAmPm(
+                  const pickedValue = from24hToAmPm(
                     `${String(selectedTime.getHours()).padStart(2, '0')}:${String(selectedTime.getMinutes()).padStart(2, '0')}`,
-                  ));
+                  );
+                  applyPickedTimeValue(pickedValue);
                   if (timeTarget.scope === 'common') {
-                    setCommonShiftPreset('');
+                    if (timeTarget.field === 'start') {
+                      setCommonShiftPreset(getShiftPresetFromStartTime(pickedValue));
+                    }
                   } else {
-                    setWorkerShiftPresets((prev) => prev.map((item, idx) => (idx === timeTarget.index ? '' : item)));
+                    if (timeTarget.field === 'start') {
+                      const autoPreset = getShiftPresetFromStartTime(pickedValue);
+                      setWorkerShiftPresets((prev) => prev.map((item, idx) => (idx === timeTarget.index ? autoPreset : item)));
+                    }
                   }
                 }}
               />

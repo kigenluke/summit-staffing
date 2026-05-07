@@ -14,13 +14,18 @@ const Card = ({ children, style }) => (
   </View>
 );
 
-const StatCard = ({ label, value, color, onPress }) => {
+const StatCard = ({ label, value, color, onPress, filled = false, valueFontSize = Typography.fontSize.xxl }) => {
+  const hasLabel = Boolean(label);
+  const valueColor = filled ? Colors.text.white : (color || Colors.text.primary);
+  const labelColor = filled ? 'rgba(255,255,255,0.9)' : Colors.text.secondary;
   const inner = (
     <>
-      <Text style={{ fontSize: Typography.fontSize.xxl, fontWeight: Typography.fontWeight.bold, color: color || Colors.text.primary, marginBottom: 2 }}>
+      <Text style={{ fontSize: valueFontSize, fontWeight: Typography.fontWeight.bold, color: valueColor, marginBottom: hasLabel ? 2 : 0, textAlign: 'center' }}>
         {value}
       </Text>
-      <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: 2, textAlign: 'center' }}>{label}</Text>
+      {hasLabel ? (
+        <Text style={{ fontSize: Typography.fontSize.sm, color: labelColor, marginTop: 2, textAlign: 'center' }}>{label}</Text>
+      ) : null}
     </>
   );
   if (onPress) {
@@ -29,10 +34,11 @@ const StatCard = ({ label, value, color, onPress }) => {
         onPress={onPress}
         style={({ pressed }) => ({
           flex: 1,
-          backgroundColor: Colors.surface,
+          backgroundColor: filled ? color : Colors.surface,
           borderRadius: Radius.md,
           padding: Spacing.md,
           alignItems: 'center',
+          justifyContent: hasLabel ? 'flex-start' : 'center',
           ...Shadows.sm,
           opacity: pressed ? 0.85 : 1,
         })}
@@ -42,7 +48,7 @@ const StatCard = ({ label, value, color, onPress }) => {
     );
   }
   return (
-    <View style={{ flex: 1, backgroundColor: Colors.surface, borderRadius: Radius.md, padding: Spacing.md, alignItems: 'center', ...Shadows.sm }}>
+    <View style={{ flex: 1, backgroundColor: filled ? color : Colors.surface, borderRadius: Radius.md, padding: Spacing.md, alignItems: 'center', justifyContent: hasLabel ? 'flex-start' : 'center', ...Shadows.sm }}>
       {inner}
     </View>
   );
@@ -137,21 +143,24 @@ export function CoordinatorDashboardScreen({ navigation }) {
         Overview
       </Text>
       <View style={{ flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.sm }}>
-        <StatCard label="Active users" value={stats.active_users} color={Colors.primary} />
-        <StatCard label="Participants" value={stats.total_participants} color={Colors.status.success} />
+        <StatCard label="Active users" value={stats.active_users} color={Colors.status.success} filled />
+        <StatCard label="Participants" value={stats.total_participants} color="#FBBF24" filled />
       </View>
       <View style={{ flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.lg }}>
         <StatCard
-          label="My profile"
-          value="Open"
+          label=""
+          value="Profile"
           color={Colors.primaryDark}
           onPress={goProfile}
+          filled
+          valueFontSize={Typography.fontSize.lg}
         />
         <StatCard
           label="Pending requests"
           value={stats.pending_requests}
-          color={Colors.status.warning}
+          color={Colors.primary}
           onPress={goNotifications}
+          filled
         />
       </View>
 

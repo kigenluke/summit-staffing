@@ -351,6 +351,12 @@ BEGIN
   ) THEN
     ALTER TABLE participants ADD COLUMN profile_image_url TEXT;
   END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'participants' AND column_name = 'about'
+  ) THEN
+    ALTER TABLE participants ADD COLUMN about TEXT;
+  END IF;
 END $$;
 
 -- Participant sign-up onboarding (client sign-up flow)

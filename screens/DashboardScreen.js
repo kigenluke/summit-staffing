@@ -195,28 +195,6 @@ export function DashboardScreen({ navigation }) {
         <StatCard label="Upcoming" value={stats.upcoming} color={Colors.status.success} />
         <StatCard label="Completed" value={stats.completed} color={Colors.primary} />
       </View>
-      {user?.role === 'participant' && (
-        <Card style={{ marginBottom: Spacing.lg }}>
-          <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.xs }}>
-            Invite a coordinator
-          </Text>
-          <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: Spacing.md }}>
-            Search by email and send a request. The coordinator must approve before they can help manage your account.
-          </Text>
-          <Pressable
-            onPress={() => navigation.navigate('ParticipantSearchCoordinator')}
-            style={({ pressed }) => ({
-              backgroundColor: Colors.primary,
-              borderRadius: Radius.md,
-              paddingVertical: Spacing.md,
-              alignItems: 'center',
-              opacity: pressed ? 0.85 : 1,
-            })}
-          >
-            <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Find coordinator</Text>
-          </Pressable>
-        </Card>
-      )}
       {isWorker && (
         <View style={{ flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.lg }}>
           <Card style={{ flex: 1, padding: Spacing.md }}>
@@ -466,6 +444,29 @@ export function DashboardScreen({ navigation }) {
           </Card>
           </Pressable>
         ))
+      )}
+
+      {user?.role === 'participant' && (
+        <Card style={{ marginTop: Spacing.lg }}>
+          <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.xs }}>
+            Invite a coordinator
+          </Text>
+          <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: Spacing.md }}>
+            Search by email and send a request. The coordinator must approve before they can help manage your account.
+          </Text>
+          <Pressable
+            onPress={() => navigation.navigate('ParticipantSearchCoordinator')}
+            style={({ pressed }) => ({
+              backgroundColor: Colors.primary,
+              borderRadius: Radius.md,
+              paddingVertical: Spacing.md,
+              alignItems: 'center',
+              opacity: pressed ? 0.85 : 1,
+            })}
+          >
+            <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Find coordinator</Text>
+          </Pressable>
+        </Card>
       )}
     </ScrollView>
   );

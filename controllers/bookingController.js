@@ -237,6 +237,9 @@ const getBookingById = async (req, res) => {
     const bookingRes = await pool.query(
       `SELECT b.*,
         p.user_id AS participant_user_id,
+        p.first_name AS participant_first_name,
+        p.last_name AS participant_last_name,
+        p.about AS participant_about,
         w.user_id AS worker_user_id
       FROM bookings b
       JOIN participants p ON p.id = b.participant_id

@@ -435,6 +435,14 @@ export function BookingDetailScreen({ route, navigation }) {
         {b.status === 'cancelled' && b.decline_reason && <InfoRow icon="" label="Decline reason" value={b.decline_reason} />}
       </Section>
 
+      {isWorker && b.participant_about && (
+        <Section title="Participant About">
+          <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.primary, lineHeight: 20 }}>
+            {b.participant_about}
+          </Text>
+        </Section>
+      )}
+
       {/* Timesheet */}
       {ts && (
         <Section title="⏱ Timesheet">

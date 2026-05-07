@@ -21,6 +21,26 @@ const getNotifData = (n) => {
   return typeof d === 'object' && d !== null ? d : {};
 };
 
+const dedupeNotifications = (list) => {
+  const seen = new Set();
+  const out = [];
+  for (const n of list || []) {
+    const d = getNotifData(n);
+    const key = [
+      n?.type || '',
+      n?.title || '',
+      n?.body || '',
+      d?.requestId || '',
+      d?.participantId || '',
+      d?.coordinatorUserId || '',
+    ].join('|');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(n);
+  }
+  return out;
+};
+
 const getRelativeTime = (dateStr) => {
   const now = new Date();
   const date = new Date(dateStr);
@@ -46,7 +66,7 @@ export function NotificationsScreen({ navigation }) {
     try {
       const { data } = await api.get('/api/notifications');
       if (data?.ok) {
-        setNotifications(data.notifications || []);
+        setNotifications(dedupeNotifications(data.notifications || []));
       }
     } catch (e) {}
     setLoading(false);

@@ -4,7 +4,7 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Text, Pressable } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { DashboardScreen } from '../screens/DashboardScreen.js';
 import { CoordinatorDashboardScreen } from '../screens/CoordinatorDashboardScreen.js';
 import { SearchWorkersScreen } from '../screens/SearchWorkersScreen.js';
@@ -14,8 +14,66 @@ import { ProfileScreen } from '../screens/ProfileScreen.js';
 import { WorkerManageScreen } from '../screens/WorkerManageScreen.js';
 import { Colors } from '../constants/theme.js';
 import { useAuthStore } from '../store/authStore.js';
+import { api } from '../services/api.js';
 
 const Tab = createBottomTabNavigator();
+
+function HomeHeaderRight() {
+  const nav = useNavigation();
+  const [unreadCount, setUnreadCount] = React.useState(0);
+
+  const loadUnreadCount = React.useCallback(async () => {
+    try {
+      const { data } = await api.get('/api/notifications/unread-count');
+      if (data?.ok) setUnreadCount(Math.max(0, Number(data.count) || 0));
+    } catch (_) {}
+  }, []);
+
+  React.useEffect(() => {
+    loadUnreadCount();
+  }, [loadUnreadCount]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      loadUnreadCount();
+      return () => {};
+    }, [loadUnreadCount])
+  );
+
+  return (
+    <Pressable
+      onPress={() => nav.navigate('Notifications' as never)}
+      style={({ pressed }) => ({
+        opacity: pressed ? 0.8 : 1,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+      })}
+    >
+      <Text style={{ color: Colors.text.white, fontWeight: '700', fontSize: 18 }}>🔔</Text>
+      {unreadCount > 0 && (
+        <Text
+          style={{
+            position: 'absolute',
+            top: 2,
+            right: 4,
+            minWidth: 16,
+            height: 16,
+            borderRadius: 8,
+            backgroundColor: Colors.status.error,
+            color: Colors.text.white,
+            fontSize: 10,
+            fontWeight: '700',
+            textAlign: 'center',
+            lineHeight: 16,
+            paddingHorizontal: 3,
+          }}
+        >
+          {unreadCount > 99 ? '99+' : String(unreadCount)}
+        </Text>
+      )}
+    </Pressable>
+  );
+}
 
 function MessagesHeaderRight() {
   const nav = useNavigation();
@@ -145,7 +203,7 @@ export function MainTabs() {
       <Tab.Screen
         name="Home"
         component={isCoordinator ? CoordinatorDashboardScreen : DashboardScreen}
-        options={{ title: isCoordinator ? 'Coordinator' : 'Summit Staffing' }}
+        options={{ title: isCoordinator ? 'Coordinator' : 'Summit Staffing', headerRight: () => <HomeHeaderRight /> }}
       />
       {!isWorker && !isCoordinator && (
         <Tab.Screen

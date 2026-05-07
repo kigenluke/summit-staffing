@@ -62,7 +62,8 @@ router.put(
     body('plan_manager_email').optional({ nullable: true }).isEmail().normalizeEmail(),
     body('plan_manager_phone').optional({ nullable: true }).isString(),
     body('monthly_budget').optional({ nullable: true }).isFloat({ min: 0 }).toFloat(),
-    body('management_type').optional({ nullable: true }).isIn(['self', 'plan_managed', 'ndia'])
+    body('management_type').optional({ nullable: true }).isIn(['self', 'plan_managed', 'ndia']),
+    body('about').optional({ nullable: true }).isString().isLength({ max: 2000 })
   ],
   participantController.updateParticipant
 );

@@ -66,6 +66,7 @@ const safeParticipantForUser = (participant) => {
     plan_manager_phone: participant.plan_manager_phone,
     monthly_budget: participant.monthly_budget,
     ndis_number: participant.ndis_number,
+    about: participant.about,
     profile_image_url: participant.profile_image_url,
     created_at: participant.created_at,
     updated_at: participant.updated_at,
@@ -145,6 +146,7 @@ const getParticipants = async (req, res) => {
         p.plan_manager_name,
         p.plan_manager_email,
         p.plan_manager_phone,
+        p.about,
         p.management_type,
         p.created_at,
         p.updated_at,
@@ -209,6 +211,7 @@ const getParticipantById = async (req, res) => {
         longitude: participant.longitude,
         management_type: participant.management_type,
         monthly_budget: participant.monthly_budget,
+        about: participant.about,
         created_at: participant.created_at,
         updated_at: participant.updated_at,
         email: participant.email,
@@ -252,7 +255,8 @@ const updateParticipant = async (req, res) => {
       'plan_manager_email',
       'plan_manager_phone',
       'monthly_budget',
-      'management_type'
+      'management_type',
+      'about'
     ];
 
     const fields = [];
@@ -295,6 +299,7 @@ const updateParticipant = async (req, res) => {
       longitude: updated.longitude,
       management_type: updated.management_type,
       monthly_budget: updated.monthly_budget,
+      about: updated.about,
       created_at: updated.created_at,
       updated_at: updated.updated_at
     };

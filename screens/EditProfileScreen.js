@@ -62,6 +62,7 @@ export function EditProfileScreen({ navigation }) {
   const [hourlyRate, setHourlyRate] = useState('');
   const [maxTravelKm, setMaxTravelKm] = useState('');
   const [ndisNumber, setNdisNumber] = useState('');
+  const [about, setAbout] = useState('');
 
   const placesRef = useRef(null);
   const lastSelectedAddressRef = useRef('');
@@ -100,6 +101,7 @@ export function EditProfileScreen({ navigation }) {
             setMaxTravelKm(p.max_travel_km ? String(p.max_travel_km) : '');
           } else {
             setNdisNumber(p.ndis_number || '');
+            setAbout(p.about || '');
           }
         }
       }
@@ -155,6 +157,7 @@ export function EditProfileScreen({ navigation }) {
       else {
         const cleanedNdis = String(ndisNumber || '').trim();
         body.ndis_number = cleanedNdis || null;
+        body.about = (about || '').trim() || null;
       }
 
       const { data, error } = await api.put(endpoint, body);
@@ -347,7 +350,34 @@ export function EditProfileScreen({ navigation }) {
           </>
         )}
         {!isWorker && (
-          <Field label="NDIS Number" value={ndisNumber} onChangeText={setNdisNumber} placeholder="10-digit NDIS number" />
+          <>
+            <Field label="NDIS Number" value={ndisNumber} onChangeText={setNdisNumber} placeholder="10-digit NDIS number" />
+            <View style={{ marginBottom: Spacing.md }}>
+              <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>
+                About (visible to workers)
+              </Text>
+              <TextInput
+                style={{
+                  backgroundColor: Colors.surfaceSecondary,
+                  borderWidth: 1,
+                  borderColor: Colors.border,
+                  borderRadius: Radius.md,
+                  paddingVertical: Spacing.sm,
+                  paddingHorizontal: Spacing.md,
+                  fontSize: Typography.fontSize.base,
+                  color: Colors.text.primary,
+                  minHeight: 90,
+                  textAlignVertical: 'top',
+                }}
+                value={about}
+                onChangeText={setAbout}
+                placeholder="Write a short introduction for workers..."
+                placeholderTextColor={Colors.text.muted}
+                multiline
+                maxLength={2000}
+              />
+            </View>
+          </>
         )}
       </View>
 
