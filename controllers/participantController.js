@@ -4,6 +4,7 @@ const pool = require('../config/database');
 const { uploadFile } = require('../services/s3Service');
 const { validateNDISNumber } = require('../utils/ndisValidator');
 const { sendPushNotification } = require('../services/notificationService');
+let initiatorColumnAvailable = null;
 
 const respondValidation = (req, res) => {
   const errors = validationResult(req);
@@ -12,6 +13,23 @@ const respondValidation = (req, res) => {
     return true;
   }
   return false;
+};
+
+const hasInitiatorColumn = async () => {
+  if (initiatorColumnAvailable !== null) return initiatorColumnAvailable;
+  try {
+    const colRes = await pool.query(
+      `SELECT 1
+       FROM information_schema.columns
+       WHERE table_name = 'coordinator_participant_access'
+         AND column_name = 'initiator'
+       LIMIT 1`
+    );
+    initiatorColumnAvailable = colRes.rowCount > 0;
+  } catch (_) {
+    initiatorColumnAvailable = false;
+  }
+  return initiatorColumnAvailable;
 };
 
 const isAdmin = (req) => {
@@ -356,21 +374,37 @@ const requestCoordinatorAccess = async (req, res) => {
 
     const participantDisplay = `${participant.first_name || ''} ${participant.last_name || ''}`.trim() || participant.email.split('@')[0];
 
-    const upsertRes = await pool.query(
-      `INSERT INTO coordinator_participant_access (
-         coordinator_user_id, participant_user_id, status, requested_at, approved_at, rejected_at, initiator
-       )
-       VALUES ($1, $2, 'pending', now(), NULL, NULL, 'participant')
-       ON CONFLICT (coordinator_user_id, participant_user_id)
-       DO UPDATE SET
-         status = 'pending',
-         requested_at = now(),
-         approved_at = NULL,
-         rejected_at = NULL,
-         initiator = 'participant'
-       RETURNING id, status, requested_at`,
-      [coordinatorUserId, participantUserId]
-    );
+    const hasInitiator = await hasInitiatorColumn();
+    const upsertRes = hasInitiator
+      ? await pool.query(
+        `INSERT INTO coordinator_participant_access (
+           coordinator_user_id, participant_user_id, status, requested_at, approved_at, rejected_at, initiator
+         )
+         VALUES ($1, $2, 'pending', now(), NULL, NULL, 'participant')
+         ON CONFLICT (coordinator_user_id, participant_user_id)
+         DO UPDATE SET
+           status = 'pending',
+           requested_at = now(),
+           approved_at = NULL,
+           rejected_at = NULL,
+           initiator = 'participant'
+         RETURNING id, status, requested_at`,
+        [coordinatorUserId, participantUserId]
+      )
+      : await pool.query(
+        `INSERT INTO coordinator_participant_access (
+           coordinator_user_id, participant_user_id, status, requested_at, approved_at, rejected_at
+         )
+         VALUES ($1, $2, 'pending', now(), NULL, NULL)
+         ON CONFLICT (coordinator_user_id, participant_user_id)
+         DO UPDATE SET
+           status = 'pending',
+           requested_at = now(),
+           approved_at = NULL,
+           rejected_at = NULL
+         RETURNING id, status, requested_at`,
+        [coordinatorUserId, participantUserId]
+      );
     const requestRow = upsertRes.rows[0];
 
     await sendPushNotification(

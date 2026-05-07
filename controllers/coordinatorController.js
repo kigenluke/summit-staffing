@@ -1,6 +1,7 @@
 const { validationResult } = require('express-validator');
 const pool = require('../config/database');
 const { sendPushNotification } = require('../services/notificationService');
+let initiatorColumnAvailable = null;
 
 const respondValidation = (req, res) => {
   const errors = validationResult(req);
@@ -9,6 +10,23 @@ const respondValidation = (req, res) => {
     return true;
   }
   return false;
+};
+
+const hasInitiatorColumn = async () => {
+  if (initiatorColumnAvailable !== null) return initiatorColumnAvailable;
+  try {
+    const colRes = await pool.query(
+      `SELECT 1
+       FROM information_schema.columns
+       WHERE table_name = 'coordinator_participant_access'
+         AND column_name = 'initiator'
+       LIMIT 1`
+    );
+    initiatorColumnAvailable = colRes.rowCount > 0;
+  } catch (_) {
+    initiatorColumnAvailable = false;
+  }
+  return initiatorColumnAvailable;
 };
 
 const getStats = async (req, res) => {
@@ -162,21 +180,37 @@ const requestParticipantAccess = async (req, res) => {
 
     const coordName = `${coordinatorRes.rows[0].email.split('@')[0]}`;
 
-    const upsertRes = await pool.query(
-      `INSERT INTO coordinator_participant_access (
-         coordinator_user_id, participant_user_id, status, requested_at, approved_at, rejected_at, initiator
-       )
-       VALUES ($1, $2, 'pending', now(), NULL, NULL, 'coordinator')
-       ON CONFLICT (coordinator_user_id, participant_user_id)
-       DO UPDATE SET
-         status = 'pending',
-         requested_at = now(),
-         approved_at = NULL,
-         rejected_at = NULL,
-         initiator = 'coordinator'
-       RETURNING id, status, requested_at`,
-      [coordinatorUserId, participant.user_id]
-    );
+    const hasInitiator = await hasInitiatorColumn();
+    const upsertRes = hasInitiator
+      ? await pool.query(
+        `INSERT INTO coordinator_participant_access (
+           coordinator_user_id, participant_user_id, status, requested_at, approved_at, rejected_at, initiator
+         )
+         VALUES ($1, $2, 'pending', now(), NULL, NULL, 'coordinator')
+         ON CONFLICT (coordinator_user_id, participant_user_id)
+         DO UPDATE SET
+           status = 'pending',
+           requested_at = now(),
+           approved_at = NULL,
+           rejected_at = NULL,
+           initiator = 'coordinator'
+         RETURNING id, status, requested_at`,
+        [coordinatorUserId, participant.user_id]
+      )
+      : await pool.query(
+        `INSERT INTO coordinator_participant_access (
+           coordinator_user_id, participant_user_id, status, requested_at, approved_at, rejected_at
+         )
+         VALUES ($1, $2, 'pending', now(), NULL, NULL)
+         ON CONFLICT (coordinator_user_id, participant_user_id)
+         DO UPDATE SET
+           status = 'pending',
+           requested_at = now(),
+           approved_at = NULL,
+           rejected_at = NULL
+         RETURNING id, status, requested_at`,
+        [coordinatorUserId, participant.user_id]
+      );
     const requestRow = upsertRes.rows[0];
 
     const participantDisplay = `${participant.first_name || ''} ${participant.last_name || ''}`.trim() || 'Participant';
@@ -212,16 +246,28 @@ const approveAccessRequest = async (req, res) => {
     const participantUserId = req.user.userId;
     const { requestId } = req.params;
 
-    const requestRes = await pool.query(
-      `SELECT cpa.id, cpa.coordinator_user_id, cpa.participant_user_id, cpa.status,
-              COALESCE(cpa.initiator, 'coordinator') AS initiator,
-              p.id AS participant_id, p.first_name, p.last_name
-       FROM coordinator_participant_access cpa
-       JOIN participants p ON p.user_id = cpa.participant_user_id
-       WHERE cpa.id = $1
-       LIMIT 1`,
-      [requestId]
-    );
+    const hasInitiator = await hasInitiatorColumn();
+    const requestRes = hasInitiator
+      ? await pool.query(
+        `SELECT cpa.id, cpa.coordinator_user_id, cpa.participant_user_id, cpa.status,
+                COALESCE(cpa.initiator, 'coordinator') AS initiator,
+                p.id AS participant_id, p.first_name, p.last_name
+         FROM coordinator_participant_access cpa
+         JOIN participants p ON p.user_id = cpa.participant_user_id
+         WHERE cpa.id = $1
+         LIMIT 1`,
+        [requestId]
+      )
+      : await pool.query(
+        `SELECT cpa.id, cpa.coordinator_user_id, cpa.participant_user_id, cpa.status,
+                'coordinator'::text AS initiator,
+                p.id AS participant_id, p.first_name, p.last_name
+         FROM coordinator_participant_access cpa
+         JOIN participants p ON p.user_id = cpa.participant_user_id
+         WHERE cpa.id = $1
+         LIMIT 1`,
+        [requestId]
+      );
     if (requestRes.rowCount === 0) {
       return res.status(404).json({ ok: false, error: 'Request not found' });
     }
@@ -265,16 +311,28 @@ const approveParticipantInitiatedRequest = async (req, res) => {
     const coordinatorUserId = req.user.userId;
     const { requestId } = req.params;
 
-    const requestRes = await pool.query(
-      `SELECT cpa.id, cpa.coordinator_user_id, cpa.participant_user_id, cpa.status,
-              COALESCE(cpa.initiator, 'coordinator') AS initiator,
-              p.id AS participant_id, p.first_name, p.last_name
-       FROM coordinator_participant_access cpa
-       JOIN participants p ON p.user_id = cpa.participant_user_id
-       WHERE cpa.id = $1
-       LIMIT 1`,
-      [requestId]
-    );
+    const hasInitiator = await hasInitiatorColumn();
+    const requestRes = hasInitiator
+      ? await pool.query(
+        `SELECT cpa.id, cpa.coordinator_user_id, cpa.participant_user_id, cpa.status,
+                COALESCE(cpa.initiator, 'coordinator') AS initiator,
+                p.id AS participant_id, p.first_name, p.last_name
+         FROM coordinator_participant_access cpa
+         JOIN participants p ON p.user_id = cpa.participant_user_id
+         WHERE cpa.id = $1
+         LIMIT 1`,
+        [requestId]
+      )
+      : await pool.query(
+        `SELECT cpa.id, cpa.coordinator_user_id, cpa.participant_user_id, cpa.status,
+                'coordinator'::text AS initiator,
+                p.id AS participant_id, p.first_name, p.last_name
+         FROM coordinator_participant_access cpa
+         JOIN participants p ON p.user_id = cpa.participant_user_id
+         WHERE cpa.id = $1
+         LIMIT 1`,
+        [requestId]
+      );
     if (requestRes.rowCount === 0) {
       return res.status(404).json({ ok: false, error: 'Request not found' });
     }
