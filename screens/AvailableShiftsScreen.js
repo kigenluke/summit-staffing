@@ -202,8 +202,15 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
   const [workerShifts, setWorkerShifts] = useState([{ start: '', end: '' }]);
   const [workerShiftPresets, setWorkerShiftPresets] = useState(['']);
   const [showNativeTimePicker, setShowNativeTimePicker] = useState(false);
-  const [nativePickerValue, setNativePickerValue] = useState({ hours: 9, minutes: 0 });
+  const [nativePickerValue, setNativePickerValue] = useState(() => {
+    const d = new Date();
+    d.setHours(9, 0, 0, 0);
+    return d;
+  });
   const [timeTarget, setTimeTarget] = useState({ scope: 'common', field: 'start', index: 0 });
+  const [webPickerHour, setWebPickerHour] = useState('9');
+  const [webPickerMinute, setWebPickerMinute] = useState('00');
+  const [webPickerPeriod, setWebPickerPeriod] = useState('AM');
   const [step, setStep] = useState('workers');
   const [activeWorkerIndex, setActiveWorkerIndex] = useState(0);
   const commonStartWebRef = useRef(null);
@@ -300,6 +307,14 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
     return `${hour}:${minute}`;
   };
 
+  const to24Hour = (hour12, minute, period) => {
+    const h = Math.max(1, Math.min(12, Number(hour12) || 12));
+    const m = Math.max(0, Math.min(59, Number(minute) || 0));
+    let hour24 = h % 12;
+    if (String(period).toUpperCase() === 'PM') hour24 += 12;
+    return `${String(hour24).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  };
+
   const toPickerParts = (timeStr) => {
     const m = (timeStr || '').trim().match(/^(\d{1,2}):([0-5]\d)\s?(AM|PM)$/i);
     if (!m) return { hour: '09', minute: '00', period: 'AM' };
@@ -361,17 +376,12 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
     // eslint-disable-next-line no-console
     console.log('[ShiftTimePicker] open requested', { platform: Platform.OS, scope, field, index, current });
     if (Platform.OS === 'web') {
-      if (scope === 'common' && field === 'start') {
-        // eslint-disable-next-line no-console
-        console.log('[ShiftTimePicker] web showPicker attempt', {
-          hasRef: Boolean(commonStartWebRef.current),
-          hasShowPicker: Boolean(commonStartWebRef.current?.showPicker),
-        });
-        commonStartWebRef.current?.showPicker?.();
-      } else {
-        // eslint-disable-next-line no-console
-        console.log('[ShiftTimePicker] web uses inline/native input click path', { scope, field, index });
-      }
+      const parsed = toPickerParts(current || '9:00 AM');
+      setWebPickerHour(String(Number(parsed.hour) || 9));
+      setWebPickerMinute(parsed.minute || '00');
+      setWebPickerPeriod(parsed.period || 'AM');
+      // eslint-disable-next-line no-console
+      console.log('[ShiftTimePicker] web picker target set', { scope, field, index, parsed });
       return;
     }
     setNativePickerValue(toPickerDate(current));
@@ -391,6 +401,20 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
         ? { ...item, [timeTarget.field]: value }
         : item
     )));
+  };
+
+  const applyWebPickedTimeValue = () => {
+    const pickedValue = from24hToAmPm(to24Hour(webPickerHour, webPickerMinute, webPickerPeriod));
+    applyPickedTimeValue(pickedValue);
+    if (timeTarget.scope === 'common') {
+      if (timeTarget.field === 'start') {
+        setCommonShiftPreset(getShiftPresetFromStartTime(pickedValue));
+      }
+    } else if (timeTarget.field === 'start') {
+      const autoPreset = getShiftPresetFromStartTime(pickedValue);
+      setWorkerShiftPresets((prev) => prev.map((item, idx) => (idx === timeTarget.index ? autoPreset : item)));
+    }
+    setTimeTarget({ scope: '', field: '', index: -1 });
   };
 
   const applyShiftPreset = (presetKey, scope = 'common', index = 0) => {
@@ -925,53 +949,50 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
                   ))}
                 </View>
                 <Text style={labelStyle}>Shift Start Time * (AM/PM)</Text>
-                {Platform.OS === 'web' ? (
-                  <View style={[inputStyle, webInputWrap]}>
-                    <input
-                      type="time"
-                      step={900}
-                      value={to24hString(workerShifts[activeWorkerIndex]?.start)}
-                      onChange={(e) => {
-                        const picked = from24hToAmPm(e.target.value);
-                        const autoPreset = getShiftPresetFromStartTime(picked);
-                        setWorkerShiftPresets((prev) => prev.map((item, idx) => (idx === activeWorkerIndex ? autoPreset : item)));
-                        setWorkerShifts((prev) => prev.map((item, idx) => (
-                          idx === activeWorkerIndex ? { ...item, start: picked } : item
-                        )));
-                      }}
-                      style={webTimeInput}
-                    />
-                  </View>
-                ) : (
-                  <Pressable style={[inputStyle, timePickerField]} onPress={() => openTimePickerFor('worker', 'start', activeWorkerIndex)}>
-                    <Text style={{ color: workerShifts[activeWorkerIndex]?.start ? Colors.text.primary : Colors.text.muted }}>
-                      {workerShifts[activeWorkerIndex]?.start || 'Select start time'}
-                    </Text>
-                  </Pressable>
-                )}
+                <Pressable style={[inputStyle, timePickerField]} onPress={() => openTimePickerFor('worker', 'start', activeWorkerIndex)}>
+                  <Text style={{ color: workerShifts[activeWorkerIndex]?.start ? Colors.text.primary : Colors.text.muted }}>
+                    {workerShifts[activeWorkerIndex]?.start || 'Select start time'}
+                  </Text>
+                </Pressable>
                 <Text style={labelStyle}>Shift End Time * (AM/PM)</Text>
-                {Platform.OS === 'web' ? (
-                  <View style={[inputStyle, webInputWrap]}>
-                    <input
-                      type="time"
-                      step={900}
-                      value={to24hString(workerShifts[activeWorkerIndex]?.end)}
-                      onChange={(e) => {
-                        const picked = from24hToAmPm(e.target.value);
-                        setWorkerShifts((prev) => prev.map((item, idx) => (
-                          idx === activeWorkerIndex ? { ...item, end: picked } : item
-                        )));
-                      }}
-                      style={webTimeInput}
-                    />
-                  </View>
-                ) : (
-                  <Pressable style={[inputStyle, timePickerField]} onPress={() => openTimePickerFor('worker', 'end', activeWorkerIndex)}>
-                    <Text style={{ color: workerShifts[activeWorkerIndex]?.end ? Colors.text.primary : Colors.text.muted }}>
-                      {workerShifts[activeWorkerIndex]?.end || 'Select end time'}
-                    </Text>
-                  </Pressable>
-                )}
+                <Pressable style={[inputStyle, timePickerField]} onPress={() => openTimePickerFor('worker', 'end', activeWorkerIndex)}>
+                  <Text style={{ color: workerShifts[activeWorkerIndex]?.end ? Colors.text.primary : Colors.text.muted }}>
+                    {workerShifts[activeWorkerIndex]?.end || 'Select end time'}
+                  </Text>
+                </Pressable>
+                {Platform.OS === 'web'
+                  && timeTarget.scope === 'worker'
+                  && timeTarget.index === activeWorkerIndex
+                  && ['start', 'end'].includes(timeTarget.field) && (
+                    <View style={{ marginTop: Spacing.xs, padding: Spacing.sm, borderRadius: Radius.md, backgroundColor: Colors.surfaceSecondary }}>
+                      <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.xs, marginBottom: 6 }}>Select time</Text>
+                      <View style={{ flexDirection: 'row', gap: Spacing.xs }}>
+                        <View style={{ flex: 1 }}>
+                          <select value={webPickerHour} onChange={(e) => setWebPickerHour(e.target.value)} style={webSelectStyle}>
+                            {Array.from({ length: 12 }, (_, idx) => String(idx + 1)).map((h) => <option key={h} value={h}>{h}</option>)}
+                          </select>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <select value={webPickerMinute} onChange={(e) => setWebPickerMinute(e.target.value)} style={webSelectStyle}>
+                            {Array.from({ length: 60 }, (_, idx) => String(idx).padStart(2, '0')).map((m) => <option key={m} value={m}>{m}</option>)}
+                          </select>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <select value={webPickerPeriod} onChange={(e) => setWebPickerPeriod(e.target.value)} style={webSelectStyle}>
+                            {['AM', 'PM'].map((p) => <option key={p} value={p}>{p}</option>)}
+                          </select>
+                        </View>
+                      </View>
+                      <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: Spacing.sm, marginTop: Spacing.sm }}>
+                        <Pressable onPress={() => setTimeTarget({ scope: '', field: '', index: -1 })}>
+                          <Text style={{ color: Colors.text.muted }}>Cancel</Text>
+                        </Pressable>
+                        <Pressable onPress={applyWebPickedTimeValue}>
+                          <Text style={{ color: Colors.primary, fontWeight: Typography.fontWeight.semibold }}>Set Time</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  )}
                 <Text style={helperText}>Up to 24 hours. Overnight shift is allowed.</Text>
                 {renderCommonDetailsFields()}
                 <View style={stepActions}>
@@ -1007,48 +1028,49 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
                       ))}
                     </View>
                     <Text style={labelStyle}>Shift Start Time * (AM/PM)</Text>
-                    {Platform.OS === 'web' ? (
-                      <View style={[inputStyle, webInputWrap]}>
-                        <input
-                          ref={commonStartWebRef}
-                          type="time"
-                          step={900}
-                          value={to24hString(startTime)}
-                          onChange={(e) => {
-                            const picked = from24hToAmPm(e.target.value);
-                            setCommonShiftPreset(getShiftPresetFromStartTime(picked));
-                            setStartTime(picked);
-                          }}
-                          style={webTimeInput}
-                        />
-                      </View>
-                    ) : (
-                      <Pressable style={[inputStyle, timePickerField]} onPress={() => openTimePickerFor('common', 'start')}>
-                        <Text style={{ color: startTime ? Colors.text.primary : Colors.text.muted }}>
-                          {startTime || 'Select start time'}
-                        </Text>
-                      </Pressable>
-                    )}
+                    <Pressable style={[inputStyle, timePickerField]} onPress={() => openTimePickerFor('common', 'start')}>
+                      <Text style={{ color: startTime ? Colors.text.primary : Colors.text.muted }}>
+                        {startTime || 'Select start time'}
+                      </Text>
+                    </Pressable>
                     <Text style={labelStyle}>Shift End Time * (AM/PM)</Text>
-                    {Platform.OS === 'web' ? (
-                      <View style={[inputStyle, webInputWrap]}>
-                        <input
-                          type="time"
-                          step={900}
-                          value={to24hString(endTime)}
-                          onChange={(e) => {
-                            setEndTime(from24hToAmPm(e.target.value));
-                          }}
-                          style={webTimeInput}
-                        />
-                      </View>
-                    ) : (
-                      <Pressable style={[inputStyle, timePickerField]} onPress={() => openTimePickerFor('common', 'end')}>
-                        <Text style={{ color: endTime ? Colors.text.primary : Colors.text.muted }}>
-                          {endTime || 'Select end time'}
-                        </Text>
-                      </Pressable>
-                    )}
+                    <Pressable style={[inputStyle, timePickerField]} onPress={() => openTimePickerFor('common', 'end')}>
+                      <Text style={{ color: endTime ? Colors.text.primary : Colors.text.muted }}>
+                        {endTime || 'Select end time'}
+                      </Text>
+                    </Pressable>
+                    {Platform.OS === 'web'
+                      && timeTarget.scope === 'common'
+                      && ['start', 'end'].includes(timeTarget.field) && (
+                        <View style={{ marginTop: Spacing.xs, padding: Spacing.sm, borderRadius: Radius.md, backgroundColor: Colors.surfaceSecondary }}>
+                          <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.xs, marginBottom: 6 }}>Select time</Text>
+                          <View style={{ flexDirection: 'row', gap: Spacing.xs }}>
+                            <View style={{ flex: 1 }}>
+                              <select value={webPickerHour} onChange={(e) => setWebPickerHour(e.target.value)} style={webSelectStyle}>
+                                {Array.from({ length: 12 }, (_, idx) => String(idx + 1)).map((h) => <option key={h} value={h}>{h}</option>)}
+                              </select>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <select value={webPickerMinute} onChange={(e) => setWebPickerMinute(e.target.value)} style={webSelectStyle}>
+                                {Array.from({ length: 60 }, (_, idx) => String(idx).padStart(2, '0')).map((m) => <option key={m} value={m}>{m}</option>)}
+                              </select>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <select value={webPickerPeriod} onChange={(e) => setWebPickerPeriod(e.target.value)} style={webSelectStyle}>
+                                {['AM', 'PM'].map((p) => <option key={p} value={p}>{p}</option>)}
+                              </select>
+                            </View>
+                          </View>
+                          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: Spacing.sm, marginTop: Spacing.sm }}>
+                            <Pressable onPress={() => setTimeTarget({ scope: '', field: '', index: -1 })}>
+                              <Text style={{ color: Colors.text.muted }}>Cancel</Text>
+                            </Pressable>
+                            <Pressable onPress={applyWebPickedTimeValue}>
+                              <Text style={{ color: Colors.primary, fontWeight: Typography.fontWeight.semibold }}>Set Time</Text>
+                            </Pressable>
+                          </View>
+                        </View>
+                      )}
                     <Text style={helperText}>Up to 24 hours. Overnight shift is allowed.</Text>
                   </View>
                 )}
