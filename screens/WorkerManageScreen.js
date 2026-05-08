@@ -9,14 +9,7 @@ import { useAuthStore } from '../store/authStore.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { SERVICE_TYPES } from '../constants/serviceTypes.js';
 import { VENDOR_CATEGORIES } from '../constants/vendorCategories.js';
-let DateTimePicker = null;
-if (Platform.OS !== 'web') {
-  try {
-    DateTimePicker = require('@react-native-community/datetimepicker').default;
-  } catch (_) {
-    DateTimePicker = null;
-  }
-}
+import NativeDatePicker from '../components/NativeDatePicker.js';
 
 const DAY_OPTIONS = [
   { key: 'monday', label: 'Monday', dayIndex: 1 },
@@ -359,20 +352,21 @@ export function WorkerManageScreen({ route, navigation }) {
   };
 
   const openTimePicker = (dayIndex, field, currentValue) => {
+    // eslint-disable-next-line no-console
+    console.log('[AvailabilityTimePicker] open requested', {
+      platform: Platform.OS,
+      dayIndex,
+      field,
+      currentValue,
+    });
     if (Platform.OS === 'web') {
       const parsed = to12Hour(currentValue);
       setWebPickerHour(parsed.hour);
       setWebPickerMinute(parsed.minute);
       setWebPickerPeriod(parsed.period);
       setTimePickerTarget({ dayIndex, field });
-      return;
-    }
-    if (!DateTimePicker) {
-      const parsed = to12Hour(currentValue);
-      setFallbackHour(parsed.hour);
-      setFallbackMinute(parsed.minute);
-      setFallbackPeriod(parsed.period);
-      setShowFallbackTimeModal(true);
+      // eslint-disable-next-line no-console
+      console.log('[AvailabilityTimePicker] web picker target set', { dayIndex, field, parsed });
       return;
     }
     const normalized = normalizeTime24(currentValue, field === 'start_time' ? '09:00' : '17:00');
@@ -381,6 +375,8 @@ export function WorkerManageScreen({ route, navigation }) {
     d.setHours(Number.isFinite(h) ? h : 9, Number.isFinite(m) ? m : 0, 0, 0);
     setNativePickerValue(d);
     setTimePickerTarget({ dayIndex, field });
+    // eslint-disable-next-line no-console
+    console.log('[AvailabilityTimePicker] native modal open', { dayIndex, field });
     setShowNativeTimePicker(true);
   };
 
@@ -952,22 +948,20 @@ export function WorkerManageScreen({ route, navigation }) {
           style={({ pressed }) => ({ backgroundColor: Colors.primary, paddingVertical: Spacing.md, borderRadius: Radius.md, alignItems: 'center', marginTop: Spacing.md, opacity: pressed ? 0.8 : 1 })}>
           <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>{savingAvail ? 'Saving...' : 'Save Availability'}</Text>
         </Pressable>
-        {Platform.OS !== 'web' && showNativeTimePicker && DateTimePicker && (
-          <DateTimePicker
-            value={nativePickerValue}
+        {Platform.OS !== 'web' && NativeDatePicker && (
+          <NativeDatePicker
+            modal
+            open={showNativeTimePicker}
+            date={nativePickerValue}
             mode="time"
-            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-            onChange={(event, selectedTime) => {
-              if (event?.type === 'dismissed') {
-                setShowNativeTimePicker(false);
-                return;
-              }
+            onConfirm={(selectedTime) => {
               setShowNativeTimePicker(false);
               if (!selectedTime || !timePickerTarget) return;
               const hh = String(selectedTime.getHours()).padStart(2, '0');
               const mm = String(selectedTime.getMinutes()).padStart(2, '0');
               updateDayTime(timePickerTarget.dayIndex, timePickerTarget.field, `${hh}:${mm}`);
             }}
+            onCancel={() => setShowNativeTimePicker(false)}
           />
         )}
         <Modal

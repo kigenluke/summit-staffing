@@ -7,19 +7,12 @@ import {
   TextInput, ScrollView, ActivityIndicator, Platform,
 } from 'react-native';
 import * as PlacesPkg from 'react-native-google-places-autocomplete';
+import NativeDatePicker from '../components/NativeDatePicker.js';
 import { useAuthStore } from '../store/authStore.js';
 import { api, ApiConfig } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { SERVICE_TYPES } from '../constants/serviceTypes.js';
 import { NavChevron } from '../components/NavChevron.js';
-let DateTimePicker = null;
-if (Platform.OS !== 'web') {
-  try {
-    DateTimePicker = require('@react-native-community/datetimepicker').default;
-  } catch (_) {
-    DateTimePicker = null;
-  }
-}
 
 const SERVICE_ICONS = {
   // 'Personal Care': '🧴',
@@ -209,11 +202,7 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
   const [workerShifts, setWorkerShifts] = useState([{ start: '', end: '' }]);
   const [workerShiftPresets, setWorkerShiftPresets] = useState(['']);
   const [showNativeTimePicker, setShowNativeTimePicker] = useState(false);
-  const [nativePickerValue, setNativePickerValue] = useState(() => {
-    const d = new Date();
-    d.setHours(9, 0, 0, 0);
-    return d;
-  });
+  const [nativePickerValue, setNativePickerValue] = useState({ hours: 9, minutes: 0 });
   const [timeTarget, setTimeTarget] = useState({ scope: 'common', field: 'start', index: 0 });
   const [step, setStep] = useState('workers');
   const [activeWorkerIndex, setActiveWorkerIndex] = useState(0);
@@ -345,6 +334,10 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
     return d;
   };
 
+  const toPickerValue = (timeStr) => {
+    return toPickerDate(timeStr);
+  };
+
   const getShiftPresetFromStartTime = (timeStr) => {
     const mins = parseTimeToMinutes(timeStr);
     if (mins == null) return '';
@@ -364,21 +357,27 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
       current = field === 'start' ? (workerShifts[index]?.start || '') : (workerShifts[index]?.end || '');
     }
     setTimeTarget({ scope, field, index });
+    // Debug logs: helps verify picker flow before APK build tests.
+    // eslint-disable-next-line no-console
+    console.log('[ShiftTimePicker] open requested', { platform: Platform.OS, scope, field, index, current });
     if (Platform.OS === 'web') {
       if (scope === 'common' && field === 'start') {
+        // eslint-disable-next-line no-console
+        console.log('[ShiftTimePicker] web showPicker attempt', {
+          hasRef: Boolean(commonStartWebRef.current),
+          hasShowPicker: Boolean(commonStartWebRef.current?.showPicker),
+        });
         commonStartWebRef.current?.showPicker?.();
+      } else {
+        // eslint-disable-next-line no-console
+        console.log('[ShiftTimePicker] web uses inline/native input click path', { scope, field, index });
       }
       return;
     }
-    if (DateTimePicker) {
-      setNativePickerValue(toPickerDate(current));
-      setShowNativeTimePicker(true);
-      return;
-    }
-    Alert.alert(
-      'Time picker unavailable',
-      'Native date/time picker is missing in this build. Please reinstall the latest app build.'
-    );
+    setNativePickerValue(toPickerDate(current));
+    // eslint-disable-next-line no-console
+    console.log('[ShiftTimePicker] native modal open', { scope, field, index });
+    setShowNativeTimePicker(true);
   };
 
   const applyPickedTimeValue = (value) => {
@@ -1071,30 +1070,28 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
               </>
             )}
 
-            {Platform.OS !== 'web' && showNativeTimePicker && DateTimePicker && (
-              <DateTimePicker
-                value={nativePickerValue}
+            {Platform.OS !== 'web' && NativeDatePicker && (
+              <NativeDatePicker
+                modal
+                open={showNativeTimePicker}
+                date={nativePickerValue}
                 mode="time"
-                is24Hour={false}
-                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                onChange={(event, selectedTime) => {
+                onConfirm={(pickedDate) => {
                   setShowNativeTimePicker(false);
-                  if (!selectedTime) return;
                   const pickedValue = from24hToAmPm(
-                    `${String(selectedTime.getHours()).padStart(2, '0')}:${String(selectedTime.getMinutes()).padStart(2, '0')}`,
+                    `${String(pickedDate.getHours()).padStart(2, '0')}:${String(pickedDate.getMinutes()).padStart(2, '0')}`
                   );
                   applyPickedTimeValue(pickedValue);
                   if (timeTarget.scope === 'common') {
                     if (timeTarget.field === 'start') {
                       setCommonShiftPreset(getShiftPresetFromStartTime(pickedValue));
                     }
-                  } else {
-                    if (timeTarget.field === 'start') {
-                      const autoPreset = getShiftPresetFromStartTime(pickedValue);
-                      setWorkerShiftPresets((prev) => prev.map((item, idx) => (idx === timeTarget.index ? autoPreset : item)));
-                    }
+                  } else if (timeTarget.field === 'start') {
+                    const autoPreset = getShiftPresetFromStartTime(pickedValue);
+                    setWorkerShiftPresets((prev) => prev.map((item, idx) => (idx === timeTarget.index ? autoPreset : item)));
                   }
                 }}
+                onCancel={() => setShowNativeTimePicker(false)}
               />
             )}
 
