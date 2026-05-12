@@ -16,6 +16,15 @@ import {
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 
+function notifyUser(title, message = '') {
+  const body = message?.trim?.() ? String(message).trim() : '';
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    window.alert(body ? `${title}\n\n${body}` : title);
+  } else {
+    Alert.alert(title, body || undefined);
+  }
+}
+
 const inputStyle = {
   backgroundColor: Colors.surface,
   borderWidth: 1,
@@ -34,26 +43,28 @@ export function ParticipantSearchCoordinatorScreen() {
   const [inviting, setInviting] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [result, setResult] = useState(null);
+  const [statusBanner, setStatusBanner] = useState(null);
 
   const runSearch = async () => {
     const q = email.trim();
     if (!q) {
-      Alert.alert('Email required', 'Enter an email address to look up.');
+      notifyUser('Email required', 'Enter an email address to look up.');
       return;
     }
     setSearching(true);
-    setHasSearched(true);
+    setStatusBanner(null);
     setResult(null);
     try {
       const { data, error } = await api.get(`/api/participants/search-coordinator?email=${encodeURIComponent(q)}`);
       if (error || !data?.ok) {
-        Alert.alert('Lookup failed', error?.message || data?.error || 'Could not look up coordinator.');
+        notifyUser('Lookup failed', error?.message || data?.error || 'Could not look up coordinator.');
         setSearching(false);
         return;
       }
-      setResult(data.coordinator);
+      setHasSearched(true);
+      setResult(data.coordinator ?? null);
     } catch (_) {
-      Alert.alert('Lookup failed', 'Could not look up coordinator.');
+      notifyUser('Lookup failed', 'Could not look up coordinator.');
     }
     setSearching(false);
   };
@@ -61,39 +72,53 @@ export function ParticipantSearchCoordinatorScreen() {
   const sendInviteEmail = async () => {
     const q = email.trim();
     if (!q || !q.includes('@')) {
-      Alert.alert('Email required', 'Enter a valid email address.');
+      notifyUser('Email required', 'Enter a valid email address.');
       return;
     }
     setInviting(true);
+    setStatusBanner(null);
+    setResult(null);
+    setHasSearched(false);
     try {
       const { data, error } = await api.post('/api/participants/invite-coordinator', { email: q });
       if (error) {
-        Alert.alert('Invite failed', error.message || 'Could not send invitation.');
+        notifyUser('Invite failed', error.message || 'Could not send invitation.');
         setInviting(false);
         return;
       }
       if (!data?.ok) {
-        Alert.alert('Invite failed', data?.error || 'Could not send invitation.');
+        notifyUser('Invite failed', data?.error || 'Could not send invitation.');
         setInviting(false);
         return;
       }
       if (data.mode === 'existing_coordinator' && data.coordinator) {
         setResult(data.coordinator);
-        Alert.alert(
+        setStatusBanner({
+          variant: 'info',
+          title: 'This email already has a coordinator account',
+          detail: 'Tap “Request to manage my account” below so they can approve access.',
+        });
+        notifyUser(
           'Already on Summit Staffing',
-          'This email already has a coordinator account. Tap Request access below to ask them to manage your account.',
+          'This email already has a coordinator account. Tap Request to manage my account below to ask them to manage your account.',
         );
         setInviting(false);
         return;
       }
       if (data.mode === 'invited') {
-        Alert.alert(
+        setStatusBanner({
+          variant: 'success',
+          title: 'Invitation sent',
+          detail:
+            'We emailed them a link to create a coordinator account. When they sign up with that link and this email, they will be connected to manage your account.',
+        });
+        notifyUser(
           'Invitation sent',
           'We emailed them a link to create a coordinator account. When they sign up with that link and this email, they will be connected to manage your account.',
         );
       }
     } catch (_) {
-      Alert.alert('Invite failed', 'Could not send invitation.');
+      notifyUser('Invite failed', 'Could not send invitation.');
     }
     setInviting(false);
   };
@@ -106,13 +131,18 @@ export function ParticipantSearchCoordinatorScreen() {
         coordinatorUserId: result.user_id,
       });
       if (error || !data?.ok) {
-        Alert.alert('Request failed', error?.message || data?.error || 'Could not send request.');
+        notifyUser('Request failed', error?.message || data?.error || 'Could not send request.');
         setRequesting(false);
         return;
       }
-      Alert.alert('Request sent', 'The coordinator will be notified to approve your request.');
+      setStatusBanner({
+        variant: 'success',
+        title: 'Request sent',
+        detail: 'The coordinator will be notified to approve your request.',
+      });
+      notifyUser('Request sent', 'The coordinator will be notified to approve your request.');
     } catch (_) {
-      Alert.alert('Request failed', 'Could not send request.');
+      notifyUser('Request failed', 'Could not send request.');
     }
     setRequesting(false);
   };
@@ -132,6 +162,38 @@ export function ParticipantSearchCoordinatorScreen() {
         <Text style={{ fontSize: Typography.fontSize.base, color: Colors.text.secondary, marginBottom: Spacing.md }}>
           Enter their email and send an invitation. This is usually a one-time setup. If they already have a Summit Staffing coordinator account, you can look them up instead and request access.
         </Text>
+
+        {statusBanner ? (
+          <View
+            style={{
+              marginBottom: Spacing.md,
+              padding: Spacing.md,
+              borderRadius: Radius.md,
+              borderLeftWidth: 4,
+              borderLeftColor:
+                statusBanner.variant === 'success'
+                  ? Colors.status.success
+                  : statusBanner.variant === 'error'
+                    ? Colors.status.error
+                    : Colors.status.info,
+              backgroundColor:
+                statusBanner.variant === 'success'
+                  ? '#ECFDF5'
+                  : statusBanner.variant === 'error'
+                    ? '#FEF2F2'
+                    : '#ECFEFF',
+            }}
+          >
+            <Text style={{ fontSize: Typography.fontSize.base, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>
+              {statusBanner.title}
+            </Text>
+            {statusBanner.detail ? (
+              <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: Spacing.xs }}>
+                {statusBanner.detail}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
 
         <Text style={{ fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.medium, color: Colors.text.primary, marginBottom: Spacing.sm }}>
           Coordinator email
@@ -190,16 +252,7 @@ export function ParticipantSearchCoordinatorScreen() {
           )}
         </Pressable>
 
-        {!hasSearched || searching ? null : result === null ? (
-          <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.sm }}>
-            <Text style={{ color: Colors.text.secondary, textAlign: 'center', marginBottom: Spacing.sm }}>
-              No coordinator account found for this email yet.
-            </Text>
-            <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs, textAlign: 'center' }}>
-              Use “Send email invitation” above so they can create an account from the link.
-            </Text>
-          </View>
-        ) : (
+        {searching ? null : !inviting && result != null ? (
           <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.sm }}>
             <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.muted, marginBottom: Spacing.xs }}>Coordinator</Text>
             <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>
@@ -225,7 +278,16 @@ export function ParticipantSearchCoordinatorScreen() {
               )}
             </Pressable>
           </View>
-        )}
+        ) : !searching && !inviting && hasSearched && result == null ? (
+          <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.sm }}>
+            <Text style={{ color: Colors.text.secondary, textAlign: 'center', marginBottom: Spacing.sm }}>
+              No coordinator account found for this email yet.
+            </Text>
+            <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs, textAlign: 'center' }}>
+              Use “Send email invitation” above so they can create an account from the link.
+            </Text>
+          </View>
+        ) : null}
       </ScrollView>
     </KeyboardAvoidingView>
   );

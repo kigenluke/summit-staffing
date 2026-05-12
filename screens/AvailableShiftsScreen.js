@@ -29,6 +29,11 @@ const {
   SLEEPOVER_FLAT_NIGHTLY,
 } = ndisParticipantRates;
 
+function nativeAlertOnly(title, message = '') {
+  const body = typeof message === 'string' && message.trim() ? message.trim() : '';
+  Alert.alert(title, body || undefined);
+}
+
 const SERVICE_ICONS = {
   // 'Personal Care': '🧴',
   // 'Domestic Assistance': '🧹',
@@ -187,25 +192,26 @@ function ServiceTypeCard({ type, selected, onPress }) {
 }
 
 /** NDIS price guide figures used as minimum offers (Sydney time / NSW public holidays). */
-const NDIS_PERSONAL_CARE_RATE_HINTS = [
-  { label: 'Weekday daytime (6am–8pm)', rate: '$70.23/hr', note: 'Minimum for standard support at this time' },
-  { label: 'Weekday evening (after 8pm–midnight)', rate: '$77.38/hr' },
-  { label: 'Weekday night (midnight–6am)', rate: '$78.81/hr' },
-  { label: 'Saturday', rate: '$98.83/hr' },
-  { label: 'Sunday', rate: '$127.43/hr' },
-  { label: 'Public holiday (NSW)', rate: '$156.03/hr' },
-  { label: 'Sleepover (per night, guide)', rate: '$297.60', note: 'Flat nightly figure — confirm billing with your provider' },
+const NDIS_OTHER_RATE_HINTS = [
+  { label: 'Domestic / Home & Community', rate: 'from $56.98/hr' },
+  { label: 'Assistance with Daily Life', rate: 'from $59.06/hr' },
+  { label: 'RN therapeutic (weekday day)', rate: 'from $123.65/hr' },
+  { label: 'Travel (non-labour)', rate: '$0.99/km' },
 ];
 
-const NDIS_OTHER_RATE_HINTS = [
-  { label: 'House cleaning / yard (Domestic Assistance, Home & Community)', rate: '$56.98/hr min (higher if weekend/PH)' },
-  { label: 'Personal domestic activities (Assistance with Daily Life)', rate: '$59.06/hr min (higher if weekend/PH)' },
-  { label: 'RN weekday daytime (Therapeutic / Improved Health)', rate: '$123.65/hr min' },
-  { label: 'Travel non-labour (per km)', rate: '$0.99/km' },
+const NDIS_PERSONAL_CARE_RATE_HINTS = [
+  { label: 'Weekday 6am–8pm', rate: '$70.23/hr' },
+  { label: 'Weekday after 8pm–midnight', rate: '$77.38/hr' },
+  { label: 'Weekday midnight–6am', rate: '$78.81/hr' },
+  { label: 'Saturday', rate: '$98.83/hr' },
+  { label: 'Sunday', rate: '$127.43/hr' },
+  { label: 'NSW public holiday', rate: '$156.03/hr' },
+  { label: 'Sleepover (flat / night)', rate: '$297.60' },
 ];
 
 // ── Create Shift Modal ────────────────────────────────────────────────────────
-function CreateShiftModal({ visible, onClose, onCreated }) {
+function CreateShiftModal({ visible, onClose, onCreated, onAppInfo }) {
+  const say = typeof onAppInfo === 'function' ? onAppInfo : nativeAlertOnly;
   const MAX_SHIFT_HOURS = 24;
   const SHIFT_TIME_PRESETS = [
     { key: 'morning', label: 'Morning', start: '6:00 AM', end: '2:00 PM' },
@@ -477,22 +483,22 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
   const validateShifts = () => {
     const count = parseInt(workersCount, 10) || 0;
     if (count < 1) {
-      Alert.alert('Missing Fields', 'Please enter how many workers you want.');
+      say('Missing Fields', 'Please enter how many workers you want.');
       return false;
     }
 
     if (count === 1 || sameShift) {
       if (!startTime || !endTime) {
-        Alert.alert('Missing Fields', 'Please enter start and end time.');
+        say('Missing Fields', 'Please enter start and end time.');
         return false;
       }
       if (!isValidTime(startTime) || !isValidTime(endTime)) {
-        Alert.alert('Invalid Time', 'Please enter valid start and end times.');
+        say('Invalid Time', 'Please enter valid start and end times.');
         return false;
       }
       const durationMin = getShiftDurationMinutes(startTime, endTime);
       if (!durationMin || durationMin > MAX_SHIFT_HOURS * 60) {
-        Alert.alert('Invalid Time', `Shift must be between 1 minute and ${MAX_SHIFT_HOURS} hours.`);
+        say('Invalid Time', `Shift must be between 1 minute and ${MAX_SHIFT_HOURS} hours.`);
         return false;
       }
       return true;
@@ -501,38 +507,38 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
     for (let i = 0; i < workerShifts.length; i++) {
       const shift = workerShifts[i];
       if (!shift.start || !shift.end) {
-        Alert.alert('Missing Fields', `Please enter start and end time for Worker ${i + 1}.`);
+        say('Missing Fields', `Please enter start and end time for Worker ${i + 1}.`);
         return false;
       }
       if (!isValidTime(shift.start) || !isValidTime(shift.end)) {
-        Alert.alert('Invalid Time', `Please enter valid start/end times for Worker ${i + 1}.`);
+        say('Invalid Time', `Please enter valid start/end times for Worker ${i + 1}.`);
         return false;
       }
       const durationMin = getShiftDurationMinutes(shift.start, shift.end);
       if (!durationMin || durationMin > MAX_SHIFT_HOURS * 60) {
-        Alert.alert('Invalid Time', `Worker ${i + 1} shift must be between 1 minute and ${MAX_SHIFT_HOURS} hours.`);
+        say('Invalid Time', `Worker ${i + 1} shift must be between 1 minute and ${MAX_SHIFT_HOURS} hours.`);
         return false;
       }
     }
     return true;
   };
 
-  const validateBreakFields = () => {
+  const validateBreakFields = (shiftStart = startTime, shiftEnd = endTime) => {
     if (!addBreak) return true;
     const minutes = parseInt(breakMinutes, 10);
     if (!minutes || minutes < 1) {
-      Alert.alert('Invalid Break', 'Please enter break duration in minutes.');
+      say('Invalid Break', 'Please enter break duration in minutes.');
       return false;
     }
-    const shiftDurationMin = getShiftDurationMinutes(startTime, endTime);
+    const shiftDurationMin = getShiftDurationMinutes(shiftStart, shiftEnd);
     if (shiftDurationMin && minutes >= shiftDurationMin) {
-      Alert.alert('Invalid Break', 'Break duration must be less than total shift duration.');
+      say('Invalid Break', 'Break duration must be less than total shift duration.');
       return false;
     }
     if (paidBreak) {
       const pay = parseFloat(breakPay);
       if (Number.isNaN(pay) || pay < 0) {
-        Alert.alert('Invalid Break Pay', 'Please enter a valid paid break amount.');
+        say('Invalid Break Pay', 'Please enter a valid paid break amount.');
         return false;
       }
     }
@@ -551,12 +557,12 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
 
   const validateCommonFields = () => {
     if (!title || !serviceType || !date || !location) {
-      Alert.alert('Missing Fields', 'Please fill in all required fields.');
+      say('Missing Fields', 'Please fill in all required fields.');
       return false;
     }
     const offered = parseFloat(String(hourlyRate || '').replace(/,/g, '')) || 0;
     if (offered <= 0 && !includeSleepover) {
-      Alert.alert('Missing rate', 'Enter an hourly labour rate (or 0) and/or turn on NDIS sleepover flat fee.');
+      say('Missing rate', 'Enter an hourly labour rate (or 0) and/or turn on NDIS sleepover flat fee.');
       return false;
     }
     return true;
@@ -565,7 +571,7 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
   const handleCreate = async () => {
     const count = parseInt(workersCount, 10) || 0;
     if (count < 1) {
-      Alert.alert('Missing Fields', 'Please select workers count.');
+      say('Missing Fields', 'Please select workers count.');
       return;
     }
     if (!validateCommonFields()) return;
@@ -576,21 +582,21 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
     const startMinutes = parseTimeToMinutes(primaryShift.start);
     const endMinutes = parseTimeToMinutes(primaryShift.end);
     if (startMinutes == null || endMinutes == null) {
-      Alert.alert('Invalid Time', 'Please enter valid times in AM/PM format.');
+      say('Invalid Time', 'Please enter valid times in AM/PM format.');
       return;
     }
-    if (!validateBreakFields()) return;
+    if (!validateBreakFields(primaryShift.start, primaryShift.end)) return;
     const breakMin = parseInt(breakMinutes, 10) || 0;
     const durationMin = getShiftDurationMinutes(primaryShift.start, primaryShift.end) || 0;
     if (addBreak && breakMin >= durationMin) {
-      Alert.alert('Invalid Break', 'Break duration must be less than total shift duration.');
+      say('Invalid Break', 'Break duration must be less than total shift duration.');
       return;
     }
     const endDayOffset = endMinutes <= startMinutes ? 1 : 0;
     const start_time = combineDateAndTimeIso(date, primaryShift.start, 0);
     const end_time = combineDateAndTimeIso(date, primaryShift.end, endDayOffset);
     if (!start_time || !end_time) {
-      Alert.alert('Invalid Time', 'Please enter a valid shift start time.');
+      say('Invalid Time', 'Please enter a valid shift start time.');
       return;
     }
 
@@ -599,23 +605,28 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
     const travelDistanceKm = Number.isFinite(travelParsed) && travelParsed > 0 ? travelParsed : null;
     const tv = validateTravelDistanceKm(travelDistanceKm == null ? '' : travelDistanceKm);
     if (!tv.ok) {
-      Alert.alert('Travel', tv.error || 'Invalid travel distance.');
+      say('Travel', tv.error || 'Invalid travel distance.');
       return;
     }
     const sleepoverFlat = includeSleepover ? SLEEPOVER_FLAT_NIGHTLY : null;
     const sv = validateSleepoverFlatAmount(sleepoverFlat);
     if (!sv.ok) {
-      Alert.alert('Sleepover', sv.error || 'Invalid sleepover.');
+      say('Sleepover', sv.error || 'Invalid sleepover.');
       return;
     }
     if (offered <= 0 && !(sleepoverFlat > 0)) {
-      Alert.alert('Rate required', 'Enter an hourly labour rate and/or turn on NDIS sleepover flat fee.');
+      say('Rate required', 'Enter an hourly labour rate and/or turn on NDIS sleepover flat fee.');
       return;
     }
     if (offered > 0) {
       const rateCheck = validateParticipantOfferedHourlyRate(serviceType, start_time, offered, { highIntensity: highIntensitySupport });
       if (!rateCheck.ok) {
-        Alert.alert('Hourly rate', rateCheck.error || `Allowed range $${Number(rateCheck.minimum).toFixed(2)} – $${Number(rateCheck.maximum).toFixed(2)}/hr.`);
+        const rateMsg = rateCheck.error || `Allowed range $${Number(rateCheck.minimum).toFixed(2)} – $${Number(rateCheck.maximum).toFixed(2)}/hr.`;
+        const belowMax = rateCheck.maximum != null && offered > Number(rateCheck.maximum) + 1e-6;
+        say(
+          belowMax ? 'Rate above maximum' : 'Rate below minimum',
+          rateMsg,
+        );
         return;
       }
     }
@@ -663,15 +674,15 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
           : [],
       });
       if (error) {
-        Alert.alert('Error', error.message || 'Failed to create shift');
+        say('Error', error.message || 'Failed to create shift');
       } else {
-        Alert.alert('Success', 'Shift posted successfully!');
+        say('Success', 'Shift posted successfully!');
         reset();
         onClose();
         onCreated?.();
       }
     } catch (e) {
-      Alert.alert('Error', 'Failed to create shift');
+      say('Error', e?.message || 'Failed to create shift');
     }
     setSaving(false);
   };
@@ -687,7 +698,7 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
 
   const handleNextFromWorkers = () => {
     if (workerCountNumber < 1) {
-      Alert.alert('Missing Fields', 'Please choose how many workers you want to hire.');
+      say('Missing Fields', 'Please choose how many workers you want to hire.');
       return;
     }
     if (workerCountNumber === 1) {
@@ -710,7 +721,7 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
   const handleWorkerNext = () => {
     const worker = workerShifts[activeWorkerIndex];
     if (!worker?.start || !worker?.end) {
-      Alert.alert('Missing Fields', `Please set start time and shift hours for Worker ${activeWorkerIndex + 1}.`);
+      say('Missing Fields', `Please set start time and shift hours for Worker ${activeWorkerIndex + 1}.`);
       return;
     }
     if (activeWorkerIndex < workerCountNumber - 1) {
@@ -719,6 +730,58 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
     }
     handleCreate();
   };
+
+  const liveHourlyRateHint = useMemo(() => {
+    const offered = parseFloat(String(hourlyRate || '').replace(/,/g, ''));
+    if (!Number.isFinite(offered)) {
+      return { borderColor: Colors.border, status: 'neutral', main: null, detail: null };
+    }
+    if (offered === 0) {
+      return {
+        borderColor: Colors.border,
+        status: 'zero',
+        main: includeSleepover ? '$0/hr labour with sleepover — OK if that matches your booking.' : 'Enter a rate above $0 or enable sleepover flat.',
+        detail: null,
+      };
+    }
+    try {
+      const iso = combineDateAndTimeIso(date, startTime || '9:00 AM', 0);
+      if (!iso || !serviceType) {
+        return {
+          borderColor: Colors.border,
+          status: 'neutral',
+          main: 'Select service, date, and shift start to check your rate.',
+          detail: null,
+        };
+      }
+      const min = getNdisMinimumHourlyRate(serviceType, iso);
+      const max = getNdisMaximumHourlyRate(serviceType, iso, { highIntensity: highIntensitySupport });
+      if (offered + 1e-6 < min) {
+        return {
+          borderColor: Colors.status.error,
+          status: 'low',
+          main: `Below minimum ($${min.toFixed(2)}/hr)`,
+          detail: `Increase to at least $${min.toFixed(2)}/hr to post this shift.`,
+        };
+      }
+      if (offered > max + 1e-6) {
+        return {
+          borderColor: Colors.status.warning,
+          status: 'high',
+          main: `Above maximum ($${max.toFixed(2)}/hr)`,
+          detail: `Lower to $${max.toFixed(2)}/hr or less (or adjust high-intensity if weekday daytime).`,
+        };
+      }
+      return {
+        borderColor: Colors.border,
+        status: 'ok',
+        main: `In range for this start time`,
+        detail: `$${min.toFixed(2)} – $${max.toFixed(2)}/hr${Math.abs(min - max) < 0.005 ? ' (single cap)' : ''}`,
+      };
+    } catch (_) {
+      return { borderColor: Colors.border, status: 'neutral', main: null, detail: null };
+    }
+  }, [hourlyRate, date, startTime, serviceType, highIntensitySupport, includeSleepover]);
 
   const renderCommonDetailsFields = () => (
     <>
@@ -754,37 +817,52 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
       )}
 
       <Text style={labelStyle}>Hourly labour rate ($) *</Text>
-      <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.primary, fontWeight: Typography.fontWeight.semibold, marginTop: -Spacing.xs, marginBottom: Spacing.xs }}>
-        Use 0 if this shift is only sleepover + travel (otherwise NDIS min/max apply by time in Sydney).
-      </Text>
-      <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: -Spacing.xs, marginBottom: Spacing.xs }}>
-        Offers must stay within NDIS min/max for your service and start time (weekday daytime high-intensity allows up to $75.98/hr).
+      <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.secondary, marginTop: -Spacing.xs, marginBottom: Spacing.sm }}>
+        NDIS min/max apply from your service type and shift start (Sydney). Use $0 only for sleepover + travel only; high-intensity raises weekday daytime cap.
       </Text>
       <TextInput
-        style={inputStyle}
+        style={[
+          inputStyle,
+          {
+            borderColor: liveHourlyRateHint.borderColor,
+            borderWidth: liveHourlyRateHint.status === 'low' || liveHourlyRateHint.status === 'high' ? 2 : 1,
+          },
+        ]}
         value={hourlyRate}
         onChangeText={setHourlyRate}
         keyboardType="decimal-pad"
         placeholder="e.g. 70.23"
         placeholderTextColor={Colors.text.muted}
       />
-      <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.secondary, marginTop: -Spacing.xs, marginBottom: Spacing.sm }}>
-        {(() => {
-          try {
-            const iso = combineDateAndTimeIso(date, startTime || '9:00 AM', 0);
-            if (!iso || !serviceType) return 'Choose service type and start time to see NDIS min/max for your shift.';
-            const min = getNdisMinimumHourlyRate(serviceType, iso);
-            const max = getNdisMaximumHourlyRate(serviceType, iso, { highIntensity: highIntensitySupport });
-            return `NDIS allowed hourly range: $${min.toFixed(2)} – $${max.toFixed(2)}/hr (toggle high intensity for weekday daytime to raise the cap).`;
-          } catch (_) {
-            return 'NDIS range depends on service type and shift start (Sydney time).';
-          }
-        })()}
-      </Text>
+      {liveHourlyRateHint.main ? (
+        <View style={{ marginTop: -Spacing.xs, marginBottom: Spacing.sm }}>
+          <Text
+            style={{
+              fontSize: Typography.fontSize.sm,
+              fontWeight: Typography.fontWeight.semibold,
+              color:
+                liveHourlyRateHint.status === 'low'
+                  ? Colors.status.error
+                  : liveHourlyRateHint.status === 'high'
+                    ? Colors.status.warning
+                    : liveHourlyRateHint.status === 'zero'
+                      ? Colors.text.secondary
+                      : Colors.status.success,
+            }}
+          >
+            {liveHourlyRateHint.main}
+          </Text>
+          {liveHourlyRateHint.detail ? (
+            <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.secondary, marginTop: 4 }}>
+              {liveHourlyRateHint.detail}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
 
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: Spacing.md }}>
         <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.primary, flex: 1, paddingRight: Spacing.sm }}>
-          High intensity support (weekday daytime cap $75.98/hr)
+          High intensity (weekday daytime, cap $75.98/hr)
         </Text>
         <Switch value={highIntensitySupport} onValueChange={setHighIntensitySupport} trackColor={{ false: Colors.border, true: Colors.primary }} />
       </View>
@@ -796,9 +874,9 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
         <Switch value={includeSleepover} onValueChange={setIncludeSleepover} trackColor={{ false: Colors.border, true: Colors.primary }} />
       </View>
 
-      <Text style={labelStyle}>Travel distance (km, optional)</Text>
+      <Text style={labelStyle}>Travel (km, optional)</Text>
       <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginBottom: Spacing.xs }}>
-        Non-labour travel billed at $0.99/km (added to shift total, separate from hourly labour).
+        Billed at $0.99/km (non-labour), added to the shift total.
       </Text>
       <TextInput
         style={inputStyle}
@@ -826,7 +904,7 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
         })}
       >
         <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.primary, fontWeight: Typography.fontWeight.semibold, flex: 1, paddingRight: Spacing.sm }}>
-          NDIS rate reference (min / max enforced)
+          Rate guide (reference only)
         </Text>
         <Text style={{ color: Colors.text.muted, fontSize: 12 }}>{rateGuideOpen ? '▲' : '▼'}</Text>
       </Pressable>
@@ -841,32 +919,20 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
         }}
         >
           <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginBottom: Spacing.sm }}>
-            Minimums below match the NDIS price guide figures used in this app (Sydney time / NSW public holidays). Confirm with your plan manager. Other categories:
+            Snapshot figures — confirm with your plan manager. Enforced limits use the checker above.
           </Text>
+          <Text style={{ fontSize: 11, fontWeight: Typography.fontWeight.semibold, color: Colors.text.secondary, marginBottom: 4 }}>Other services</Text>
           {NDIS_OTHER_RATE_HINTS.map((row) => (
-            <View key={row.label} style={{ marginBottom: Spacing.xs, paddingBottom: Spacing.xs, borderBottomWidth: 1, borderBottomColor: Colors.border }}>
-              <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.primary, fontWeight: Typography.fontWeight.medium }}>
-                {row.label}
-              </Text>
-              <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.primary, fontWeight: Typography.fontWeight.semibold, marginTop: 2 }}>
-                {row.rate}
-              </Text>
+            <View key={row.label} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: Colors.borderLight }}>
+              <Text style={{ fontSize: 12, color: Colors.text.primary, flex: 1, paddingRight: Spacing.sm }}>{row.label}</Text>
+              <Text style={{ fontSize: 12, color: Colors.primary, fontWeight: Typography.fontWeight.semibold }}>{row.rate}</Text>
             </View>
           ))}
-          <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: Spacing.sm, marginBottom: Spacing.sm }}>
-            Standard support (personal care style) by time of week:
-          </Text>
+          <Text style={{ fontSize: 11, fontWeight: Typography.fontWeight.semibold, color: Colors.text.secondary, marginTop: Spacing.sm, marginBottom: 4 }}>Standard support (by time)</Text>
           {NDIS_PERSONAL_CARE_RATE_HINTS.map((row) => (
-            <View key={row.label} style={{ marginBottom: Spacing.xs, paddingBottom: Spacing.xs, borderBottomWidth: 1, borderBottomColor: Colors.border }}>
-              <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.primary, fontWeight: Typography.fontWeight.medium }}>
-                {row.label}
-              </Text>
-              <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.primary, fontWeight: Typography.fontWeight.semibold, marginTop: 2 }}>
-                {row.rate}
-              </Text>
-              {row.note ? (
-                <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: 2 }}>{row.note}</Text>
-              ) : null}
+            <View key={row.label} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: Colors.borderLight }}>
+              <Text style={{ fontSize: 12, color: Colors.text.primary, flex: 1, paddingRight: Spacing.sm }}>{row.label}</Text>
+              <Text style={{ fontSize: 12, color: Colors.primary, fontWeight: Typography.fontWeight.semibold }}>{row.rate}</Text>
             </View>
           ))}
         </View>
@@ -1432,6 +1498,21 @@ const webNumberInput = {
   color: '#0f172a',
   fontSize: 16,
 };
+/** Native `<select>` style for web time pickers inside `CreateShiftModal` */
+const webSelectStyle = {
+  width: '100%',
+  minHeight: 44,
+  paddingVertical: Spacing.sm,
+  paddingHorizontal: Spacing.sm,
+  backgroundColor: Colors.surface,
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: Colors.border,
+  borderRadius: Radius.md,
+  fontSize: Typography.fontSize.base,
+  color: Colors.text.primary,
+  boxSizing: 'border-box',
+};
 const workersSectionCard = {
   backgroundColor: 'transparent',
   borderRadius: Radius.md,
@@ -1745,7 +1826,21 @@ export function AvailableShiftsScreen({ navigation }) {
     message: '',
     confirmText: 'Confirm',
   });
+  const [infoModal, setInfoModal] = useState({ visible: false, title: '', message: '' });
   const confirmActionRef = useRef(null);
+
+  const openInfo = useCallback((title, message = '') => {
+    const body = typeof message === 'string' && message.trim() ? message.trim() : '';
+    if (Platform.OS === 'web') {
+      setInfoModal({ visible: true, title: title || 'Notice', message: body });
+    } else {
+      nativeAlertOnly(title, body);
+    }
+  }, []);
+
+  const closeInfo = useCallback(() => {
+    setInfoModal((p) => ({ ...p, visible: false }));
+  }, []);
 
   const openConfirm = useCallback(({ title, message, confirmText = 'Confirm', onConfirm }) => {
     confirmActionRef.current = typeof onConfirm === 'function' ? onConfirm : null;
@@ -1882,9 +1977,9 @@ export function AvailableShiftsScreen({ navigation }) {
 
   const applyForShift = async (shiftId) => {
     const { error } = await api.post(`/api/shifts/${shiftId}/apply`, { message: 'I am interested in this shift.' });
-    if (error) Alert.alert('Error', error.message || 'Failed to apply');
+    if (error) openInfo('Error', error.message || 'Failed to apply');
     else {
-      Alert.alert(
+      openInfo(
         'Application Pending',
         'Your shift application is pending. It will be assigned to you once the employer accepts it.'
       );
@@ -1899,7 +1994,7 @@ export function AvailableShiftsScreen({ navigation }) {
     setApplicationsLoading(true);
     const { data, error } = await api.get(`/api/shifts/${shift.id}`);
     if (error) {
-      Alert.alert('Error', error.message || 'Failed to load applicants');
+      openInfo('Error', error.message || 'Failed to load applicants');
       setApplicationsLoading(false);
       return;
     }
@@ -1915,10 +2010,10 @@ export function AvailableShiftsScreen({ navigation }) {
       const { error } = await api.put(`/api/shifts/${selectedShift.id}/applications/${application.id}/accept`, {});
       setAcceptingApplicationId(null);
       if (error) {
-        Alert.alert('Error', error.message || 'Failed to accept applicant');
+        openInfo('Error', error.message || 'Failed to accept applicant');
         return;
       }
-      Alert.alert('Worker selected', 'Booking confirmation was sent to the selected worker.');
+      openInfo('Worker selected', 'Booking confirmation was sent to the selected worker.');
       setShowApplicantsModal(false);
       setSelectedShift(null);
       setApplications([]);
@@ -2092,6 +2187,7 @@ export function AvailableShiftsScreen({ navigation }) {
         visible={showCreateModal}
         onClose={() => setShowCreateModal(false)}
         onCreated={loadShifts}
+        onAppInfo={openInfo}
       />
 
       <Modal visible={showApplicantsModal} transparent animationType="slide" onRequestClose={() => setShowApplicantsModal(false)}>
@@ -2267,6 +2363,34 @@ export function AvailableShiftsScreen({ navigation }) {
                   </Text>
                 </Pressable>
               </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {Platform.OS === 'web' && (
+        <Modal visible={infoModal.visible} transparent animationType="fade" onRequestClose={closeInfo}>
+          <View style={fallbackOverlay}>
+            <View style={[fallbackCard, { maxWidth: 420 }]}>
+              <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>
+                {infoModal.title || 'Notice'}
+              </Text>
+              <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: Spacing.sm, whiteSpace: 'pre-wrap' }}>
+                {infoModal.message || ''}
+              </Text>
+              <Pressable
+                onPress={closeInfo}
+                style={({ pressed }) => ({
+                  marginTop: Spacing.lg,
+                  backgroundColor: Colors.primary,
+                  borderRadius: Radius.md,
+                  paddingVertical: Spacing.sm,
+                  alignItems: 'center',
+                  opacity: pressed ? 0.85 : 1,
+                })}
+              >
+                <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>OK</Text>
+              </Pressable>
             </View>
           </View>
         </Modal>
