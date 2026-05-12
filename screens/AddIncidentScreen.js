@@ -72,9 +72,7 @@ export function AddIncidentScreen({ navigation }) {
         form.append('images', it.file);
       }
 
-      const { error } = await api.post(incidentEndpoint, form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      const { error } = await api.post(incidentEndpoint, form);
 
       if (error) {
         Alert.alert('Error', error.message || 'Could not submit incident');

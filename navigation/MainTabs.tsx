@@ -4,6 +4,7 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Text, Pressable } from 'react-native';
+import { NavChevron } from '../components/NavChevron.js';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { DashboardScreen } from '../screens/DashboardScreen.js';
 import { CoordinatorDashboardScreen } from '../screens/CoordinatorDashboardScreen.js';
@@ -98,7 +99,7 @@ function MessagesHeaderLeft() {
       }}
       style={({ pressed }) => ({ opacity: pressed ? 0.8 : 1, paddingHorizontal: 12, paddingVertical: 8 })}
     >
-      <Text style={{ color: Colors.text.white, fontWeight: '700', fontSize: 20 }}>←</Text>
+      <NavChevron direction="left" color={Colors.text.white} size={22} />
     </Pressable>
   );
 }
@@ -113,7 +114,7 @@ function BookingsHeaderLeft() {
       }}
       style={({ pressed }) => ({ opacity: pressed ? 0.8 : 1, paddingHorizontal: 12, paddingVertical: 8 })}
     >
-      <Text style={{ color: Colors.text.white, fontWeight: '700', fontSize: 20 }}>←</Text>
+      <NavChevron direction="left" color={Colors.text.white} size={22} />
     </Pressable>
   );
 }
@@ -128,7 +129,7 @@ function SearchHeaderLeft() {
       }}
       style={({ pressed }) => ({ opacity: pressed ? 0.8 : 1, paddingHorizontal: 12, paddingVertical: 8 })}
     >
-      <Text style={{ color: Colors.text.white, fontWeight: '700', fontSize: 20 }}>←</Text>
+      <NavChevron direction="left" color={Colors.text.white} size={22} />
     </Pressable>
   );
 }
@@ -143,7 +144,7 @@ function ProfileHeaderLeft() {
       }}
       style={({ pressed }) => ({ opacity: pressed ? 0.8 : 1, paddingHorizontal: 12, paddingVertical: 8 })}
     >
-      <Text style={{ color: Colors.text.white, fontWeight: '700', fontSize: 20 }}>←</Text>
+      <NavChevron direction="left" color={Colors.text.white} size={22} />
     </Pressable>
   );
 }
@@ -158,7 +159,7 @@ function AvailabilityHeaderLeft() {
       }}
       style={({ pressed }) => ({ opacity: pressed ? 0.8 : 1, paddingHorizontal: 12, paddingVertical: 8 })}
     >
-      <Text style={{ color: Colors.text.white, fontWeight: '700', fontSize: 20 }}>←</Text>
+      <NavChevron direction="left" color={Colors.text.white} size={22} />
     </Pressable>
   );
 }
@@ -173,7 +174,7 @@ function EmergencyHeaderLeft() {
       }}
       style={({ pressed }) => ({ opacity: pressed ? 0.8 : 1, paddingHorizontal: 12, paddingVertical: 8 })}
     >
-      <Text style={{ color: Colors.text.white, fontWeight: '700', fontSize: 20 }}>←</Text>
+      <NavChevron direction="left" color={Colors.text.white} size={22} />
     </Pressable>
   );
 }

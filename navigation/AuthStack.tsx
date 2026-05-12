@@ -1,6 +1,7 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Pressable, Text } from 'react-native';
+import { Pressable } from 'react-native';
+import { NavChevron } from '../components/NavChevron.js';
 
 import { WelcomeScreen } from '../screens/auth/WelcomeScreen.js';
 import { LoginScreen } from '../screens/auth/LoginScreen.js';
@@ -48,9 +49,7 @@ export const AuthStack = () => {
             style={({ pressed }) => ({ paddingRight: 12, opacity: pressed ? 0.7 : 1 })}
             hitSlop={8}
           >
-            <Text style={{ color: tintColor || '#FFFFFF', fontSize: 24, fontWeight: '700', lineHeight: 24 }}>
-              ←
-            </Text>
+            <NavChevron direction="left" color={tintColor || '#FFFFFF'} size={22} />
           </Pressable>
         ) : null,
       })}

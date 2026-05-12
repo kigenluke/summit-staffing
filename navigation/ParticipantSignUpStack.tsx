@@ -3,7 +3,8 @@
  */
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Pressable, Text } from 'react-native';
+import { Pressable } from 'react-native';
+import { NavChevron } from '../components/NavChevron.js';
 import { ParticipantSignUpProvider } from '../context/ParticipantSignUpContext.js';
 import { SignUpWhoNeedsSupport } from '../screens/auth/SignUpWhoNeedsSupport.js';
 import { SignUpWhenStart } from '../screens/auth/SignUpWhenStart.js';
@@ -43,9 +44,7 @@ function ParticipantSignUpNavigator() {
             style={({ pressed }) => ({ paddingRight: 12, opacity: pressed ? 0.7 : 1 })}
             hitSlop={8}
           >
-            <Text style={{ color: tintColor || '#FFFFFF', fontSize: 24, fontWeight: '700', lineHeight: 24 }}>
-              ←
-            </Text>
+            <NavChevron direction="left" color={tintColor || '#FFFFFF'} size={22} />
           </Pressable>
         ) : null,
       })}
