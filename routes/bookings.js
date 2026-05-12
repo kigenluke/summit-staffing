@@ -21,7 +21,9 @@ router.post(
     body('location_address').optional({ nullable: true }).isString(),
     body('location_lat').optional({ nullable: true }).isFloat({ min: -90, max: 90 }).toFloat(),
     body('location_lng').optional({ nullable: true }).isFloat({ min: -180, max: 180 }).toFloat(),
-    body('special_instructions').optional({ nullable: true }).isString()
+    body('high_intensity_support').optional().isBoolean().toBoolean(),
+    body('travel_distance_km').optional({ nullable: true }).isFloat({ min: 0, max: 2000 }).toFloat(),
+    body('sleepover_flat_amount').optional({ nullable: true }).isFloat({ min: 0 }).toFloat(),
   ],
   bookingController.createBooking
 );

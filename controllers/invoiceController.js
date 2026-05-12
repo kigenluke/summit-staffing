@@ -52,6 +52,8 @@ const generateInvoice = async (req, res) => {
   try {
     if (respondValidation(req, res)) return;
 
+    const { computeTravelCharge } = await import('../utils/ndisParticipantRates.mjs');
+
     const { bookingId } = req.params;
 
     const workerRes = await pool.query('SELECT id, user_id, abn, first_name, last_name FROM workers WHERE user_id = $1 LIMIT 1', [
@@ -116,7 +118,12 @@ const generateInvoice = async (req, res) => {
 
       const hours = Number(booking.actual_hours || 0);
       const rate = Number(booking.hourly_rate ?? booking.worker_hourly_rate ?? 0);
-      const subtotal = Number((hours * rate).toFixed(2));
+      const labourSubtotal = Number((hours * rate).toFixed(2));
+      const travelKm = booking.travel_distance_km != null ? Number(booking.travel_distance_km) : 0;
+      const travelPerKm = booking.travel_rate_per_km != null ? Number(booking.travel_rate_per_km) : 0.99;
+      const travelSubtotal = computeTravelCharge(travelKm, travelPerKm);
+      const sleepoverSubtotal = booking.sleepover_flat_amount != null ? Number(booking.sleepover_flat_amount) : 0;
+      const subtotal = Number((labourSubtotal + travelSubtotal + sleepoverSubtotal).toFixed(2));
       const gst = 0;
       const total = Number((subtotal + gst).toFixed(2));
 
@@ -124,6 +131,18 @@ const generateInvoice = async (req, res) => {
       const serviceDateISO = serviceDate.toISOString().slice(0, 10);
 
       const ndisSupportItemCode = getNDISItemCode(booking.service_type);
+
+      const descParts = [booking.service_type];
+      if (sleepoverSubtotal > 0) {
+        descParts.push(`Sleepover (flat): $${sleepoverSubtotal.toFixed(2)}`);
+      }
+      if (travelKm > 0) {
+        descParts.push(`Travel ${travelKm.toFixed(1)} km @ $${Number(travelPerKm).toFixed(2)}/km: $${travelSubtotal.toFixed(2)}`);
+      }
+      if (hours > 0 && rate > 0) {
+        descParts.push(`Labour ${hours.toFixed(2)} h @ $${rate.toFixed(2)}/h: $${labourSubtotal.toFixed(2)}`);
+      }
+      const serviceDescription = descParts.join(' | ');
 
       const invInsert = await client.query(
         `INSERT INTO invoices (
@@ -148,7 +167,7 @@ const generateInvoice = async (req, res) => {
           worker.abn,
           booking.ndis_number || null,
           serviceDateISO,
-          booking.service_type,
+          serviceDescription,
           ndisSupportItemCode,
           hours,
           rate,

@@ -3,7 +3,7 @@
  */
 import React, { useState } from 'react';
 import { createElement } from 'react';
-import { View, Text, ScrollView, Pressable, Alert, TextInput, Platform } from 'react-native';
+import { View, Text, ScrollView, Pressable, Alert, TextInput, Platform, Switch } from 'react-native';
 import { api } from '../services/api.js';
 let DateTimePicker = null;
 if (Platform.OS !== 'web') {
@@ -14,7 +14,12 @@ if (Platform.OS !== 'web') {
   }
 }
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
+import { formatDateDMY } from '../utils/dateFormat.js';
 import { SERVICE_TYPES, getServiceTypeSuggestions } from '../constants/serviceTypes.js';
+import * as ndisParticipantRatesMod from '../utils/ndisParticipantRates.js';
+
+const ndisParticipantRates = ndisParticipantRatesMod.default ?? ndisParticipantRatesMod;
+const { validateParticipantOfferedHourlyRate, validateTravelDistanceKm, validateSleepoverFlatAmount, SLEEPOVER_FLAT_NIGHTLY } = ndisParticipantRates;
 
 const webInputStyle = {
   width: '100%',
@@ -93,6 +98,9 @@ export function WorkerDetailScreen({ route, navigation }) {
   });
   const [instructions, setInstructions] = useState('');
   const [proposedHourlyRate, setProposedHourlyRate] = useState('');
+  const [highIntensityBooking, setHighIntensityBooking] = useState(false);
+  const [includeSleepoverBooking, setIncludeSleepoverBooking] = useState(false);
+  const [travelKmBooking, setTravelKmBooking] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showStartTimePicker, setShowStartTimePicker] = useState(false);
@@ -124,21 +132,44 @@ export function WorkerDetailScreen({ route, navigation }) {
 
   const handleBook = async () => {
     if (!serviceType.trim()) { Alert.alert('Error', 'Please enter a service type'); return; }
-    const rate = proposedHourlyRate.trim() ? parseFloat(proposedHourlyRate.replace(/,/g, '')) : NaN;
-    if (isNaN(rate) || rate < 0) {
-      Alert.alert('Error', 'Please enter your budget (hourly rate in $). You set the rate; the worker can accept or decline.');
+    const rate = proposedHourlyRate.trim() ? parseFloat(proposedHourlyRate.replace(/,/g, '')) : 0;
+    if (Number.isNaN(rate) || rate < 0) {
+      Alert.alert('Error', 'Please enter a valid hourly rate (0 is allowed with sleepover).');
       return;
     }
     const { start, end } = getStartEndForSubmit();
-    if (end <= start) {
-      Alert.alert('Error', 'End time must be after start time');
-      return;
-    }
     if (isWeb && (!webDateText || !webStartTimeText || !webEndTimeText)) {
       Alert.alert('Error', 'Please enter date and start/end time');
       return;
     }
-
+    if (end <= start) {
+      Alert.alert('Error', 'End time must be after start time');
+      return;
+    }
+    const travelParsed = parseFloat(String(travelKmBooking || '').replace(/,/g, ''));
+    const travelKm = Number.isFinite(travelParsed) && travelParsed > 0 ? travelParsed : null;
+    const tv = validateTravelDistanceKm(travelKm == null ? '' : travelKm);
+    if (!tv.ok) {
+      Alert.alert('Travel', tv.error || 'Invalid travel km');
+      return;
+    }
+    const sleepoverFlat = includeSleepoverBooking ? SLEEPOVER_FLAT_NIGHTLY : null;
+    const sv = validateSleepoverFlatAmount(sleepoverFlat);
+    if (!sv.ok) {
+      Alert.alert('Sleepover', sv.error || 'Invalid sleepover');
+      return;
+    }
+    if (rate <= 0 && !(sleepoverFlat > 0)) {
+      Alert.alert('Error', 'Enter an hourly rate and/or enable NDIS sleepover flat fee.');
+      return;
+    }
+    if (rate > 0) {
+      const rateCheck = validateParticipantOfferedHourlyRate(serviceType.trim(), start.toISOString(), rate, { highIntensity: highIntensityBooking });
+      if (!rateCheck.ok) {
+        Alert.alert('Hourly rate', rateCheck.error || `Allowed $${Number(rateCheck.minimum).toFixed(2)} – $${Number(rateCheck.maximum).toFixed(2)}/hr`);
+        return;
+      }
+    }
     setSubmitting(true);
     try {
       const { data, error } = await api.post('/api/bookings', {
@@ -148,6 +179,9 @@ export function WorkerDetailScreen({ route, navigation }) {
         end_time: end.toISOString(),
         proposed_hourly_rate: rate,
         special_instructions: instructions.trim() || undefined,
+        high_intensity_support: highIntensityBooking,
+        travel_distance_km: travelKm,
+        sleepover_flat_amount: sleepoverFlat,
       });
       if (error) {
         Alert.alert('Error', error.message || 'Failed to create booking');
@@ -276,18 +310,36 @@ export function WorkerDetailScreen({ route, navigation }) {
             </View>
           )}
 
-          <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>Your budget (hourly rate $)</Text>
+          <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>Your budget (hourly labour $)</Text>
           <TextInput
             style={inputStyle}
-            placeholder="e.g. 55.00"
+            placeholder="0 if sleepover only, else e.g. 70.23"
             placeholderTextColor={Colors.text.muted}
             value={proposedHourlyRate}
             onChangeText={setProposedHourlyRate}
             keyboardType="decimal-pad"
           />
           <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: -4, marginBottom: Spacing.sm }}>
-            You set the rate; the worker can accept or decline. NDIS price guide max ~$60.48/hr weekday (reference only).
+            NDIS min/max apply by service and start time (Sydney). Weekday daytime high-intensity cap $75.98/hr when toggled below.
           </Text>
+
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: Spacing.sm }}>
+            <Text style={{ flex: 1, fontSize: Typography.fontSize.sm, color: Colors.text.primary }}>High intensity (weekday daytime)</Text>
+            <Switch value={highIntensityBooking} onValueChange={setHighIntensityBooking} trackColor={{ false: Colors.border, true: Colors.primary }} />
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: Spacing.sm }}>
+            <Text style={{ flex: 1, fontSize: Typography.fontSize.sm, color: Colors.text.primary }}>NDIS sleepover flat (${SLEEPOVER_FLAT_NIGHTLY.toFixed(2)})</Text>
+            <Switch value={includeSleepoverBooking} onValueChange={setIncludeSleepoverBooking} trackColor={{ false: Colors.border, true: Colors.primary }} />
+          </View>
+          <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>Travel km (optional, $0.99/km)</Text>
+          <TextInput
+            style={inputStyle}
+            placeholder="e.g. 15"
+            placeholderTextColor={Colors.text.muted}
+            value={travelKmBooking}
+            onChangeText={setTravelKmBooking}
+            keyboardType="decimal-pad"
+          />
 
           {isWeb ? (
             <>
@@ -306,7 +358,7 @@ export function WorkerDetailScreen({ route, navigation }) {
                 style={[inputStyle, { justifyContent: 'center' }]}
               >
                 <Text style={{ color: Colors.text.primary }}>
-                   {bookingDate.toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}
+                   {formatDateDMY(bookingDate)}
                 </Text>
               </Pressable>
               {showDatePicker && DateTimePicker && (

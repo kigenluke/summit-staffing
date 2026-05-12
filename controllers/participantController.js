@@ -1,9 +1,11 @@
+const crypto = require('crypto');
 const { validationResult } = require('express-validator');
 
 const pool = require('../config/database');
 const { uploadFile } = require('../services/s3Service');
 const { validateNDISNumber } = require('../utils/ndisValidator');
 const { sendPushNotification } = require('../services/notificationService');
+const { sendCoordinatorInviteEmail } = require('../services/emailService');
 let initiatorColumnAvailable = null;
 
 const respondValidation = (req, res) => {
@@ -437,6 +439,88 @@ const requestCoordinatorAccess = async (req, res) => {
   }
 };
 
+const inviteCoordinatorByEmail = async (req, res) => {
+  try {
+    if (respondValidation(req, res)) return;
+    const participantUserId = req.user.userId;
+    const email = String(req.body.email || '').trim().toLowerCase();
+    if (!email || !email.includes('@')) {
+      return res.status(400).json({ ok: false, error: 'Valid email is required' });
+    }
+
+    const participant = await getParticipantForUser(participantUserId);
+    if (!participant) {
+      return res.status(404).json({ ok: false, error: 'Participant not found' });
+    }
+
+    const existing = await pool.query(
+      'SELECT id, email, role FROM users WHERE lower(email) = lower($1) LIMIT 1',
+      [email]
+    );
+    if (existing.rowCount > 0) {
+      const u = existing.rows[0];
+      if (u.role === 'coordinator') {
+        return res.status(200).json({
+          ok: true,
+          mode: 'existing_coordinator',
+          coordinator: {
+            user_id: u.id,
+            email: u.email,
+            display_name: u.email.split('@')[0],
+          },
+        });
+      }
+      return res.status(400).json({
+        ok: false,
+        error: 'This email is already registered as a worker or participant. They need a different email for a coordinator account.',
+      });
+    }
+
+    await pool.query(
+      `DELETE FROM coordinator_email_invites
+       WHERE participant_user_id = $1 AND lower(invited_email) = lower($2) AND consumed_at IS NULL`,
+      [participantUserId, email]
+    );
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+    await pool.query(
+      `INSERT INTO coordinator_email_invites (participant_user_id, invited_email, token, expires_at)
+       VALUES ($1, $2, $3, $4)`,
+      [participantUserId, email, token, expiresAt]
+    );
+
+    const appUrl = (process.env.WEB_APP_URL || process.env.APP_URL || 'http://localhost:5173').replace(/\/$/, '');
+    const signupUrl = `${appUrl}/?coordinatorInvite=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}&role=coordinator`;
+
+    const participantDisplay = `${participant.first_name || ''} ${participant.last_name || ''}`.trim() || participant.email.split('@')[0];
+
+    try {
+      await sendCoordinatorInviteEmail(email, participantDisplay, signupUrl);
+    } catch (emailErr) {
+      // eslint-disable-next-line no-console
+      console.error('sendCoordinatorInviteEmail failed:', emailErr?.message || emailErr);
+      return res.status(503).json({
+        ok: false,
+        error: 'Could not send email. Check server Mailgun settings (MAILGUN_API_KEY, MAILGUN_DOMAIN) or try again later.',
+        details: process.env.NODE_ENV !== 'production' ? String(emailErr?.message || emailErr).slice(0, 200) : undefined,
+      });
+    }
+
+    return res.status(200).json({ ok: true, mode: 'invited', message: 'Invitation email sent.' });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('inviteCoordinatorByEmail:', err);
+    if (String(err?.message || '').includes('coordinator_email_invites')) {
+      return res.status(503).json({
+        ok: false,
+        error: 'Database is missing coordinator invite tables. Run the latest schema migration (coordinator_email_invites), then try again.',
+      });
+    }
+    return res.status(500).json({ ok: false, error: 'Failed to send invitation' });
+  }
+};
+
 module.exports = {
   getParticipants,
   getParticipantById,
@@ -446,4 +530,5 @@ module.exports = {
   verifyNDIS,
   searchCoordinatorByEmail,
   requestCoordinatorAccess,
+  inviteCoordinatorByEmail,
 };

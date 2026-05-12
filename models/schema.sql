@@ -701,6 +701,21 @@ BEGIN
   END IF;
 END $$;
 
+-- Pending email invites when a participant invites someone who is not yet a coordinator user
+CREATE TABLE IF NOT EXISTS coordinator_email_invites (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  participant_user_id UUID NOT NULL,
+  invited_email TEXT NOT NULL,
+  token TEXT NOT NULL UNIQUE,
+  expires_at TIMESTAMPTZ NOT NULL,
+  consumed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT coordinator_email_invites_participant_fk FOREIGN KEY (participant_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS coordinator_email_invites_token_idx ON coordinator_email_invites (token);
+CREATE INDEX IF NOT EXISTS coordinator_email_invites_participant_email_idx ON coordinator_email_invites (participant_user_id, lower(invited_email));
+
 -- ============================================================
 -- Worker Incidents & Complaints
 -- ============================================================
@@ -735,5 +750,69 @@ CREATE TABLE IF NOT EXISTS worker_complaints (
 
 CREATE INDEX IF NOT EXISTS worker_complaints_worker_id_idx ON worker_complaints (worker_id);
 CREATE INDEX IF NOT EXISTS worker_complaints_created_at_idx ON worker_complaints (created_at DESC);
+
+ALTER TABLE worker_complaints ADD COLUMN IF NOT EXISTS image_urls TEXT[] DEFAULT '{}'::text[];
+
+-- Participant incidents & complaints (same shape as worker tables)
+CREATE TABLE IF NOT EXISTS participant_incidents (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  participant_id UUID NOT NULL,
+  incident_name TEXT NOT NULL,
+  incident_details TEXT,
+  image_urls TEXT[] DEFAULT '{}'::text[],
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT participant_incidents_participant_fk FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE
+);
+
+ALTER TABLE participant_incidents ADD COLUMN IF NOT EXISTS triage_category TEXT;
+ALTER TABLE participant_incidents ADD COLUMN IF NOT EXISTS called_000 BOOLEAN DEFAULT FALSE;
+ALTER TABLE participant_incidents ADD COLUMN IF NOT EXISTS is_reportable BOOLEAN DEFAULT FALSE;
+ALTER TABLE participant_incidents ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'normal';
+ALTER TABLE participant_incidents ADD COLUMN IF NOT EXISTS incident_status TEXT DEFAULT 'received';
+ALTER TABLE participant_incidents ADD COLUMN IF NOT EXISTS admin_handover_at TIMESTAMPTZ;
+
+CREATE INDEX IF NOT EXISTS participant_incidents_participant_id_idx ON participant_incidents (participant_id);
+CREATE INDEX IF NOT EXISTS participant_incidents_created_at_idx ON participant_incidents (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS participant_complaints (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  participant_id UUID NOT NULL,
+  complaint_details TEXT NOT NULL,
+  image_urls TEXT[] DEFAULT '{}'::text[],
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT participant_complaints_participant_fk FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS participant_complaints_participant_id_idx ON participant_complaints (participant_id);
+CREATE INDEX IF NOT EXISTS participant_complaints_created_at_idx ON participant_complaints (created_at DESC);
+
+-- NDIS billing extras: sleepover flat, travel km, high-intensity cap flag
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'shifts' AND column_name = 'high_intensity') THEN
+    ALTER TABLE shifts ADD COLUMN high_intensity BOOLEAN NOT NULL DEFAULT FALSE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'shifts' AND column_name = 'travel_distance_km') THEN
+    ALTER TABLE shifts ADD COLUMN travel_distance_km NUMERIC(10,2);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'shifts' AND column_name = 'sleepover_flat_amount') THEN
+    ALTER TABLE shifts ADD COLUMN sleepover_flat_amount NUMERIC(10,2);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'shifts' AND column_name = 'travel_rate_per_km') THEN
+    ALTER TABLE shifts ADD COLUMN travel_rate_per_km NUMERIC(10,4) NOT NULL DEFAULT 0.99;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'bookings' AND column_name = 'high_intensity') THEN
+    ALTER TABLE bookings ADD COLUMN high_intensity BOOLEAN NOT NULL DEFAULT FALSE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'bookings' AND column_name = 'travel_distance_km') THEN
+    ALTER TABLE bookings ADD COLUMN travel_distance_km NUMERIC(10,2);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'bookings' AND column_name = 'sleepover_flat_amount') THEN
+    ALTER TABLE bookings ADD COLUMN sleepover_flat_amount NUMERIC(10,2);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'bookings' AND column_name = 'travel_rate_per_km') THEN
+    ALTER TABLE bookings ADD COLUMN travel_rate_per_km NUMERIC(10,4) NOT NULL DEFAULT 0.99;
+  END IF;
+END $$;
 
 COMMIT;

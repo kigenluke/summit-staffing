@@ -1,8 +1,8 @@
 /**
- * Summit Staffing – Email verification (enter token from email)
+ * Summit Staffing – Set a new password using the token from the reset email.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, Pressable, KeyboardAvoidingView, Platform } from 'react-native';
 import { useLoading } from '../../hooks/useLoading.js';
 import { useErrorHandler } from '../../hooks/useErrorHandler.js';
@@ -30,49 +30,67 @@ const buttonStyle = (pressed) => ({
   opacity: pressed ? 0.9 : 1,
 });
 
-function readVerifyTokenFromWebUrl() {
+function readTokenFromWebUrl() {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return '';
   try {
-    return String(new URL(window.location.href).searchParams.get('token') || '').trim();
+    const u = new URL(window.location.href);
+    return String(u.searchParams.get('token') || '').trim();
   } catch (_) {
     return '';
   }
 }
 
-export function VerificationScreen({ route, navigation }) {
-  const email = route?.params?.email ?? '';
+export function ResetPasswordScreen({ route, navigation }) {
   const paramToken = route?.params?.token ? String(route.params.token).trim() : '';
   const [token, setToken] = useState(paramToken);
-  const [verified, setVerified] = useState(false);
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [done, setDone] = useState(false);
   const { isLoading, withLoading } = useLoading();
   const { error, handleError, clearError } = useErrorHandler();
 
   useEffect(() => {
     if (paramToken) setToken(paramToken);
     else {
-      const fromUrl = readVerifyTokenFromWebUrl();
+      const fromUrl = readTokenFromWebUrl();
       if (fromUrl) setToken(fromUrl);
     }
   }, [paramToken]);
 
-  const onVerify = withLoading(async () => {
+  const onSubmit = withLoading(async () => {
     clearError();
-    const { data, error: err } = await api.post('/api/auth/verify-email', { token: token.trim() });
+    const t = token.trim();
+    if (!t) {
+      handleError(new Error('Reset link is missing or invalid. Open the link from your email again.'));
+      return;
+    }
+    if (password.length < 8) {
+      handleError(new Error('Password must be at least 8 characters.'));
+      return;
+    }
+    if (password !== confirm) {
+      handleError(new Error('Passwords do not match.'));
+      return;
+    }
+    const { data, error: err } = await api.post('/api/auth/reset-password', {
+      token: t,
+      newPassword: password,
+    });
     if (err) {
       handleError(err);
       return;
     }
     if (data?.ok) {
-      setVerified(true);
-      showSuccess('Email verified. You can sign in.');
-      setTimeout(() => navigation.navigate('Login'), 1500);
+      setDone(true);
+      showSuccess('Password updated. You can sign in now.');
+      setTimeout(() => navigation.navigate('Login'), 1600);
     } else {
-      handleError(new Error(data?.error || 'Verification failed'));
+      handleError(new Error(data?.error || 'Reset failed'));
     }
   });
 
   if (isLoading) {
-    return <LoadingScreen message="Verifying…" />;
+    return <LoadingScreen message="Updating password…" />;
   }
 
   return (
@@ -83,38 +101,67 @@ export function VerificationScreen({ route, navigation }) {
     >
       <View style={{ flex: 1, padding: Spacing.lg, justifyContent: 'center' }}>
         <Text style={{ fontSize: Typography.fontSize.xxl, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.sm }}>
-          Verify your email
+          New password
         </Text>
         <Text style={{ fontSize: Typography.fontSize.base, color: Colors.text.secondary, marginBottom: Spacing.xl }}>
-          {email ? `We sent a verification link to ${email}. Enter the code from the email below.` : "Enter the verification code from your email."}
+          Choose a new password for your account. The reset link from your email is valid for one hour.
         </Text>
 
-        {verified ? (
+        {done ? (
           <Text style={{ fontSize: Typography.fontSize.base, color: Colors.status.success }}>
-            Verified! Redirecting to sign in…
+            Password saved. Taking you to sign in…
           </Text>
         ) : (
           <>
             <Text style={{ fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.medium, color: Colors.text.primary, marginBottom: Spacing.sm }}>
-              Verification code
+              Reset token (from your email)
             </Text>
             <TextInput
-              style={[inputStyle, { marginBottom: Spacing.lg }]}
-              placeholder="Paste code from email"
+              style={[inputStyle, { marginBottom: Spacing.md, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }]}
+              placeholder="Paste token if the link did not fill it"
               placeholderTextColor={Colors.text.muted}
               value={token}
               onChangeText={setToken}
               autoCapitalize="none"
+              autoCorrect={false}
               editable={!isLoading}
             />
+
+            <Text style={{ fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.medium, color: Colors.text.primary, marginBottom: Spacing.sm }}>
+              New password
+            </Text>
+            <TextInput
+              style={[inputStyle, { marginBottom: Spacing.md }]}
+              placeholder="At least 8 characters"
+              placeholderTextColor={Colors.text.muted}
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+              editable={!isLoading}
+            />
+
+            <Text style={{ fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.medium, color: Colors.text.primary, marginBottom: Spacing.sm }}>
+              Confirm password
+            </Text>
+            <TextInput
+              style={[inputStyle, { marginBottom: Spacing.lg }]}
+              placeholder="Repeat new password"
+              placeholderTextColor={Colors.text.muted}
+              value={confirm}
+              onChangeText={setConfirm}
+              secureTextEntry
+              editable={!isLoading}
+            />
+
             {error ? (
               <Text style={{ color: Colors.status.error, fontSize: Typography.fontSize.sm, marginBottom: Spacing.md }}>
                 {error.message}
               </Text>
             ) : null}
-            <Pressable onPress={onVerify} style={({ pressed }) => buttonStyle(pressed)}>
+
+            <Pressable onPress={onSubmit} style={({ pressed }) => buttonStyle(pressed)}>
               <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold, fontSize: Typography.fontSize.base }}>
-                Verify email
+                Update password
               </Text>
             </Pressable>
           </>

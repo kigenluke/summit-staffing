@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
+import { formatDateDMY } from '../utils/dateFormat.js';
 import { useAuthStore } from '../store/authStore.js';
 
 /* ───── stat card ───── */
@@ -197,7 +198,7 @@ export function AdminDashboardScreen({ navigation }) {
               <View key={d.id} style={{ backgroundColor: Colors.surface, borderRadius: Radius.md, padding: Spacing.md, marginBottom: Spacing.sm, ...Shadows.sm }}>
                 <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>{d.document_type || d.type}</Text>
                 <Text style={{ color: Colors.text.secondary, marginVertical: 4 }}>Worker: {d.first_name ? `${d.first_name} ${d.last_name || ''}` : d.worker_name || `ID: ${d.worker_id}`}</Text>
-                <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs }}>Uploaded: {new Date(d.created_at || d.uploaded_at).toLocaleDateString()}</Text>
+                <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs }}>Uploaded: {formatDateDMY(d.created_at || d.uploaded_at)}</Text>
                 <View style={{ flexDirection: 'row', marginTop: Spacing.sm }}>
                   <Pressable onPress={() => handleDoc(d.id, 'approve')}
                     style={{ flex: 1, backgroundColor: '#10B981', padding: Spacing.sm, borderRadius: Radius.sm, alignItems: 'center', marginRight: Spacing.xs }}>
@@ -224,7 +225,7 @@ export function AdminDashboardScreen({ navigation }) {
               <View key={u.id} style={{ backgroundColor: Colors.surface, borderRadius: Radius.md, padding: Spacing.md, marginBottom: Spacing.sm, ...Shadows.sm, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>{u.email}</Text>
-                  <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs }}>{u.role} • {u.is_suspended ? ' Suspended' : ' Active'} • Joined {new Date(u.created_at).toLocaleDateString()}</Text>
+                  <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs }}>{u.role} • {u.is_suspended ? ' Suspended' : ' Active'} • Joined {formatDateDMY(u.created_at)}</Text>
                 </View>
                 <View style={{ alignItems: 'flex-end', gap: 6 }}>
                   {u.role === 'worker' && (
@@ -259,7 +260,7 @@ export function AdminDashboardScreen({ navigation }) {
                 {Array.isArray(revenue.report) && revenue.report.length > 0 ? (
                   revenue.report.map((r, i) => (
                     <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: Colors.border }}>
-                      <Text style={{ color: Colors.text.secondary }}>{r.period ? new Date(r.period).toLocaleDateString() : `Period ${i + 1}`}</Text>
+                      <Text style={{ color: Colors.text.secondary }}>{r.period ? formatDateDMY(r.period) : `Period ${i + 1}`}</Text>
                       <View style={{ alignItems: 'flex-end' }}>
                         <Text style={{ color: '#10B981', fontWeight: Typography.fontWeight.bold }}>${Number(r.total_revenue || 0).toLocaleString()}</Text>
                         <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs }}>{r.total_bookings || 0} bookings</Text>

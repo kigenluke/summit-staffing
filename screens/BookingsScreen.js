@@ -6,6 +6,7 @@ import { View, Text, FlatList, Pressable, RefreshControl, ActivityIndicator, Ale
 import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
+import { formatDateDMY, formatTime12h } from '../utils/dateFormat.js';
 
 const STATUS_COLORS = {
   pending: Colors.status.warning,
@@ -79,8 +80,13 @@ export function BookingsScreen({ navigation }) {
             {b.service_type}
           </Text>
           <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: 4 }}>
-            {new Date(b.start_time).toLocaleDateString()} • {new Date(b.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            {formatDateDMY(b.start_time)} • {formatTime12h(b.start_time)}
           </Text>
+          {isWorker && (b.status === 'confirmed' || b.status === 'in_progress') && (b.participant_first_name || b.participant_last_name) ? (
+            <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.primary, marginTop: 4, fontWeight: Typography.fontWeight.medium }}>
+              Client: {[b.participant_first_name, b.participant_last_name].filter(Boolean).join(' ')}
+            </Text>
+          ) : null}
         </View>
         <View style={{
           backgroundColor: STATUS_COLORS[b.status] || Colors.text.muted,

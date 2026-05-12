@@ -3,9 +3,9 @@
  * Wraps navigation and toast; shows Auth or Main stack based on auth state.
  */
 
-import React, { useEffect } from 'react';
-import { View, Text, ScrollView } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import React, { useEffect, useCallback } from 'react';
+import { View, Text, ScrollView, Platform, Linking } from 'react-native';
+import { NavigationContainer, createNavigationContainerRef, CommonActions } from '@react-navigation/native';
 import { ToastProvider } from './components/Toast.js';
 import { AppNavigator } from './navigation/AppNavigator';
 import { Colors } from './constants/theme.js';
@@ -24,6 +24,46 @@ const navTheme = {
 };
 
 const appWrapperStyle = { flex: 1, backgroundColor: Colors.background };
+
+/** Web: open /reset-password?token=… or /verify-email?token=… from email links. */
+export const navigationRef = createNavigationContainerRef();
+
+function consumeWebAuthDeepLink() {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+  const path = (window.location.pathname || '').replace(/^\//, '').split('/')[0] || '';
+  let token = '';
+  try {
+    token = String(new URLSearchParams(window.location.search).get('token') || '').trim();
+  } catch (_) {}
+  if (!token || !navigationRef.isReady()) return;
+  if (path === 'reset-password') {
+    navigationRef.dispatch(CommonActions.navigate({ name: 'ResetPassword', params: { token } }));
+    return;
+  }
+  if (path === 'verify-email') {
+    navigationRef.dispatch(CommonActions.navigate({ name: 'Verification', params: { token } }));
+  }
+}
+
+function consumeNativeAuthDeepLink() {
+  if (Platform.OS === 'web') return;
+  Linking.getInitialURL()
+    .then((url) => {
+      if (!url || !navigationRef.isReady()) return;
+      try {
+        const u = new URL(url);
+        const token = String(u.searchParams.get('token') || '').trim();
+        const path = (u.pathname || '').replace(/^\//, '').split('/')[0] || '';
+        if (!token) return;
+        if (path === 'reset-password') {
+          navigationRef.dispatch(CommonActions.navigate({ name: 'ResetPassword', params: { token } }));
+        } else if (path === 'verify-email') {
+          navigationRef.dispatch(CommonActions.navigate({ name: 'Verification', params: { token } }));
+        }
+      } catch (_) {}
+    })
+    .catch(() => {});
+}
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -60,11 +100,17 @@ export default function App() {
   useEffect(() => {
     rehydrateAuth();
   }, []);
+
+  const onNavReady = useCallback(() => {
+    consumeWebAuthDeepLink();
+    consumeNativeAuthDeepLink();
+  }, []);
+
   return (
     <ErrorBoundary>
       <View style={appWrapperStyle}>
         <ToastProvider>
-          <NavigationContainer theme={navTheme}>
+          <NavigationContainer ref={navigationRef} theme={navTheme} onReady={onNavReady}>
             <AppNavigator />
           </NavigationContainer>
         </ToastProvider>

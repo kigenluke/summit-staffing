@@ -37,9 +37,19 @@ const createAttachment = (buffer, filename, contentType = 'application/octet-str
   });
 };
 
+const getClientAppBaseUrl = () => {
+  const base =
+    process.env.WEB_APP_URL ||
+    process.env.CLIENT_APP_URL ||
+    process.env.PUBLIC_APP_URL ||
+    process.env.APP_URL ||
+    'http://localhost:5173';
+  return String(base).replace(/\/$/, '');
+};
+
 const sendPasswordResetEmail = async (email, resetToken) => {
-  const appUrl = process.env.APP_URL || 'http://localhost:3000';
-  const resetUrl = `${appUrl.replace(/\/$/, '')}/reset-password?token=${encodeURIComponent(resetToken)}`;
+  const appUrl = getClientAppBaseUrl();
+  const resetUrl = `${appUrl}/reset-password?token=${encodeURIComponent(resetToken)}`;
 
   const subject = 'Reset your password';
   const html = `<p>You requested a password reset.</p><p>Use this link to reset your password:</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>This link expires in 1 hour.</p>`;
@@ -48,13 +58,27 @@ const sendPasswordResetEmail = async (email, resetToken) => {
 };
 
 const sendVerificationEmail = async (email, verificationToken) => {
-  const appUrl = process.env.APP_URL || 'http://localhost:3000';
-  const verifyUrl = `${appUrl.replace(/\/$/, '')}/verify-email?token=${encodeURIComponent(verificationToken)}`;
+  const appUrl = getClientAppBaseUrl();
+  const verifyUrl = `${appUrl}/verify-email?token=${encodeURIComponent(verificationToken)}`;
 
   const subject = 'Verify your email';
   const html = `<p>Welcome to Summit Staffing.</p><p>Please verify your email using this link:</p><p><a href="${verifyUrl}">${verifyUrl}</a></p>`;
 
   return sendEmail(email, subject, html);
+};
+
+const sendCoordinatorInviteEmail = async (toEmail, participantDisplayName, signupUrl) => {
+  const subject = 'Invitation: coordinate on Summit Staffing';
+  const safeName = String(participantDisplayName || 'A participant').replace(/</g, '&lt;');
+  const html = `
+    <p>Hello,</p>
+    <p><strong>${safeName}</strong> has invited you to join Summit Staffing as a <strong>coordinator</strong> so you can help manage their account.</p>
+    <p>Create your coordinator account using this link (valid for 14 days):</p>
+    <p><a href="${signupUrl}">${signupUrl}</a></p>
+    <p>Use the same email address this invitation was sent to: <strong>${String(toEmail).replace(/</g, '&lt;')}</strong></p>
+    <p>If you did not expect this email, you can ignore it.</p>
+  `;
+  return sendEmail(toEmail, subject, html);
 };
 
 const sendInvoiceEmail = async (to, invoiceNumber, pdfBuffer) => {
@@ -74,5 +98,6 @@ module.exports = {
   createAttachment,
   sendPasswordResetEmail,
   sendVerificationEmail,
+  sendCoordinatorInviteEmail,
   sendInvoiceEmail
 };

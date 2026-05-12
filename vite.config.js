@@ -142,7 +142,10 @@ export default defineConfig(({ mode }) => {
         '/api': {
           target: RAILWAY_API_TARGET,
           changeOrigin: true,
-          secure: true,
+          secure: RAILWAY_API_TARGET.startsWith('https'),
+          // Multipart (complaints/incidents) can be slow; avoid premature socket close / ECONNRESET on large uploads.
+          timeout: 120000,
+          proxyTimeout: 120000,
         },
       },
     },

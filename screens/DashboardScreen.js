@@ -7,6 +7,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
+import { formatDateDMY, formatTime12h } from '../utils/dateFormat.js';
 
 const Card = ({ children, style }) => (
   <View style={[{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.md }, style]}>
@@ -372,7 +373,7 @@ export function DashboardScreen({ navigation }) {
             {nextShift ? (
               <>
                 <Text style={{ fontSize: Typography.fontSize.lg, color: Colors.text.primary, fontWeight: Typography.fontWeight.bold, marginTop: 4 }}>
-                  {new Date(nextShift.start_time).toLocaleDateString()} at {new Date(nextShift.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  {formatDateDMY(nextShift.start_time)} at {formatTime12h(nextShift.start_time)}
                 </Text>
                 <Text style={{ fontSize: Typography.fontSize.base, color: Colors.text.primary, marginTop: 4 }}>
                   {nextShift.participant_first_name ? `${nextShift.participant_first_name} ${nextShift.participant_last_name || ''}`.trim() : 'Participant'}
@@ -429,8 +430,13 @@ export function DashboardScreen({ navigation }) {
               <View style={{ flex: 1 }}>
                 <Text style={{ fontWeight: Typography.fontWeight.semibold, color: Colors.text.primary }}>{b.service_type}</Text>
                 <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: 2 }}>
-                  {new Date(b.start_time).toLocaleDateString()} • {new Date(b.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  {formatDateDMY(b.start_time)} • {formatTime12h(b.start_time)}
                 </Text>
+                {isWorker && (b.status === 'confirmed' || b.status === 'in_progress') && (b.participant_first_name || b.participant_last_name) ? (
+                  <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.primary, marginTop: 4, fontWeight: Typography.fontWeight.medium }}>
+                    Client: {[b.participant_first_name, b.participant_last_name].filter(Boolean).join(' ')}
+                  </Text>
+                ) : null}
               </View>
               <View style={{
                 backgroundColor: b.status === 'confirmed' ? Colors.status.success : Colors.status.warning,
@@ -446,28 +452,6 @@ export function DashboardScreen({ navigation }) {
         ))
       )}
 
-      {user?.role === 'participant' && (
-        <Card style={{ marginTop: Spacing.lg }}>
-          <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.xs }}>
-            Invite a coordinator
-          </Text>
-          <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: Spacing.md }}>
-            Search by email and send a request. The coordinator must approve before they can help manage your account.
-          </Text>
-          <Pressable
-            onPress={() => navigation.navigate('ParticipantSearchCoordinator')}
-            style={({ pressed }) => ({
-              backgroundColor: Colors.primary,
-              borderRadius: Radius.md,
-              paddingVertical: Spacing.md,
-              alignItems: 'center',
-              opacity: pressed ? 0.85 : 1,
-            })}
-          >
-            <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Find coordinator</Text>
-          </Pressable>
-        </Card>
-      )}
     </ScrollView>
   );
 }

@@ -32,6 +32,54 @@ CREATE TABLE IF NOT EXISTS worker_complaints (
 
 CREATE INDEX IF NOT EXISTS worker_complaints_worker_id_idx ON worker_complaints (worker_id);
 CREATE INDEX IF NOT EXISTS worker_complaints_created_at_idx ON worker_complaints (created_at DESC);
+
+ALTER TABLE worker_complaints ADD COLUMN IF NOT EXISTS image_urls TEXT[] DEFAULT '{}'::text[];
+
+CREATE TABLE IF NOT EXISTS participant_incidents (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  participant_id UUID NOT NULL,
+  incident_name TEXT NOT NULL,
+  incident_details TEXT,
+  image_urls TEXT[] DEFAULT '{}'::text[],
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT participant_incidents_participant_fk FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE
+);
+
+ALTER TABLE participant_incidents ADD COLUMN IF NOT EXISTS triage_category TEXT;
+ALTER TABLE participant_incidents ADD COLUMN IF NOT EXISTS called_000 BOOLEAN DEFAULT FALSE;
+ALTER TABLE participant_incidents ADD COLUMN IF NOT EXISTS is_reportable BOOLEAN DEFAULT FALSE;
+ALTER TABLE participant_incidents ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'normal';
+ALTER TABLE participant_incidents ADD COLUMN IF NOT EXISTS incident_status TEXT DEFAULT 'received';
+ALTER TABLE participant_incidents ADD COLUMN IF NOT EXISTS admin_handover_at TIMESTAMPTZ;
+
+CREATE INDEX IF NOT EXISTS participant_incidents_participant_id_idx ON participant_incidents (participant_id);
+CREATE INDEX IF NOT EXISTS participant_incidents_created_at_idx ON participant_incidents (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS participant_complaints (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  participant_id UUID NOT NULL,
+  complaint_details TEXT NOT NULL,
+  image_urls TEXT[] DEFAULT '{}'::text[],
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT participant_complaints_participant_fk FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS participant_complaints_participant_id_idx ON participant_complaints (participant_id);
+CREATE INDEX IF NOT EXISTS participant_complaints_created_at_idx ON participant_complaints (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS coordinator_email_invites (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  participant_user_id UUID NOT NULL,
+  invited_email TEXT NOT NULL,
+  token TEXT NOT NULL UNIQUE,
+  expires_at TIMESTAMPTZ NOT NULL,
+  consumed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT coordinator_email_invites_participant_fk FOREIGN KEY (participant_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS coordinator_email_invites_token_idx ON coordinator_email_invites (token);
+CREATE INDEX IF NOT EXISTS coordinator_email_invites_participant_email_idx ON coordinator_email_invites (participant_user_id, lower(invited_email));
 `;
 
 async function run() {
@@ -51,7 +99,7 @@ async function run() {
     SELECT table_name
     FROM information_schema.tables
     WHERE table_schema = 'public'
-      AND table_name IN ('worker_incidents','worker_complaints')
+      AND table_name IN ('worker_incidents','worker_complaints','participant_incidents','participant_complaints')
     ORDER BY table_name
   `);
 

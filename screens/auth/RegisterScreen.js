@@ -2,7 +2,7 @@
  * Summit Staffing – Register screen (worker or participant)
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -41,6 +41,8 @@ const buttonStyle = (pressed) => ({
 
 export function RegisterScreen({ navigation, route }) {
   const roleFromRoute = route.params?.role;
+  const inviteTokenFromRoute = route.params?.coordinatorInviteToken;
+  const emailFromRoute = route.params?.email;
   const isProvideSupportFlow = roleFromRoute === 'worker';
   const isCoordinatorFlow = roleFromRoute === 'coordinator';
   const initialRole = roleFromRoute === 'worker'
@@ -50,7 +52,7 @@ export function RegisterScreen({ navigation, route }) {
       : 'participant';
   const [role, setRole] = useState(initialRole);
   const [workAs, setWorkAs] = useState('individual');
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(emailFromRoute ? String(emailFromRoute).trim().toLowerCase() : '');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [firstName, setFirstName] = useState('');
@@ -58,11 +60,30 @@ export function RegisterScreen({ navigation, route }) {
   const [abn, setAbn] = useState('');
   const [ndisNumber, setNdisNumber] = useState('');
   const [phone, setPhone] = useState('');
+  const [coordinatorInviteToken, setCoordinatorInviteToken] = useState(
+    inviteTokenFromRoute ? String(inviteTokenFromRoute).trim() : ''
+  );
   const [showVendorCategoryDropdown, setShowVendorCategoryDropdown] = useState(false);
   const [vendorCategories, setVendorCategories] = useState([]);
   const { setAuth } = useAuthStore();
   const { isLoading, withLoading } = useLoading();
   const { error, handleError, clearError } = useErrorHandler();
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    try {
+      const usp = new URLSearchParams(window.location.search);
+      const inv = usp.get('coordinatorInvite');
+      const em = usp.get('email');
+      const r = usp.get('role');
+      if (inv) {
+        setCoordinatorInviteToken(inv.trim());
+        setRole('coordinator');
+      }
+      if (em) setEmail(String(em).trim().toLowerCase());
+      if (r === 'coordinator') setRole('coordinator');
+    } catch (_) {}
+  }, []);
 
   const onRegister = withLoading(async () => {
     clearError();
@@ -92,6 +113,9 @@ export function RegisterScreen({ navigation, route }) {
     if (role === 'participant' && ndisNumber.trim()) {
       body.ndis_number = ndisNumber.replace(/\D/g, '').slice(0, 10);
     }
+    if (role === 'coordinator' && coordinatorInviteToken) {
+      body.coordinator_invite_token = coordinatorInviteToken;
+    }
 
     const { data, error: err } = await api.post('/api/auth/register', body);
     if (err) {
@@ -100,6 +124,11 @@ export function RegisterScreen({ navigation, route }) {
     }
     if (data?.ok && data?.token) {
       setAuth(data.token, data.user);
+      if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.search?.includes('coordinatorInvite')) {
+        try {
+          window.history.replaceState({}, '', window.location.pathname || '/');
+        } catch (_) {}
+      }
     } else {
       handleError(new Error(data?.error || 'Registration failed'));
     }
@@ -125,6 +154,12 @@ export function RegisterScreen({ navigation, route }) {
         <Text style={{ fontSize: Typography.fontSize.base, color: Colors.text.secondary, marginBottom: Spacing.lg }}>
           {isProvideSupportFlow ? 'Create your worker account' : 'Join as a participant, worker, or coordinator'}
         </Text>
+
+        {role === 'coordinator' && coordinatorInviteToken ? (
+          <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.status.success, marginBottom: Spacing.md, padding: Spacing.md, backgroundColor: `${Colors.status.success}18`, borderRadius: Radius.md }}>
+            You are signing up from a participant invitation. Use the same email the invitation was sent to. After you create your account, you will be linked to manage their profile.
+          </Text>
+        ) : null}
 
         {!isProvideSupportFlow && !isCoordinatorFlow && (
           <>

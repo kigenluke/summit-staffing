@@ -3,6 +3,7 @@ import { View, Text, ScrollView, RefreshControl, ActivityIndicator, Pressable, T
 import { api } from '../services/api.js';
 import { useAuthStore } from '../store/authStore.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
+import { formatDateDMY } from '../utils/dateFormat.js';
 
 const Card = ({ children, style }) => (
   <View style={[{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.sm }, style]}>
@@ -250,7 +251,7 @@ export function BudgetScreen() {
           bookings.slice(0, 30).map((b) => (
             <View key={b.id} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6 }}>
               <Text style={{ color: Colors.text.secondary }}>
-                {new Date(b.end_time || b.start_time || Date.now()).toLocaleDateString()} - {b.service_type || 'Service'}
+                {formatDateDMY(b.end_time || b.start_time || Date.now())} - {b.service_type || 'Service'}
               </Text>
               <Text style={{ color: Colors.text.primary, fontWeight: Typography.fontWeight.semibold }}>
                 {fmtMoney(b.total_amount)}

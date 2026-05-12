@@ -7,6 +7,7 @@ import { View, Text, FlatList, RefreshControl, ActivityIndicator, Pressable } fr
 import { api } from '../services/api.js';
 import { useAuthStore } from '../store/authStore.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
+import { formatDateDMY } from '../utils/dateFormat.js';
 
 const getStatusColor = (status) => {
   switch (status) {
@@ -110,7 +111,7 @@ export function DocumentsScreen({ navigation }) {
                 </Text>
                 {item.service_date && (
                   <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: 4 }}>
-                    {new Date(item.service_date).toLocaleDateString()}
+                    {formatDateDMY(item.service_date)}
                   </Text>
                 )}
               </View>

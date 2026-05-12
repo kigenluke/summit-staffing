@@ -4,7 +4,6 @@ const pool = require('../config/database');
 const { isWithinRadius } = require('../utils/gpsHelper');
 const { sendPushNotification } = require('../services/notificationService');
 const { sendSMS } = require('../services/smsService');
-
 const respondValidation = (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -78,6 +77,18 @@ const createBooking = async (req, res) => {
   try {
     if (respondValidation(req, res)) return;
 
+    const [ndis, breakMeta] = await Promise.all([
+      import('../utils/ndisParticipantRates.mjs'),
+      import('../utils/shiftBreakMeta.mjs'),
+    ]);
+    const {
+      validateParticipantOfferedHourlyRate,
+      validateTravelDistanceKm,
+      validateSleepoverFlatAmount,
+      TRAVEL_NON_LABOUR_PER_KM,
+    } = ndis;
+    const { getShiftPayEstimate } = breakMeta;
+
     const participant = await getParticipantForUser(req.user.userId);
     if (!participant) {
       return res.status(403).json({ ok: false, error: 'Forbidden' });
@@ -92,7 +103,10 @@ const createBooking = async (req, res) => {
       location_address,
       location_lat,
       location_lng,
-      special_instructions
+      special_instructions,
+      high_intensity_support,
+      travel_distance_km,
+      sleepover_flat_amount,
     } = req.body;
 
     const workerRes = await pool.query('SELECT id, user_id FROM workers WHERE id = $1 LIMIT 1', [worker_id]);
@@ -106,10 +120,49 @@ const createBooking = async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Proposed hourly rate must be 0 or more' });
     }
 
+    let travelKm = travel_distance_km == null || travel_distance_km === '' ? null : Number(travel_distance_km);
+    if (travelKm != null && Number.isNaN(travelKm)) travelKm = null;
+    const tv = validateTravelDistanceKm(travelKm == null ? '' : travelKm);
+    if (!tv.ok) {
+      return res.status(400).json({ ok: false, error: tv.error });
+    }
+
+    let sleepoverFlat = sleepover_flat_amount == null || sleepover_flat_amount === '' ? null : Number(sleepover_flat_amount);
+    if (sleepoverFlat != null && (Number.isNaN(sleepoverFlat) || sleepoverFlat === 0)) sleepoverFlat = null;
+    const sv = validateSleepoverFlatAmount(sleepoverFlat);
+    if (!sv.ok) {
+      return res.status(400).json({ ok: false, error: sv.error });
+    }
+
+    const highIntensity = Boolean(high_intensity_support);
+
+    if (rate <= 0 && !(sleepoverFlat > 0)) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Enter an hourly labour rate and/or include the NDIS sleepover flat fee.',
+      });
+    }
+
+    if (rate > 0) {
+      const rateCheck = validateParticipantOfferedHourlyRate(service_type, start_time, rate, { highIntensity });
+      if (!rateCheck.ok) {
+        return res.status(400).json({
+          ok: false,
+          error: rateCheck.error,
+          minimum_hourly_rate: rateCheck.minimum,
+          maximum_hourly_rate: rateCheck.maximum,
+        });
+      }
+    }
+
     const start = new Date(start_time);
     const end = new Date(end_time);
-    const scheduledHours = hoursBetween(start, end);
-    const totalAmount = Number((rate * scheduledHours).toFixed(2));
+    const payEst = getShiftPayEstimate(start, end, rate, special_instructions || '', {
+      sleepoverFlatAmount: sleepoverFlat || 0,
+      travelKm: travelKm || 0,
+      travelRatePerKm: TRAVEL_NON_LABOUR_PER_KM,
+    });
+    const totalAmount = Number(payEst.estimatedTotal.toFixed(2));
     const commissionAmount = Number((totalAmount * 0.15).toFixed(2));
 
     const bookingRes = await pool.query(
@@ -126,8 +179,12 @@ const createBooking = async (req, res) => {
         location_lng,
         special_instructions,
         total_amount,
-        commission_amount
-      ) VALUES ($1,$2,$3,$4,$5,'pending',$6,$7,$8,$9,$10,$11,$12)
+        commission_amount,
+        high_intensity,
+        travel_distance_km,
+        sleepover_flat_amount,
+        travel_rate_per_km
+      ) VALUES ($1,$2,$3,$4,$5,'pending',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
       RETURNING *`,
       [
         participant.id,
@@ -141,7 +198,11 @@ const createBooking = async (req, res) => {
         toNumberOrNull(location_lng),
         special_instructions || null,
         totalAmount,
-        commissionAmount
+        commissionAmount,
+        highIntensity,
+        travelKm,
+        sleepoverFlat,
+        TRAVEL_NON_LABOUR_PER_KM,
       ]
     );
 
@@ -208,8 +269,14 @@ const getBookings = async (req, res) => {
     const countRes = await pool.query(`SELECT COUNT(*)::int AS total FROM bookings b ${whereSql}`, params);
 
     const dataRes = await pool.query(
-      `SELECT b.*
+      `SELECT b.*,
+              COALESCE(p.first_name, '') AS participant_first_name,
+              COALESCE(p.last_name, '') AS participant_last_name,
+              COALESCE(w.first_name, '') AS worker_first_name,
+              COALESCE(w.last_name, '') AS worker_last_name
        FROM bookings b
+       JOIN participants p ON p.id = b.participant_id
+       JOIN workers w ON w.id = b.worker_id
        ${whereSql}
        ORDER BY b.created_at DESC
        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,

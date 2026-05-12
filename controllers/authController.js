@@ -101,6 +101,63 @@ const register = async (req, res) => {
         );
       }
 
+      const coordinatorInviteRaw = typeof req.body.coordinator_invite_token === 'string'
+        ? req.body.coordinator_invite_token.trim()
+        : '';
+      if (role === 'coordinator' && coordinatorInviteRaw) {
+        try {
+          const invRes = await client.query(
+            `SELECT id, participant_user_id, invited_email
+             FROM coordinator_email_invites
+             WHERE token = $1 AND consumed_at IS NULL AND expires_at > now()
+             LIMIT 1`,
+            [coordinatorInviteRaw]
+          );
+          if (invRes.rowCount > 0) {
+            const inv = invRes.rows[0];
+            if (String(inv.invited_email).toLowerCase() === normalizedEmail) {
+              const participantUserId = inv.participant_user_id;
+              const coordinatorUserId = user.id;
+              const initCol = await client.query(
+                `SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = 'public' AND table_name = 'coordinator_participant_access' AND column_name = 'initiator' LIMIT 1`
+              );
+              const hasInitiator = initCol.rowCount > 0;
+              if (hasInitiator) {
+                await client.query(
+                  `INSERT INTO coordinator_participant_access (
+                     coordinator_user_id, participant_user_id, status, requested_at, approved_at, rejected_at, initiator
+                   ) VALUES ($1, $2, 'approved', now(), now(), NULL, 'participant')
+                   ON CONFLICT (coordinator_user_id, participant_user_id) DO UPDATE SET
+                     status = 'approved',
+                     requested_at = now(),
+                     approved_at = now(),
+                     rejected_at = NULL,
+                     initiator = 'participant'`,
+                  [coordinatorUserId, participantUserId]
+                );
+              } else {
+                await client.query(
+                  `INSERT INTO coordinator_participant_access (
+                     coordinator_user_id, participant_user_id, status, requested_at, approved_at, rejected_at
+                   ) VALUES ($1, $2, 'approved', now(), now(), NULL)
+                   ON CONFLICT (coordinator_user_id, participant_user_id) DO UPDATE SET
+                     status = 'approved',
+                     requested_at = now(),
+                     approved_at = now(),
+                     rejected_at = NULL`,
+                  [coordinatorUserId, participantUserId]
+                );
+              }
+              await client.query('UPDATE coordinator_email_invites SET consumed_at = now() WHERE id = $1', [inv.id]);
+            }
+          }
+        } catch (linkErr) {
+          // eslint-disable-next-line no-console
+          console.error('Coordinator invite link failed (non-fatal):', linkErr?.message || linkErr);
+        }
+      }
+
       const verificationToken = crypto.randomBytes(TOKEN_BYTES).toString('hex');
       const verificationTokenHash = sha256(verificationToken);
       const verificationExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);

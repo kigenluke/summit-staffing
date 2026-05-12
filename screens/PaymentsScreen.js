@@ -6,6 +6,7 @@ import { View, Text, FlatList, Pressable, RefreshControl, ActivityIndicator, Ale
 import { api } from '../services/api.js';
 import { useAuthStore } from '../store/authStore.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
+import { formatDateDMY } from '../utils/dateFormat.js';
 
 const STATUS_COLORS = { pending: Colors.status.warning, succeeded: Colors.status.success, failed: Colors.status.error, refunded: Colors.text.muted };
 
@@ -208,7 +209,7 @@ export function PaymentsScreen() {
                     ${Number(p.amount || 0).toFixed(2)}
                   </Text>
                   {p.payment_date && <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: 2 }}>
-                    {new Date(p.payment_date).toLocaleDateString()}
+                    {formatDateDMY(p.payment_date)}
                   </Text>}
                 </View>
                 <View style={{ backgroundColor: STATUS_COLORS[p.status] || Colors.text.muted, paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: Radius.full }}>

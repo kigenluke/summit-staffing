@@ -7,6 +7,12 @@ const authController = require('../controllers/authController');
 const router = express.Router();
 
 const emailValidator = body('email').isEmail().withMessage('Valid email is required').normalizeEmail();
+const emailValidatorForgot = body('email')
+  .trim()
+  .notEmpty()
+  .withMessage('Email is required')
+  .isEmail()
+  .withMessage('Valid email is required');
 const passwordValidator = body('password')
   .isString()
   .isLength({ min: 8 })
@@ -34,7 +40,12 @@ router.post(
     body('address').optional({ nullable: true }).isString(),
     body('work_as').optional({ nullable: true }).isIn(['individual', 'vendor']),
     body('vendor_categories').optional({ nullable: true }).isArray({ min: 1 }),
-    body('vendor_categories.*').optional({ nullable: true }).isString().isLength({ min: 2, max: 100 })
+    body('vendor_categories.*').optional({ nullable: true }).isString().isLength({ min: 2, max: 100 }),
+    body('coordinator_invite_token')
+      .optional({ nullable: true })
+      .isString()
+      .isLength({ min: 10, max: 128 })
+      .withMessage('Invalid invitation token')
   ],
   (req, res, next) => {
     // Enforce required worker fields
@@ -59,7 +70,7 @@ router.post(
 
 router.post('/login', [emailValidator, body('password').isString()], authController.login);
 
-router.post('/forgot-password', [emailValidator], authController.forgotPassword);
+router.post('/forgot-password', [emailValidatorForgot], authController.forgotPassword);
 
 router.post(
   '/reset-password',

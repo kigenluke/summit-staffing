@@ -2,7 +2,7 @@
  * Summit Staffing – Search/Browse Workers Screen
  */
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, ScrollView, Pressable, TextInput, RefreshControl, ActivityIndicator, FlatList, Linking, Platform } from 'react-native';
+import { View, Text, ScrollView, Pressable, TextInput, RefreshControl, ActivityIndicator, FlatList } from 'react-native';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { getServiceTypeSuggestions } from '../constants/serviceTypes.js';
@@ -185,20 +185,6 @@ export function SearchWorkersScreen({ navigation }) {
   const vendorsMissingDocs = mode === 'vendor' && baseFiltered.some((w) => !w.has_vendor_documents);
   const isAmbulanceCategory = mode === 'vendor' && vendorCategoryFilter === 'Ambulance Services';
 
-  const callAmbulance = useCallback(async () => {
-    const telUrl = 'tel:000';
-    try {
-      const canOpen = await Linking.canOpenURL(telUrl);
-      if (canOpen) {
-        await Linking.openURL(telUrl);
-        return;
-      }
-    } catch (_) {}
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      window.location.href = telUrl;
-    }
-  }, []);
-
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
       <View style={{ flexDirection: 'row', paddingHorizontal: Spacing.md, paddingTop: Spacing.sm, gap: Spacing.sm }}>
@@ -272,7 +258,13 @@ export function SearchWorkersScreen({ navigation }) {
                 {VENDOR_CATEGORIES.map((cat) => (
                   <Pressable
                     key={cat}
-                    onPress={() => setVendorCategoryFilter(cat)}
+                    onPress={() => {
+                      if (cat === 'Ambulance Services') {
+                        navigation.navigate('Emergency');
+                        return;
+                      }
+                      setVendorCategoryFilter(cat);
+                    }}
                     style={{
                       borderRadius: Radius.full,
                       borderWidth: 1,
@@ -315,10 +307,10 @@ export function SearchWorkersScreen({ navigation }) {
               {isAmbulanceCategory ? (
                 <>
                   <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.semibold, color: Colors.text.primary, textAlign: 'center' }}>
-                    Call 000 for an emergency
+                    Use the Emergency tab for 000 and crisis contacts
                   </Text>
                   <Pressable
-                    onPress={callAmbulance}
+                    onPress={() => navigation.navigate('Emergency')}
                     style={({ pressed }) => ({
                       marginTop: Spacing.md,
                       backgroundColor: Colors.status.error,
@@ -329,7 +321,7 @@ export function SearchWorkersScreen({ navigation }) {
                     })}
                   >
                     <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>
-                      Call Ambulance
+                      Open Emergency
                     </Text>
                   </Pressable>
                 </>

@@ -75,28 +75,46 @@ export function getHeaders(customHeaders = {}) {
  * Does not throw; parse response and surface errors for callers.
  */
 export async function request(method, path, body = null, options = {}) {
-  const url = path.startsWith('http') ? path : `${ApiConfig.baseURL.replace(/\/$/, '')}${path}`;;
+  const url = path.startsWith('http') ? path : `${ApiConfig.baseURL.replace(/\/$/, '')}${path}`;
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), ApiConfig.timeout);
   const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
+  const timeoutMs = isFormData ? Math.max(ApiConfig.timeout, 120000) : ApiConfig.timeout;
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  const { headers: headerOverrides, signal: callerSignal, ...restFetchOptions } = options;
+  const mergedHeaders = (() => {
+    const h = getHeaders(headerOverrides);
+    // For multipart uploads, browser/React Native sets boundary automatically.
+    if (isFormData) {
+      delete h['Content-Type'];
+      delete h['content-type'];
+    }
+    return h;
+  })();
+
+  let fetchSignal = controller.signal;
+  let onCallerAbort;
+  if (callerSignal) {
+    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.any === 'function') {
+      fetchSignal = AbortSignal.any([controller.signal, callerSignal]);
+    } else if (callerSignal.aborted) {
+      controller.abort();
+    } else {
+      onCallerAbort = () => controller.abort();
+      callerSignal.addEventListener('abort', onCallerAbort);
+    }
+  }
 
   try {
+    // Important: do not `...options` after `headers` — callers often pass `headers: { 'Content-Type': ... }`
+    // which would replace merged headers and drop Authorization / break multipart boundaries.
     const res = await fetch(url, {
       method,
-      headers: (() => {
-        const h = getHeaders(options.headers);
-        // For multipart uploads, browser/React Native sets boundary automatically.
-        if (isFormData) {
-          delete h['Content-Type'];
-          delete h['content-type'];
-        }
-        return h;
-      })(),
+      ...restFetchOptions,
+      headers: mergedHeaders,
       body: body != null ? (isFormData ? body : JSON.stringify(body)) : undefined,
-      signal: controller.signal,
-      ...options,
+      signal: fetchSignal,
     });
-    clearTimeout(timeoutId);
 
     let data = null;
     const contentType = res.headers.get('content-type') || '';
@@ -112,7 +130,13 @@ export async function request(method, path, body = null, options = {}) {
       if (res.status === 401) {
         try { logout(); } catch (_) {}
       }
-      const errorMsg = data?.error || data?.errors?.[0]?.msg || data?.message || `Request failed: ${res.status}`;
+      const errorMsg =
+        data?.error
+        || (Array.isArray(data?.errors) && data.errors.length
+          ? data.errors.map((e) => e?.msg || e?.message).filter(Boolean).join(' ')
+          : null)
+        || data?.message
+        || `Request failed: ${res.status}`;
       const error = new Error(errorMsg);
       error.status = res.status;
       error.response = data;
@@ -121,11 +145,15 @@ export async function request(method, path, body = null, options = {}) {
 
     return { data, error: null, status: res.status };
   } catch (err) {
-    clearTimeout(timeoutId);
     const error = err.name === 'AbortError'
       ? Object.assign(new Error('Request timed out'), { status: 408 })
       : Object.assign(err, { status: err.status || 0 });
     return { data: null, error, status: error.status };
+  } finally {
+    clearTimeout(timeoutId);
+    if (onCallerAbort && callerSignal) {
+      callerSignal.removeEventListener('abort', onCallerAbort);
+    }
   }
 }
 

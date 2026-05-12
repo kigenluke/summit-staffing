@@ -5,6 +5,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, FlatList, Pressable, RefreshControl, ActivityIndicator, Alert } from 'react-native';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
+import { formatDateDMY } from '../utils/dateFormat.js';
 
 const STATUS_COLORS = { draft: Colors.text.muted, sent: Colors.status.info, paid: Colors.status.success };
 
@@ -51,7 +52,7 @@ export function InvoicesScreen() {
                     {inv.service_description || 'NDIS Service'}
                   </Text>
                   {inv.service_date && <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: 2 }}>
-                     {new Date(inv.service_date).toLocaleDateString()}
+                     {formatDateDMY(inv.service_date)}
                   </Text>}
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>

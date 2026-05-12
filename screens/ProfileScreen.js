@@ -56,6 +56,7 @@ const MenuSection = ({ children }) => (
 export function ProfileScreen({ navigation }) {
   const { user, logout } = useAuthStore();
   const isWorker = user?.role === 'worker';
+  const isParticipant = user?.role === 'participant';
   const isCoordinator = user?.role === 'coordinator';
   const isAdmin = user?.role === 'admin';
   const { restricted, syncFromWorkerProfile } = useWorkerGate();
@@ -299,7 +300,7 @@ export function ProfileScreen({ navigation }) {
         <MenuItem label="Inbox" disabled={restricted} onPress={() => safeNavigate('Messages')} />
       </MenuSection>
 
-      {isWorker && (
+      {(isWorker || isParticipant) && (
         <MenuSection>
           <MenuItem
             label="Incident & Complain reports"
@@ -310,7 +311,7 @@ export function ProfileScreen({ navigation }) {
           {incidentMenuOpen && (
             <View style={{ paddingLeft: Spacing.md }}>
               <MenuItem label="Report an Incident" onPress={() => safeNavigate('AddIncident')} />
-              <MenuItem label="Add Complain" onPress={() => safeNavigate('AddComplaint')} />
+              <MenuItem label="Add Complaint" onPress={() => safeNavigate('AddComplaint')} />
             </View>
           )}
         </MenuSection>
@@ -324,6 +325,16 @@ export function ProfileScreen({ navigation }) {
           <MenuItem label="Payment Details" onPress={() => safeNavigate('Payments')} />
         )}
       </MenuSection>
+
+      {isParticipant && (
+        <MenuSection>
+          <MenuItem
+            label="Invite a coordinator"
+            disabled={false}
+            onPress={() => safeNavigate('ParticipantSearchCoordinator')}
+          />
+        </MenuSection>
+      )}
 
       {isWorker && (
         <MenuSection>

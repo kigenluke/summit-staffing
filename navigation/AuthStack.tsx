@@ -8,6 +8,7 @@ import { SignUpRoleChoice } from '../screens/auth/SignUpRoleChoice.js';
 import { RegisterScreen } from '../screens/auth/RegisterScreen.js';
 import { ParticipantSignUpStack } from './ParticipantSignUpStack';
 import { ForgotPasswordScreen } from '../screens/auth/ForgotPasswordScreen.js';
+import { ResetPasswordScreen } from '../screens/auth/ResetPasswordScreen.js';
 import { VerificationScreen } from '../screens/auth/VerificationScreen.js';
 
 const headerStyle = {
@@ -22,10 +23,15 @@ export type AuthStackParamList = {
   Welcome: undefined;
   Login: undefined;
   SignUpRoleChoice: undefined;
-  Register: { role?: 'worker' | 'participant' } | undefined;
+  Register: {
+    role?: 'worker' | 'participant' | 'coordinator';
+    coordinatorInviteToken?: string;
+    email?: string;
+  } | undefined;
   ParticipantSignUp: undefined;
   ForgotPassword: undefined;
-  Verification: { email?: string } | undefined;
+  ResetPassword: { token?: string } | undefined;
+  Verification: { email?: string; token?: string } | undefined;
 };
 
 const Stack = createNativeStackNavigator<AuthStackParamList>();
@@ -55,6 +61,7 @@ export const AuthStack = () => {
       <Stack.Screen name="Register" component={RegisterScreen} options={{ title: 'Sign up' }} />
       <Stack.Screen name="ParticipantSignUp" component={ParticipantSignUpStack} options={{ headerShown: false }} />
       <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} options={{ title: 'Reset Password' }} />
+      <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} options={{ title: 'New password' }} />
       <Stack.Screen name="Verification" component={VerificationScreen} options={{ title: 'Verify Email' }} />
     </Stack.Navigator>
   );

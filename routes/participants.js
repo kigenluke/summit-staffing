@@ -6,6 +6,7 @@ const auth = require('../middleware/auth');
 const checkAdmin = require('../middleware/checkAdmin');
 const checkParticipant = require('../middleware/checkParticipant');
 const participantController = require('../controllers/participantController');
+const incidentsController = require('../controllers/incidentsController');
 
 const router = express.Router();
 
@@ -23,6 +24,50 @@ const upload = multer({
   }
 });
 
+const incidentImagesUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024,
+    files: 5,
+  },
+  fileFilter: (req, file, cb) => {
+    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
+    if (!allowed.includes(file.mimetype)) {
+      return cb(new Error('Invalid file type. Only images are allowed.'));
+    }
+    return cb(null, true);
+  },
+});
+
+const participantIncidentMiddlewares = [
+  auth,
+  checkParticipant,
+  incidentImagesUpload.array('images', 5),
+  body('incident_name').isString().isLength({ min: 2, max: 120 }),
+  body('incident_details').isString().isLength({ min: 5, max: 2000 }),
+  body('triage_category')
+    .isString()
+    .isIn([
+      'death_of_participant',
+      'serious_injury',
+      'abuse_or_neglect',
+      'unlawful_physical_or_sexual_contact',
+      'sexual_misconduct',
+      'restrictive_practice',
+      'other',
+    ]),
+  body('called_000')
+    .isString()
+    .isIn(['true', 'false']),
+];
+
+const participantComplaintMiddlewares = [
+  auth,
+  checkParticipant,
+  incidentImagesUpload.array('images', 5),
+  body('complaint_details').isString().isLength({ min: 5, max: 2000 }),
+];
+
 router.get(
   '/',
   [auth, checkAdmin, query('limit').optional().isInt({ min: 1, max: 100 }).toInt(), query('offset').optional().isInt({ min: 0 }).toInt()],
@@ -30,6 +75,24 @@ router.get(
 );
 
 router.get('/me', [auth, checkParticipant], participantController.getMe);
+
+router.post(
+  '/me/incidents',
+  participantIncidentMiddlewares,
+  incidentsController.createParticipantIncident
+);
+
+router.post(
+  '/me/complaints',
+  participantComplaintMiddlewares,
+  incidentsController.createParticipantComplaint
+);
+
+router.post(
+  '/invite-coordinator',
+  [auth, checkParticipant, body('email').isEmail().normalizeEmail()],
+  participantController.inviteCoordinatorByEmail
+);
 
 router.get(
   '/search-coordinator',

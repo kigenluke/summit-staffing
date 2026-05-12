@@ -4,7 +4,7 @@
 import React, { useEffect, useState, useCallback, useLayoutEffect, useRef, useMemo } from 'react';
 import {
   View, Text, FlatList, Pressable, RefreshControl, Alert, Modal,
-  TextInput, ScrollView, ActivityIndicator, Platform,
+  TextInput, ScrollView, ActivityIndicator, Platform, Image, Switch,
 } from 'react-native';
 import * as PlacesPkg from 'react-native-google-places-autocomplete';
 import NativeDatePicker from '../components/NativeDatePicker.js';
@@ -13,6 +13,21 @@ import { api, ApiConfig } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { SERVICE_TYPES } from '../constants/serviceTypes.js';
 import { NavChevron } from '../components/NavChevron.js';
+import { formatDateDMY, formatYmdToDMY, sameLocalCalendarDay } from '../utils/dateFormat.js';
+import * as shiftBreakMetaMod from '../utils/shiftBreakMeta.js';
+import * as ndisParticipantRatesMod from '../utils/ndisParticipantRates.js';
+
+const shiftBreakMeta = shiftBreakMetaMod.default ?? shiftBreakMetaMod;
+const { getShiftPayEstimate } = shiftBreakMeta;
+const ndisParticipantRates = ndisParticipantRatesMod.default ?? ndisParticipantRatesMod;
+const {
+  validateParticipantOfferedHourlyRate,
+  getNdisMinimumHourlyRate,
+  getNdisMaximumHourlyRate,
+  validateTravelDistanceKm,
+  validateSleepoverFlatAmount,
+  SLEEPOVER_FLAT_NIGHTLY,
+} = ndisParticipantRates;
 
 const SERVICE_ICONS = {
   // 'Personal Care': '🧴',
@@ -54,6 +69,8 @@ function getGooglePlacesBrowserKey() {
 
 // ── Mini Calendar Component ────────────────────────────────────────────────────
 function MiniCalendar({ selectedDate, onSelect }) {
+  const CAL_MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'];
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -62,8 +79,6 @@ function MiniCalendar({ selectedDate, onSelect }) {
 
   const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
   const firstDayOfWeek = new Date(viewYear, viewMonth, 1).getDay();
-  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December'];
   const dayNames = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 
   const goBack = () => {
@@ -87,7 +102,7 @@ function MiniCalendar({ selectedDate, onSelect }) {
           <NavChevron direction="left" color={Colors.primary} size={18} />
         </Pressable>
         <Text style={{ fontSize: Typography.fontSize.base, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>
-          {monthNames[viewMonth]} {viewYear}
+          {CAL_MONTH_NAMES[viewMonth]} {viewYear}
         </Text>
         <Pressable onPress={goForward} style={{ padding: Spacing.sm }}>
           <NavChevron direction="right" color={Colors.primary} size={18} />
@@ -171,6 +186,24 @@ function ServiceTypeCard({ type, selected, onPress }) {
   );
 }
 
+/** NDIS price guide figures used as minimum offers (Sydney time / NSW public holidays). */
+const NDIS_PERSONAL_CARE_RATE_HINTS = [
+  { label: 'Weekday daytime (6am–8pm)', rate: '$70.23/hr', note: 'Minimum for standard support at this time' },
+  { label: 'Weekday evening (after 8pm–midnight)', rate: '$77.38/hr' },
+  { label: 'Weekday night (midnight–6am)', rate: '$78.81/hr' },
+  { label: 'Saturday', rate: '$98.83/hr' },
+  { label: 'Sunday', rate: '$127.43/hr' },
+  { label: 'Public holiday (NSW)', rate: '$156.03/hr' },
+  { label: 'Sleepover (per night, guide)', rate: '$297.60', note: 'Flat nightly figure — confirm billing with your provider' },
+];
+
+const NDIS_OTHER_RATE_HINTS = [
+  { label: 'House cleaning / yard (Domestic Assistance, Home & Community)', rate: '$56.98/hr min (higher if weekend/PH)' },
+  { label: 'Personal domestic activities (Assistance with Daily Life)', rate: '$59.06/hr min (higher if weekend/PH)' },
+  { label: 'RN weekday daytime (Therapeutic / Improved Health)', rate: '$123.65/hr min' },
+  { label: 'Travel non-labour (per km)', rate: '$0.99/km' },
+];
+
 // ── Create Shift Modal ────────────────────────────────────────────────────────
 function CreateShiftModal({ visible, onClose, onCreated }) {
   const MAX_SHIFT_HOURS = 24;
@@ -183,7 +216,7 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
   const [title, setTitle] = useState('');
   const [serviceType, setServiceType] = useState('');
   const [showServicePicker, setShowServicePicker] = useState(false);
-  const [hourlyRate, setHourlyRate] = useState('');
+  const [hourlyRate, setHourlyRate] = useState('70.23');
   const [date, setDate] = useState('');
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
@@ -219,6 +252,11 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
   const [paidBreak, setPaidBreak] = useState(false);
   const [breakPay, setBreakPay] = useState('');
 
+  const [rateGuideOpen, setRateGuideOpen] = useState(false);
+  const [highIntensitySupport, setHighIntensitySupport] = useState(false);
+  const [includeSleepover, setIncludeSleepover] = useState(false);
+  const [travelKmInput, setTravelKmInput] = useState('');
+
   const placesRef = useRef(null);
   const PlacesAutocompleteComponent = (
     PlacesPkg?.GooglePlacesAutocomplete ||
@@ -249,7 +287,7 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
   }, [visible]);
 
   const reset = () => {
-    setTitle(''); setServiceType(''); setHourlyRate(''); setDate('');
+    setTitle(''); setServiceType(''); setHourlyRate('70.23'); setDate('');
     setStartTime(''); setEndTime(''); setLocation(''); setDescription('');
     setLocationLat(null); setLocationLng(null);
     setCommonShiftPreset('');
@@ -264,6 +302,10 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
     setBreakPay('');
     setStep('workers');
     setActiveWorkerIndex(0);
+    setRateGuideOpen(false);
+    setHighIntensitySupport(false);
+    setIncludeSleepover(false);
+    setTravelKmInput('');
   };
 
   const parseTimeToMinutes = (timeStr) => {
@@ -508,8 +550,13 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
   };
 
   const validateCommonFields = () => {
-    if (!title || !serviceType || !hourlyRate || !date || !location) {
+    if (!title || !serviceType || !date || !location) {
       Alert.alert('Missing Fields', 'Please fill in all required fields.');
+      return false;
+    }
+    const offered = parseFloat(String(hourlyRate || '').replace(/,/g, '')) || 0;
+    if (offered <= 0 && !includeSleepover) {
+      Alert.alert('Missing rate', 'Enter an hourly labour rate (or 0) and/or turn on NDIS sleepover flat fee.');
       return false;
     }
     return true;
@@ -547,6 +594,32 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
       return;
     }
 
+    const offered = parseFloat(String(hourlyRate || '').replace(/,/g, '')) || 0;
+    const travelParsed = parseFloat(String(travelKmInput || '').replace(/,/g, ''));
+    const travelDistanceKm = Number.isFinite(travelParsed) && travelParsed > 0 ? travelParsed : null;
+    const tv = validateTravelDistanceKm(travelDistanceKm == null ? '' : travelDistanceKm);
+    if (!tv.ok) {
+      Alert.alert('Travel', tv.error || 'Invalid travel distance.');
+      return;
+    }
+    const sleepoverFlat = includeSleepover ? SLEEPOVER_FLAT_NIGHTLY : null;
+    const sv = validateSleepoverFlatAmount(sleepoverFlat);
+    if (!sv.ok) {
+      Alert.alert('Sleepover', sv.error || 'Invalid sleepover.');
+      return;
+    }
+    if (offered <= 0 && !(sleepoverFlat > 0)) {
+      Alert.alert('Rate required', 'Enter an hourly labour rate and/or turn on NDIS sleepover flat fee.');
+      return;
+    }
+    if (offered > 0) {
+      const rateCheck = validateParticipantOfferedHourlyRate(serviceType, start_time, offered, { highIntensity: highIntensitySupport });
+      if (!rateCheck.ok) {
+        Alert.alert('Hourly rate', rateCheck.error || `Allowed range $${Number(rateCheck.minimum).toFixed(2)} – $${Number(rateCheck.maximum).toFixed(2)}/hr.`);
+        return;
+      }
+    }
+
     const breakMetaText = addBreak
       ? `Break: ${breakMinutes} min | Paid break: ${paidBreak ? 'Yes' : 'No'}${paidBreak ? ` | Break pay: $${parseFloat(breakPay || 0).toFixed(2)}` : ''}`
       : '';
@@ -567,11 +640,14 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
       const { error } = await api.post('/api/shifts', {
         title,
         service_type: serviceType,
-        hourly_rate: parseFloat(hourlyRate),
+        hourly_rate: offered,
         start_time,
         end_time,
         location,
         description: fullDescription,
+        high_intensity_support: highIntensitySupport,
+        travel_distance_km: travelDistanceKm,
+        sleepover_flat_amount: sleepoverFlat,
         workers_count: count,
         same_shift: count >= 2 ? sameShift : true,
         has_break: addBreak,
@@ -677,12 +753,128 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
         </View>
       )}
 
-      <Text style={labelStyle}>Hourly Rate ($) *</Text>
-      <TextInput style={inputStyle} value={hourlyRate} onChangeText={setHourlyRate} keyboardType="numeric" />
+      <Text style={labelStyle}>Hourly labour rate ($) *</Text>
+      <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.primary, fontWeight: Typography.fontWeight.semibold, marginTop: -Spacing.xs, marginBottom: Spacing.xs }}>
+        Use 0 if this shift is only sleepover + travel (otherwise NDIS min/max apply by time in Sydney).
+      </Text>
+      <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: -Spacing.xs, marginBottom: Spacing.xs }}>
+        Offers must stay within NDIS min/max for your service and start time (weekday daytime high-intensity allows up to $75.98/hr).
+      </Text>
+      <TextInput
+        style={inputStyle}
+        value={hourlyRate}
+        onChangeText={setHourlyRate}
+        keyboardType="decimal-pad"
+        placeholder="e.g. 70.23"
+        placeholderTextColor={Colors.text.muted}
+      />
+      <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.secondary, marginTop: -Spacing.xs, marginBottom: Spacing.sm }}>
+        {(() => {
+          try {
+            const iso = combineDateAndTimeIso(date, startTime || '9:00 AM', 0);
+            if (!iso || !serviceType) return 'Choose service type and start time to see NDIS min/max for your shift.';
+            const min = getNdisMinimumHourlyRate(serviceType, iso);
+            const max = getNdisMaximumHourlyRate(serviceType, iso, { highIntensity: highIntensitySupport });
+            return `NDIS allowed hourly range: $${min.toFixed(2)} – $${max.toFixed(2)}/hr (toggle high intensity for weekday daytime to raise the cap).`;
+          } catch (_) {
+            return 'NDIS range depends on service type and shift start (Sydney time).';
+          }
+        })()}
+      </Text>
+
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: Spacing.md }}>
+        <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.primary, flex: 1, paddingRight: Spacing.sm }}>
+          High intensity support (weekday daytime cap $75.98/hr)
+        </Text>
+        <Switch value={highIntensitySupport} onValueChange={setHighIntensitySupport} trackColor={{ false: Colors.border, true: Colors.primary }} />
+      </View>
+
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: Spacing.md }}>
+        <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.primary, flex: 1, paddingRight: Spacing.sm }}>
+          Include NDIS sleepover flat (${SLEEPOVER_FLAT_NIGHTLY.toFixed(2)} / night)
+        </Text>
+        <Switch value={includeSleepover} onValueChange={setIncludeSleepover} trackColor={{ false: Colors.border, true: Colors.primary }} />
+      </View>
+
+      <Text style={labelStyle}>Travel distance (km, optional)</Text>
+      <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginBottom: Spacing.xs }}>
+        Non-labour travel billed at $0.99/km (added to shift total, separate from hourly labour).
+      </Text>
+      <TextInput
+        style={inputStyle}
+        value={travelKmInput}
+        onChangeText={setTravelKmInput}
+        keyboardType="decimal-pad"
+        placeholder="e.g. 12.5"
+        placeholderTextColor={Colors.text.muted}
+      />
+
+      <Pressable
+        onPress={() => setRateGuideOpen((o) => !o)}
+        style={({ pressed }) => ({
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          backgroundColor: Colors.surfaceSecondary,
+          borderWidth: 1,
+          borderColor: Colors.border,
+          borderRadius: Radius.md,
+          paddingVertical: Spacing.sm,
+          paddingHorizontal: Spacing.md,
+          marginBottom: rateGuideOpen ? Spacing.sm : Spacing.md,
+          opacity: pressed ? 0.9 : 1,
+        })}
+      >
+        <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.primary, fontWeight: Typography.fontWeight.semibold, flex: 1, paddingRight: Spacing.sm }}>
+          NDIS rate reference (min / max enforced)
+        </Text>
+        <Text style={{ color: Colors.text.muted, fontSize: 12 }}>{rateGuideOpen ? '▲' : '▼'}</Text>
+      </Pressable>
+      {rateGuideOpen && (
+        <View style={{
+          backgroundColor: Colors.surfaceSecondary,
+          borderRadius: Radius.md,
+          borderWidth: 1,
+          borderColor: Colors.border,
+          padding: Spacing.md,
+          marginBottom: Spacing.md,
+        }}
+        >
+          <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginBottom: Spacing.sm }}>
+            Minimums below match the NDIS price guide figures used in this app (Sydney time / NSW public holidays). Confirm with your plan manager. Other categories:
+          </Text>
+          {NDIS_OTHER_RATE_HINTS.map((row) => (
+            <View key={row.label} style={{ marginBottom: Spacing.xs, paddingBottom: Spacing.xs, borderBottomWidth: 1, borderBottomColor: Colors.border }}>
+              <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.primary, fontWeight: Typography.fontWeight.medium }}>
+                {row.label}
+              </Text>
+              <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.primary, fontWeight: Typography.fontWeight.semibold, marginTop: 2 }}>
+                {row.rate}
+              </Text>
+            </View>
+          ))}
+          <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: Spacing.sm, marginBottom: Spacing.sm }}>
+            Standard support (personal care style) by time of week:
+          </Text>
+          {NDIS_PERSONAL_CARE_RATE_HINTS.map((row) => (
+            <View key={row.label} style={{ marginBottom: Spacing.xs, paddingBottom: Spacing.xs, borderBottomWidth: 1, borderBottomColor: Colors.border }}>
+              <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.primary, fontWeight: Typography.fontWeight.medium }}>
+                {row.label}
+              </Text>
+              <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.primary, fontWeight: Typography.fontWeight.semibold, marginTop: 2 }}>
+                {row.rate}
+              </Text>
+              {row.note ? (
+                <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: 2 }}>{row.note}</Text>
+              ) : null}
+            </View>
+          ))}
+        </View>
+      )}
 
       <Text style={labelStyle}>Date *</Text>
       <Pressable onPress={() => setShowCalendar(!showCalendar)} style={[inputStyle, { justifyContent: 'center' }]}>
-        <Text style={{ color: date ? Colors.text.primary : Colors.text.muted }}>{date || 'Select a date...'}</Text>
+        <Text style={{ color: date ? Colors.text.primary : Colors.text.muted }}>{date ? formatYmdToDMY(date) : 'Select a date...'}</Text>
       </Pressable>
       {showCalendar && <MiniCalendar selectedDate={date} onSelect={(d) => { setDate(d); setShowCalendar(false); }} />}
 
@@ -704,7 +896,7 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
         >
           <PlacesAutocompleteComponent
             ref={placesRef}
-            placeholder="Start typing street, suburb, or city"
+            placeholder="Start typing address in Australia"
             fetchDetails={false}
             minLength={3}
             debounce={450}
@@ -737,6 +929,7 @@ function CreateShiftModal({ visible, onClose, onCreated }) {
             query={{
               key: placesQueryKey,
               language: 'en',
+              components: 'country:au',
             }}
             requestUrl={placesRequestUrl}
             styles={{
@@ -1308,16 +1501,99 @@ const fallbackCard = {
   borderColor: Colors.border,
 };
 
+/** Participant: worker assigned to this shift (after you accept an application). */
+function AssignedWorkerSummary({ shift, variant = 'card' }) {
+  if (shift.status !== 'filled' || !shift.filled_by_worker_id) return null;
+  const name = `${shift.assigned_worker_first_name || ''} ${shift.assigned_worker_last_name || ''}`.trim()
+    || shift.assigned_worker_email
+    || 'Assigned worker';
+  const initial = (name || '?')[0].toUpperCase();
+  const uri = shift.assigned_worker_profile_image_url ? String(shift.assigned_worker_profile_image_url).trim() : '';
+  const rating = shift.assigned_worker_rating != null ? Number(shift.assigned_worker_rating) : 0;
+  const reviews = shift.assigned_worker_total_reviews != null ? Number(shift.assigned_worker_total_reviews) : 0;
+  const isCompact = variant === 'compact';
+  const bioNumberOfLines = isCompact ? 4 : 6;
+
+  return (
+    <View style={{
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      backgroundColor: `${Colors.primary}12`,
+      borderRadius: Radius.md,
+      borderWidth: 1,
+      borderColor: `${Colors.primary}44`,
+      padding: isCompact ? Spacing.sm : Spacing.md,
+      marginBottom: Spacing.sm,
+    }}
+    >
+      <View style={{
+        width: isCompact ? 52 : 64,
+        height: isCompact ? 52 : 64,
+        borderRadius: isCompact ? 26 : 32,
+        backgroundColor: Colors.primary,
+        overflow: 'hidden',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: Spacing.md,
+      }}
+      >
+        {uri ? (
+          <Image source={{ uri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+        ) : (
+          <Text style={{ fontSize: isCompact ? 22 : 26, color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>{initial}</Text>
+        )}
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.primary, fontWeight: Typography.fontWeight.semibold, marginBottom: 2 }}>
+          Worker for this shift
+        </Text>
+        <Text style={{ fontSize: Typography.fontSize.base, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>
+          {name}
+        </Text>
+        {!!shift.assigned_worker_email && (
+          <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: 2 }} selectable>
+            {shift.assigned_worker_email}
+          </Text>
+        )}
+        {!!shift.assigned_worker_phone && (
+          <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: 2 }} selectable>
+            {shift.assigned_worker_phone}
+          </Text>
+        )}
+        {rating > 0 && (
+          <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: 4 }}>
+            {`Rating ${rating.toFixed(1)}${reviews > 0 ? ` (${reviews} review${reviews === 1 ? '' : 's'})` : ''}`}
+          </Text>
+        )}
+        {shift.assigned_worker_public_hourly_rate != null && Number(shift.assigned_worker_public_hourly_rate) > 0 && (
+          <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: 2 }}>
+            {`Profile rate: $${Number(shift.assigned_worker_public_hourly_rate).toFixed(2)}/hr`}
+          </Text>
+        )}
+        {!!shift.assigned_worker_bio && (
+          <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: Spacing.xs }} numberOfLines={bioNumberOfLines}>
+            {shift.assigned_worker_bio}
+          </Text>
+        )}
+      </View>
+    </View>
+  );
+}
+
 // ── Shift Card ────────────────────────────────────────────────────────────────
 function ShiftCard({ shift, onApply, isWorker, isParticipant, onOpenApplications }) {
   const startDate = new Date(shift.start_time);
   const endDate = new Date(shift.end_time);
   const isShiftExpired = startDate.getTime() <= Date.now();
-  const hours = ((endDate - startDate) / (1000 * 60 * 60)).toFixed(1);
-  const breakMeta = (shift.description || '').match(/Break:\s*(\d+)\s*min\s*\|\s*Paid break:\s*(Yes|No)(?:\s*\|\s*Break pay:\s*\$([0-9.]+))?/i);
-  const breakMinutes = breakMeta ? breakMeta[1] : null;
-  const breakIsPaid = breakMeta ? (breakMeta[2] || '').toLowerCase() === 'yes' : false;
-  const breakPay = breakMeta && breakMeta[3] ? parseFloat(breakMeta[3]) : 0;
+  const payEst = getShiftPayEstimate(shift.start_time, shift.end_time, shift.hourly_rate, shift.description, {
+    sleepoverFlatAmount: shift.sleepover_flat_amount != null ? Number(shift.sleepover_flat_amount) : 0,
+    travelKm: shift.travel_distance_km != null ? Number(shift.travel_distance_km) : 0,
+    travelRatePerKm: shift.travel_rate_per_km != null ? Number(shift.travel_rate_per_km) : undefined,
+  });
+  const hasUnpaidBreakDeduction = payEst.breakMinutes > 0 && !payEst.breakIsPaid && payEst.paidHoursAtRate < payEst.shiftHours - 1e-6;
+  const hoursLabel = hasUnpaidBreakDeduction
+    ? `${payEst.shiftDurationLabel} on site • ${payEst.paidDurationLabel} paid`
+    : payEst.shiftDurationLabel;
   const workerAssigned = Boolean(shift?.is_assigned_to_me);
   const participantName =
     (shift?.participant_first_name || shift?.participant_last_name)
@@ -1328,6 +1604,12 @@ function ShiftCard({ shift, onApply, isWorker, isParticipant, onOpenApplications
     && shift.status === 'open'
     && !isShiftExpired
     && (shift.within_travel_range !== false);
+
+  const startTimeStr = startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const endTimeStr = endDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const dateTimeLine = sameLocalCalendarDay(startDate, endDate)
+    ? `${formatDateDMY(startDate)} • ${startTimeStr} – ${endTimeStr} (${hoursLabel})`
+    : `${formatDateDMY(startDate)} ${startTimeStr} – ${formatDateDMY(endDate)} ${endTimeStr} (${hoursLabel})`;
 
   const cardContent = (
     <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.sm, ...Shadows.md }}>
@@ -1354,23 +1636,27 @@ function ShiftCard({ shift, onApply, isWorker, isParticipant, onOpenApplications
       ) : (
         <>
           <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>
-            {startDate.toLocaleDateString()} • {startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} – {endDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ({hours}h)
+            {dateTimeLine}
           </Text>
 
           <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>
-            ${parseFloat(shift.hourly_rate).toFixed(2)}/hr • ~${(parseFloat(shift.hourly_rate) * parseFloat(hours)).toFixed(2)} total
+            ${Number(shift.hourly_rate || 0).toFixed(2)}/hr • ~${payEst.estimatedTotal.toFixed(2)} total
+            {hasUnpaidBreakDeduction ? ' (pay for paid time only)' : ''}
+            {payEst.breakIsPaid && payEst.breakPay > 0 ? ' (includes break pay)' : ''}
           </Text>
         </>
       )}
-      {!isWorker && breakMinutes && (
+      {payEst.breakMinutes > 0 && (!isWorker || shouldShowFullForWorker) && (
         <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>
-          Break: {breakMinutes} min • Paid: {breakIsPaid ? `Yes ($${breakPay.toFixed(2)})` : 'No'}
+          Break: {payEst.breakMinutes} min • Paid: {payEst.breakIsPaid ? `Yes${payEst.breakPay > 0 ? ` ($${payEst.breakPay.toFixed(2)})` : ''}` : 'No'}
         </Text>
       )}
 
       <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: Spacing.sm }}>
         📍 {shift.location}
       </Text>
+
+      {isParticipant && <AssignedWorkerSummary shift={shift} variant="card" />}
 
       {!isWorker && shift.participant_first_name && (
         <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginBottom: Spacing.sm }}>
@@ -1568,17 +1854,27 @@ export function AvailableShiftsScreen({ navigation }) {
 
   const handleApply = (shift) => {
     const confirmAction = () => applyForShift(shift.id);
+    const pay = getShiftPayEstimate(shift.start_time, shift.end_time, shift.hourly_rate, shift.description, {
+      sleepoverFlatAmount: shift.sleepover_flat_amount != null ? Number(shift.sleepover_flat_amount) : 0,
+      travelKm: shift.travel_distance_km != null ? Number(shift.travel_distance_km) : 0,
+      travelRatePerKm: shift.travel_rate_per_km != null ? Number(shift.travel_rate_per_km) : undefined,
+    });
+    const unpaidDed = pay.breakMinutes > 0 && !pay.breakIsPaid && pay.paidHoursAtRate < pay.shiftHours - 1e-6;
+    const payLine = unpaidDed
+      ? `\nOn site: ${pay.shiftDurationLabel} • Paid time: ${pay.paidDurationLabel}\nApprox. total: ~$${pay.estimatedTotal.toFixed(2)} (hourly rate × paid time only)`
+      : `\nApprox. total: ~$${pay.estimatedTotal.toFixed(2)}`;
+    const body = `Apply for "${shift.title}"?\n\nLabour: $${Number(shift.hourly_rate || 0).toFixed(2)}/hr${payLine}\nTime: ${new Date(shift.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${new Date(shift.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}\nLocation: ${shift.location}`;
     if (Platform.OS === 'web') {
       openConfirm({
         title: 'Apply for shift',
-        message: `Apply for "${shift.title}"?\n\nRate: $${parseFloat(shift.hourly_rate).toFixed(2)}/hr\nTime: ${new Date(shift.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${new Date(shift.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}\nLocation: ${shift.location}`,
+        message: body,
         confirmText: 'Apply',
         onConfirm: confirmAction,
       });
     } else {
       Alert.alert(
         'Apply for Shift',
-        `Apply for "${shift.title}"?\n\nRate: $${parseFloat(shift.hourly_rate).toFixed(2)}/hr\nTime: ${new Date(shift.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${new Date(shift.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}\nLocation: ${shift.location}`,
+        body,
         [{ text: 'Cancel', style: 'cancel' }, { text: 'Apply', onPress: confirmAction }]
       );
     }
@@ -1812,8 +2108,15 @@ export function AvailableShiftsScreen({ navigation }) {
               <ActivityIndicator size="large" color={Colors.primary} style={{ marginVertical: Spacing.lg }} />
             ) : (
               <ScrollView style={{ maxHeight: 420 }}>
+                {selectedShift?.status === 'filled' && (
+                  <AssignedWorkerSummary shift={selectedShift} variant="compact" />
+                )}
                 {applications.length === 0 ? (
-                  <Text style={{ color: Colors.text.secondary }}>No applicants yet for this shift.</Text>
+                  <Text style={{ color: Colors.text.secondary }}>
+                    {selectedShift?.status === 'filled'
+                      ? 'Assigned worker is shown above.'
+                      : 'No applicants yet for this shift.'}
+                  </Text>
                 ) : (
                   applications.map((app) => (
                     <View
@@ -1827,12 +2130,45 @@ export function AvailableShiftsScreen({ navigation }) {
                         backgroundColor: Colors.surface,
                       }}
                     >
-                      <Text style={{ fontSize: Typography.fontSize.base, fontWeight: Typography.fontWeight.semibold, color: Colors.text.primary }}>
-                        {(app.worker_first_name || app.worker_last_name) ? `${app.worker_first_name || ''} ${app.worker_last_name || ''}`.trim() : (app.worker_email || 'Worker')}
-                      </Text>
-                      <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.secondary, marginTop: 2 }}>
-                        {app.worker_email || 'No email'}{app.worker_rating ? ` • Rating ${app.worker_rating}` : ''}
-                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+                        <View style={{
+                          width: 48,
+                          height: 48,
+                          borderRadius: 24,
+                          backgroundColor: Colors.primary,
+                          overflow: 'hidden',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          marginRight: Spacing.sm,
+                        }}
+                        >
+                          {app.worker_profile_image_url ? (
+                            <Image source={{ uri: String(app.worker_profile_image_url) }} style={{ width: 48, height: 48 }} resizeMode="cover" />
+                          ) : (
+                            <Text style={{ fontSize: 20, color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>
+                              {(app.worker_first_name || app.worker_email || '?')[0].toUpperCase()}
+                            </Text>
+                          )}
+                        </View>
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text style={{ fontSize: Typography.fontSize.base, fontWeight: Typography.fontWeight.semibold, color: Colors.text.primary }}>
+                            {(app.worker_first_name || app.worker_last_name) ? `${app.worker_first_name || ''} ${app.worker_last_name || ''}`.trim() : (app.worker_email || 'Worker')}
+                          </Text>
+                          <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.secondary, marginTop: 2 }}>
+                            {app.worker_email || 'No email'}
+                            {app.worker_rating ? ` • Rating ${Number(app.worker_rating).toFixed(1)}` : ''}
+                            {app.worker_total_reviews ? ` (${app.worker_total_reviews} reviews)` : ''}
+                          </Text>
+                          {!!app.worker_phone && (
+                            <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: 2 }} selectable>{app.worker_phone}</Text>
+                          )}
+                        </View>
+                      </View>
+                      {!!app.worker_bio && (
+                        <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: Spacing.xs }} numberOfLines={3}>
+                          {app.worker_bio}
+                        </Text>
+                      )}
                       {!!app.message && (
                         <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: Spacing.xs }}>
                           "{app.message}"

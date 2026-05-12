@@ -1,5 +1,5 @@
 /**
- * Participant: search coordinator by email and request account management.
+ * Participant: invite a coordinator by email (primary). Optional lookup if they already have an account.
  */
 import React, { useState } from 'react';
 import {
@@ -31,13 +31,14 @@ export function ParticipantSearchCoordinatorScreen() {
   const [email, setEmail] = useState('');
   const [searching, setSearching] = useState(false);
   const [requesting, setRequesting] = useState(false);
+  const [inviting, setInviting] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [result, setResult] = useState(null);
 
   const runSearch = async () => {
     const q = email.trim();
     if (!q) {
-      Alert.alert('Email required', 'Enter an email address to search.');
+      Alert.alert('Email required', 'Enter an email address to look up.');
       return;
     }
     setSearching(true);
@@ -46,15 +47,55 @@ export function ParticipantSearchCoordinatorScreen() {
     try {
       const { data, error } = await api.get(`/api/participants/search-coordinator?email=${encodeURIComponent(q)}`);
       if (error || !data?.ok) {
-        Alert.alert('Search failed', error?.message || data?.error || 'Could not search.');
+        Alert.alert('Lookup failed', error?.message || data?.error || 'Could not look up coordinator.');
         setSearching(false);
         return;
       }
       setResult(data.coordinator);
     } catch (_) {
-      Alert.alert('Search failed', 'Could not search.');
+      Alert.alert('Lookup failed', 'Could not look up coordinator.');
     }
     setSearching(false);
+  };
+
+  const sendInviteEmail = async () => {
+    const q = email.trim();
+    if (!q || !q.includes('@')) {
+      Alert.alert('Email required', 'Enter a valid email address.');
+      return;
+    }
+    setInviting(true);
+    try {
+      const { data, error } = await api.post('/api/participants/invite-coordinator', { email: q });
+      if (error) {
+        Alert.alert('Invite failed', error.message || 'Could not send invitation.');
+        setInviting(false);
+        return;
+      }
+      if (!data?.ok) {
+        Alert.alert('Invite failed', data?.error || 'Could not send invitation.');
+        setInviting(false);
+        return;
+      }
+      if (data.mode === 'existing_coordinator' && data.coordinator) {
+        setResult(data.coordinator);
+        Alert.alert(
+          'Already on Summit Staffing',
+          'This email already has a coordinator account. Tap Request access below to ask them to manage your account.',
+        );
+        setInviting(false);
+        return;
+      }
+      if (data.mode === 'invited') {
+        Alert.alert(
+          'Invitation sent',
+          'We emailed them a link to create a coordinator account. When they sign up with that link and this email, they will be connected to manage your account.',
+        );
+      }
+    } catch (_) {
+      Alert.alert('Invite failed', 'Could not send invitation.');
+    }
+    setInviting(false);
   };
 
   const sendRequest = async () => {
@@ -85,12 +126,15 @@ export function ParticipantSearchCoordinatorScreen() {
         contentContainerStyle={{ padding: Spacing.lg, paddingBottom: Spacing.xxl }}
         keyboardShouldPersistTaps="handled"
       >
+        <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.sm }}>
+          Invite your coordinator
+        </Text>
         <Text style={{ fontSize: Typography.fontSize.base, color: Colors.text.secondary, marginBottom: Spacing.md }}>
-          Search coordinator by email to invite them to manage your account
+          Enter their email and send an invitation. This is usually a one-time setup. If they already have a Summit Staffing coordinator account, you can look them up instead and request access.
         </Text>
 
         <Text style={{ fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.medium, color: Colors.text.primary, marginBottom: Spacing.sm }}>
-          Email
+          Coordinator email
         </Text>
         <TextInput
           style={[inputStyle, { marginBottom: Spacing.md }]}
@@ -103,10 +147,35 @@ export function ParticipantSearchCoordinatorScreen() {
         />
 
         <Pressable
+          onPress={sendInviteEmail}
+          disabled={inviting}
+          style={({ pressed }) => ({
+            backgroundColor: Colors.primary,
+            borderRadius: Radius.md,
+            paddingVertical: Spacing.md,
+            alignItems: 'center',
+            opacity: pressed || inviting ? 0.85 : 1,
+            marginBottom: Spacing.sm,
+          })}
+        >
+          {inviting ? (
+            <ActivityIndicator color={Colors.text.white} />
+          ) : (
+            <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Send email invitation</Text>
+          )}
+        </Pressable>
+
+        <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginBottom: Spacing.md, textAlign: 'center' }}>
+          They will receive a sign-up link (email must be configured on the server).
+        </Text>
+
+        <Pressable
           onPress={runSearch}
           disabled={searching}
           style={({ pressed }) => ({
-            backgroundColor: Colors.primary,
+            backgroundColor: Colors.surface,
+            borderWidth: 2,
+            borderColor: Colors.primary,
             borderRadius: Radius.md,
             paddingVertical: Spacing.md,
             alignItems: 'center',
@@ -115,15 +184,20 @@ export function ParticipantSearchCoordinatorScreen() {
           })}
         >
           {searching ? (
-            <ActivityIndicator color={Colors.text.white} />
+            <ActivityIndicator color={Colors.primary} />
           ) : (
-            <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Search</Text>
+            <Text style={{ color: Colors.primary, fontWeight: Typography.fontWeight.semibold }}>Look up existing coordinator</Text>
           )}
         </Pressable>
 
         {!hasSearched || searching ? null : result === null ? (
           <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.sm }}>
-            <Text style={{ color: Colors.text.secondary, textAlign: 'center' }}>No coordinator found for this email.</Text>
+            <Text style={{ color: Colors.text.secondary, textAlign: 'center', marginBottom: Spacing.sm }}>
+              No coordinator account found for this email yet.
+            </Text>
+            <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs, textAlign: 'center' }}>
+              Use “Send email invitation” above so they can create an account from the link.
+            </Text>
           </View>
         ) : (
           <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.sm }}>
@@ -147,7 +221,7 @@ export function ParticipantSearchCoordinatorScreen() {
               {requesting ? (
                 <ActivityIndicator color={Colors.text.white} />
               ) : (
-                <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Request</Text>
+                <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Request to manage my account</Text>
               )}
             </Pressable>
           </View>

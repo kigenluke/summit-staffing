@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, RefreshControl, ActivityIndicator, TextInput, Pressable, Alert, Platform } from 'react-native';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
+import { formatDateDMY } from '../utils/dateFormat.js';
 
 const Card = ({ children, style }) => (
   <View style={[{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.sm }, style]}>
@@ -226,7 +227,7 @@ export function EarningsDashboard() {
           payments.slice(0, 25).map((p, idx) => (
             <View key={p.id || `${p.created_at}-${idx}`} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6 }}>
               <Text style={{ color: Colors.text.secondary }}>
-                {new Date(p.paid_at || p.created_at || Date.now()).toLocaleDateString()} - {(p.status || 'unknown').toUpperCase()}
+                {formatDateDMY(p.paid_at || p.created_at || Date.now())} - {(p.status || 'unknown').toUpperCase()}
               </Text>
               <Text style={{ color: p.status === 'succeeded' ? Colors.status.success : Colors.text.primary, fontWeight: Typography.fontWeight.semibold }}>
                 {fmtMoney(p.amount)}

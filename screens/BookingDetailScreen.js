@@ -7,6 +7,7 @@ import { View, Text, ScrollView, Pressable, Alert, TextInput, ActivityIndicator,
 import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
+import { formatDateDMY } from '../utils/dateFormat.js';
 
 const STATUS_COLORS = {
   pending: Colors.status.warning,
@@ -422,13 +423,24 @@ export function BookingDetailScreen({ route, navigation }) {
       {/* Booking Details */}
       <Section title=" Booking Details">
         <InfoRow icon="" label="Service" value={b.service_type} />
-        <InfoRow icon="" label="Date" value={new Date(b.start_time).toLocaleDateString()} />
+        <InfoRow icon="" label="Date" value={formatDateDMY(b.start_time)} />
         <InfoRow icon="" label="Time" value={`${new Date(b.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} – ${new Date(b.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`} />
         <InfoRow
           icon=""
           label={isWorker && b.status === 'pending' ? "Participant's budget" : "Agreed rate"}
           value={b.hourly_rate != null ? `$${Number(b.hourly_rate).toFixed(2)}/hr` : '—'}
         />
+        {b.high_intensity ? <InfoRow icon="" label="High intensity" value="Yes" /> : null}
+        {Number(b.travel_distance_km) > 0 ? (
+          <InfoRow
+            icon=""
+            label="Travel (non-labour)"
+            value={`${Number(b.travel_distance_km).toFixed(1)} km @ $${Number(b.travel_rate_per_km || 0.99).toFixed(2)}/km`}
+          />
+        ) : null}
+        {Number(b.sleepover_flat_amount) > 0 ? (
+          <InfoRow icon="" label="Sleepover (flat)" value={`$${Number(b.sleepover_flat_amount).toFixed(2)}`} />
+        ) : null}
         <InfoRow icon="" label="Location" value={b.location_address} />
         <InfoRow icon="" label="Total (est.)" value={b.total_amount ? `$${Number(b.total_amount).toFixed(2)}` : '—'} />
         {!isPendingAcceptance && b.special_instructions && <InfoRow icon="" label="Notes" value={b.special_instructions} />}

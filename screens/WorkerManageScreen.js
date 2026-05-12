@@ -7,6 +7,7 @@ import { View, Text, ScrollView, Pressable, TextInput, Alert, ActivityIndicator,
 import { api } from '../services/api.js';
 import { useAuthStore } from '../store/authStore.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
+import { formatDateDMY } from '../utils/dateFormat.js';
 import { SERVICE_TYPES } from '../constants/serviceTypes.js';
 import { VENDOR_CATEGORIES } from '../constants/vendorCategories.js';
 import NativeDatePicker from '../components/NativeDatePicker.js';
@@ -718,7 +719,7 @@ export function WorkerManageScreen({ route, navigation }) {
             <View key={dt.key} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: Spacing.sm, borderBottomWidth: 1, borderBottomColor: Colors.borderLight }}>
               <View style={{ flex: 1 }}>
                 <Text style={{ color: Colors.text.primary, fontWeight: Typography.fontWeight.medium }}>{dt.label}</Text>
-                {doc?.expiry_date && <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted }}>Expires: {new Date(doc.expiry_date).toLocaleDateString()}</Text>}
+                {doc?.expiry_date && <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted }}>Expires: {formatDateDMY(doc.expiry_date)}</Text>}
               </View>
               {doc ? (
                 <View style={{ backgroundColor: DOC_STATUS_COLORS[doc.status] || Colors.text.muted, paddingHorizontal: Spacing.sm, paddingVertical: 2, borderRadius: Radius.full }}>

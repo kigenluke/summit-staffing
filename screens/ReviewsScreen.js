@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
+import { formatDateDMY } from '../utils/dateFormat.js';
 import { useAuthStore } from '../store/authStore.js';
 
 function Stars({ rating }) {
@@ -24,7 +25,7 @@ function ReviewCard({ review, onFlag }) {
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.xs }}>
         <Stars rating={review.rating} />
         <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs }}>
-          {new Date(review.created_at).toLocaleDateString()}
+          {formatDateDMY(review.created_at)}
         </Text>
       </View>
       <Text style={{ color: Colors.text.primary, marginBottom: Spacing.xs, lineHeight: 20 }}>{review.comment || review.review_text || '(No comment)'}</Text>

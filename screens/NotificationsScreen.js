@@ -7,6 +7,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, FlatList, RefreshControl, Pressable, Alert, Platform, ActivityIndicator } from 'react-native';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
+import { formatDateDMY } from '../utils/dateFormat.js';
 
 const getNotifData = (n) => {
   let d = n?.data;
@@ -54,7 +55,7 @@ const getRelativeTime = (dateStr) => {
   if (diffMin < 60) return `${diffMin}m ago`;
   if (diffHr < 24) return `${diffHr}h ago`;
   if (diffDay === 1) return 'yesterday';
-  return date.toLocaleDateString();
+  return formatDateDMY(date);
 };
 
 export function NotificationsScreen({ navigation }) {

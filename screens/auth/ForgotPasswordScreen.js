@@ -3,7 +3,7 @@
  */
 
 import React, { useState } from 'react';
-import { View, Text, TextInput, Pressable, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TextInput, Pressable, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { useLoading } from '../../hooks/useLoading.js';
 import { useErrorHandler } from '../../hooks/useErrorHandler.js';
 import { api } from '../../services/api.js';
@@ -38,7 +38,17 @@ export function ForgotPasswordScreen({ navigation }) {
 
   const onSubmit = withLoading(async () => {
     clearError();
-    const { data, error: err } = await api.post('/api/auth/forgot-password', { email: email.trim().toLowerCase() });
+    const trimmed = email.trim().toLowerCase();
+    if (!trimmed) {
+      Alert.alert('Email required', 'Please enter your email address.');
+      return;
+    }
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
+    if (!emailOk) {
+      Alert.alert('Invalid email', 'Please enter a valid email address.');
+      return;
+    }
+    const { data, error: err } = await api.post('/api/auth/forgot-password', { email: trimmed });
     if (err) {
       handleError(err);
       return;

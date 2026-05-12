@@ -2,8 +2,8 @@
  * Summit Staffing – Welcome / Landing Screen
  * Full-screen hero image with sign-up and log-in buttons.
  */
-import React from 'react';
-import { View, Text, Pressable, ImageBackground, StatusBar, useWindowDimensions } from 'react-native';
+import React, { useEffect } from 'react';
+import { View, Text, Pressable, ImageBackground, StatusBar, useWindowDimensions, Platform } from 'react-native';
 import { Colors, Spacing, Typography, Radius } from '../../constants/theme.js';
 
 // Import works in both Vite (web → URL string) and Metro (native → asset id)
@@ -12,6 +12,22 @@ import welcomeImage from '../../welcome.jpg';
 export function WelcomeScreen({ navigation }) {
   const { width, height } = useWindowDimensions();
   const isTablet = Math.min(width, height) >= 768;
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    try {
+      const usp = new URLSearchParams(window.location.search);
+      const token = usp.get('coordinatorInvite');
+      if (!token) return;
+      const em = usp.get('email') || undefined;
+      navigation.replace('Register', {
+        role: 'coordinator',
+        coordinatorInviteToken: token.trim(),
+        email: em,
+      });
+    } catch (_) {}
+  }, [navigation]);
+
   // Vite gives string URL; Metro gives number. ImageBackground accepts both.
   const source = typeof welcomeImage === 'string' ? { uri: welcomeImage } : welcomeImage;
   return (
@@ -34,6 +50,15 @@ export function WelcomeScreen({ navigation }) {
               letterSpacing: 1,
             }}>
               Summit Staffing
+            </Text>
+            <Text style={{
+              marginTop: Spacing.sm,
+              fontSize: Typography.fontSize.base,
+              fontWeight: Typography.fontWeight.semibold,
+              color: 'rgba(255,255,255,0.95)',
+              textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4,
+            }}>
+              Trusted support, Australia-wide
             </Text>
           </View>
 

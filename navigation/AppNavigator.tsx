@@ -97,7 +97,7 @@ export function AppNavigator() {
       <Stack.Screen name="AddComplaint" component={AddComplaintScreen} options={{ title: 'Complaint Report' }} />
       <Stack.Screen name="CoordinatorParticipantManage" component={CoordinatorParticipantManageScreen} options={{ title: 'Manage Participant' }} />
       <Stack.Screen name="CoordinatorSearchParticipant" component={CoordinatorSearchParticipantScreen} options={{ title: 'Request participant' }} />
-      <Stack.Screen name="ParticipantSearchCoordinator" component={ParticipantSearchCoordinatorScreen} options={{ title: 'Request coordinator' }} />
+      <Stack.Screen name="ParticipantSearchCoordinator" component={ParticipantSearchCoordinatorScreen} options={{ title: 'Invite coordinator' }} />
     </Stack.Navigator>
     </WorkerGateProvider>
   );

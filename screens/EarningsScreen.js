@@ -7,6 +7,7 @@ import { View, Text, ScrollView, RefreshControl, ActivityIndicator } from 'react
 import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
+import { formatDateDMY } from '../utils/dateFormat.js';
 
 export function EarningsScreen({ navigation }) {
   const { user } = useAuthStore();
@@ -134,7 +135,7 @@ export function EarningsScreen({ navigation }) {
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontWeight: Typography.fontWeight.semibold, color: Colors.text.primary }}>{b.service_type}</Text>
                     <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: 2 }}>
-                      {new Date(b.start_time).toLocaleDateString()} • {hours}h
+                      {formatDateDMY(b.start_time)} • {hours}h
                     </Text>
                   </View>
                   <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.status.success }}>

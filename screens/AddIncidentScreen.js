@@ -7,6 +7,9 @@ import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme
 export function AddIncidentScreen({ navigation }) {
   const { user } = useAuthStore();
   const isWorker = user?.role === 'worker';
+  const isParticipant = user?.role === 'participant';
+  const canUse = isWorker || isParticipant;
+  const incidentEndpoint = isWorker ? '/api/incidents' : '/api/participants/me/incidents';
 
   const [loading, setLoading] = useState(false);
   const [incidentName, setIncidentName] = useState('');
@@ -20,8 +23,8 @@ export function AddIncidentScreen({ navigation }) {
   const canSubmit = useMemo(() => {
     const nameOk = incidentName.trim().length >= 2;
     const detailsOk = incidentDetails.trim().length >= 5;
-    return isWorker && nameOk && detailsOk && !!triageCategory && typeof called000 === 'boolean' && !loading;
-  }, [incidentName, incidentDetails, isWorker, loading, triageCategory, called000]);
+    return canUse && nameOk && detailsOk && !!triageCategory && typeof called000 === 'boolean' && !loading;
+  }, [incidentName, incidentDetails, canUse, loading, triageCategory, called000]);
 
   const imageInputRef = useRef(null);
 
@@ -47,7 +50,7 @@ export function AddIncidentScreen({ navigation }) {
   };
 
   const submit = async () => {
-    if (!isWorker) return;
+    if (!canUse) return;
     if (incidentName.trim().length < 2) {
       Alert.alert('Missing name', 'Please enter incident name.');
       return;
@@ -66,11 +69,10 @@ export function AddIncidentScreen({ navigation }) {
       form.append('called_000', called000 ? 'true' : 'false');
 
       for (const it of selectedImages) {
-        // field name must be "images" because multer uses upload.array('images', 5)
         form.append('images', it.file);
       }
 
-      const { error } = await api.post('/api/incidents', form, {
+      const { error } = await api.post(incidentEndpoint, form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
 
@@ -95,11 +97,45 @@ export function AddIncidentScreen({ navigation }) {
     }
   };
 
-  if (!isWorker) {
+  const addPhotosNative = () => {
+    if (selectedImages.length >= 5) return;
+    try {
+      const pickerLib = require('react-native-image-picker');
+      const launch = pickerLib?.launchImageLibrary;
+      if (typeof launch !== 'function') {
+        Alert.alert('Unavailable', 'Image picker is not available on this device.');
+        return;
+      }
+      launch(
+        { mediaType: 'photo', selectionLimit: Math.min(5, 5 - selectedImages.length) },
+        (response) => {
+          if (response?.didCancel) return;
+          if (response?.errorCode) {
+            Alert.alert('Error', response.errorMessage || 'Failed to pick image');
+            return;
+          }
+          const assets = response?.assets || [];
+          const mapped = assets.map((a) => ({
+            file: {
+              uri: a.uri,
+              name: a.fileName || `photo_${Date.now()}.jpg`,
+              type: a.type || 'image/jpeg',
+            },
+            previewUrl: a.uri,
+          }));
+          setSelectedImages((prev) => [...prev, ...mapped].slice(0, 5));
+        },
+      );
+    } catch (_) {
+      Alert.alert('Unavailable', 'Image picker is not available right now.');
+    }
+  };
+
+  if (!canUse) {
     return (
       <View style={{ flex: 1, backgroundColor: Colors.background, justifyContent: 'center', padding: Spacing.lg }}>
         <Text style={{ color: Colors.status.warning, fontWeight: Typography.fontWeight.bold, fontSize: Typography.fontSize.lg }}>
-          This feature is for worker accounts only.
+          This feature is for participant and worker accounts only.
         </Text>
       </View>
     );
@@ -168,16 +204,37 @@ export function AddIncidentScreen({ navigation }) {
             </Text>
           </View>
         ) : (
-          <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs, marginBottom: Spacing.sm }}>
-            Image upload is available on web. You can still submit incident details.
-          </Text>
+          <View>
+            <Pressable
+              onPress={addPhotosNative}
+              disabled={selectedImages.length >= 5}
+              style={({ pressed }) => ({
+                alignSelf: 'flex-start',
+                backgroundColor: Colors.surfaceSecondary,
+                borderWidth: 1,
+                borderColor: Colors.border,
+                borderRadius: Radius.md,
+                paddingVertical: Spacing.sm,
+                paddingHorizontal: Spacing.md,
+                opacity: selectedImages.length >= 5 ? 0.5 : pressed ? 0.85 : 1,
+                marginBottom: Spacing.sm,
+              })}
+            >
+              <Text style={{ color: Colors.primary, fontWeight: Typography.fontWeight.semibold }}>
+                Add photos (up to 5)
+              </Text>
+            </Pressable>
+            <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs }}>
+              {selectedImages.length}/5 selected
+            </Text>
+          </View>
         )}
 
         {selectedImages.length > 0 && (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
             {selectedImages.map((it, idx) => (
               <View
-                key={it.previewUrl}
+                key={`${it.previewUrl}-${idx}`}
                 style={{
                   width: 92,
                   height: 92,
