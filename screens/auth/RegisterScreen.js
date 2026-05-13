@@ -12,7 +12,7 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
-import { useAuthStore } from '../../store/authStore.js';
+import { useAuthStore, clearCoordinatorImpersonationStashSync } from '../../store/authStore.js';
 import { useLoading } from '../../hooks/useLoading.js';
 import { useErrorHandler } from '../../hooks/useErrorHandler.js';
 import { api } from '../../services/api.js';
@@ -123,6 +123,7 @@ export function RegisterScreen({ navigation, route }) {
       return;
     }
     if (data?.ok && data?.token) {
+      clearCoordinatorImpersonationStashSync();
       setAuth(data.token, data.user);
       if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.search?.includes('coordinatorInvite')) {
         try {

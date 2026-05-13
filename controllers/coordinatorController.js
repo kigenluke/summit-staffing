@@ -1,5 +1,6 @@
 const { validationResult } = require('express-validator');
 const pool = require('../config/database');
+const { generateToken } = require('../utils/jwt');
 const { sendPushNotification } = require('../services/notificationService');
 let initiatorColumnAvailable = null;
 
@@ -579,6 +580,52 @@ const withdrawCoordinatorAccessRequest = async (req, res) => {
   }
 };
 
+/** Issue a normal participant JWT after verifying approved coordinator access (same rules as profile read). */
+const sessionAsManagedParticipant = async (req, res) => {
+  try {
+    const coordinatorUserId = req.user.userId;
+    const { participantId } = req.params;
+
+    const result = await pool.query(
+      `SELECT u.id AS user_id, u.email, u.role, u.email_verified, u.is_suspended
+       FROM participants p
+       JOIN users u ON u.id = p.user_id
+       INNER JOIN coordinator_participant_access cpa
+         ON cpa.participant_user_id = p.user_id
+        AND cpa.coordinator_user_id = $1
+        AND cpa.status = 'approved'
+       WHERE p.id = $2 AND u.role = 'participant'
+       LIMIT 1`,
+      [coordinatorUserId, participantId]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ ok: false, error: 'Participant not found or access not approved' });
+    }
+    const u = result.rows[0];
+    if (u.is_suspended) {
+      return res.status(403).json({ ok: false, error: 'Account suspended' });
+    }
+
+    await pool.query('UPDATE users SET last_login_at = now(), updated_at = now() WHERE id = $1', [u.user_id]);
+
+    const token = generateToken({ userId: u.user_id, role: u.role, email: u.email }, '24h');
+    return res.status(200).json({
+      ok: true,
+      token,
+      user: {
+        id: u.user_id,
+        email: u.email,
+        role: u.role,
+        email_verified: u.email_verified,
+      },
+    });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('sessionAsManagedParticipant', err);
+    return res.status(500).json({ ok: false, error: 'Failed to open participant session' });
+  }
+};
+
 const getManagedParticipantProfile = async (req, res) => {
   try {
     const coordinatorUserId = req.user.userId;
@@ -727,6 +774,7 @@ module.exports = {
   listMyManagedParticipants,
   listParticipants,
   listCoordinatorAccessRequests,
+  sessionAsManagedParticipant,
   getManagedParticipantProfile,
   requestParticipantAccess,
   approveAccessRequest,

@@ -155,6 +155,23 @@ export function DashboardScreen({ navigation }) {
     }
     const encoded = encodeURIComponent(address);
     const webUrl = `https://www.google.com/maps/search/?api=1&query=${encoded}`;
+
+    // Web: never use geo:/maps:// — browsers often open geo: in the same tab → blank page.
+    if (Platform.OS === 'web') {
+      try {
+        if (typeof window !== 'undefined' && window.open) {
+          const w = window.open(webUrl, '_blank', 'noopener,noreferrer');
+          if (w) return;
+        }
+      } catch (_) {}
+      try {
+        await Linking.openURL(webUrl);
+      } catch (_) {
+        if (typeof window !== 'undefined') window.location.href = webUrl;
+      }
+      return;
+    }
+
     const nativeUrl = Platform.OS === 'ios'
       ? `maps://?q=${encoded}`
       : `geo:0,0?q=${encoded}`;

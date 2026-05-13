@@ -11,7 +11,7 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
-import { useAuthStore } from '../../store/authStore.js';
+import { useAuthStore, clearCoordinatorImpersonationStashSync } from '../../store/authStore.js';
 import { useParticipantSignUp } from '../../context/ParticipantSignUpContext.js';
 import { useLoading } from '../../hooks/useLoading.js';
 import { useErrorHandler } from '../../hooks/useErrorHandler.js';
@@ -78,6 +78,7 @@ export function RegisterParticipantScreen({ navigation }) {
     }
     if (data?.ok && data?.token) {
       onboarding.reset();
+      clearCoordinatorImpersonationStashSync();
       setAuth(data.token, data.user);
     } else {
       handleError(new Error(data?.error || 'Registration failed'));

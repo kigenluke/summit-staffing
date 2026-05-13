@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState, createElement } from 'react';
-import { View, Text, ScrollView, TextInput, Pressable, Alert, Platform, ActivityIndicator, Image } from 'react-native';
+import { View, Text, ScrollView, TextInput, Pressable, Alert, Platform, ActivityIndicator, Image, Modal } from 'react-native';
 import { api } from '../services/api.js';
 import { useAuthStore } from '../store/authStore.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
@@ -12,6 +12,7 @@ export function AddIncidentScreen({ navigation }) {
   const incidentEndpoint = isWorker ? '/api/incidents' : '/api/participants/me/incidents';
 
   const [loading, setLoading] = useState(false);
+  const [submitSuccessOpen, setSubmitSuccessOpen] = useState(false);
   const [incidentName, setIncidentName] = useState('');
   const [incidentDetails, setIncidentDetails] = useState('');
   const [triageCategory, setTriageCategory] = useState('other');
@@ -86,9 +87,7 @@ export function AddIncidentScreen({ navigation }) {
       setTriageCategory('other');
       setCalled000(false);
 
-      Alert.alert('Incident is reported', 'Thanks for letting us know.', [
-        { text: 'OK', onPress: () => navigation.goBack() },
-      ]);
+      setSubmitSuccessOpen(true);
     } catch (e) {
       Alert.alert('Error', 'Could not submit incident');
     } finally {
@@ -140,11 +139,49 @@ export function AddIncidentScreen({ navigation }) {
     );
   }
 
+  const goToProfileAfterSubmit = () => {
+    setSubmitSuccessOpen(false);
+    navigation.navigate('MainTabs', { screen: 'Profile' });
+  };
+
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: Colors.background }}
-      contentContainerStyle={{ padding: Spacing.lg, paddingBottom: Spacing.xxl }}
-    >
+    <View style={{ flex: 1, backgroundColor: Colors.background }}>
+      <Modal visible={submitSuccessOpen} transparent animationType="fade" onRequestClose={goToProfileAfterSubmit}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: Spacing.lg }}>
+          <View
+            style={{
+              backgroundColor: Colors.surface,
+              borderRadius: Radius.lg,
+              padding: Spacing.lg,
+              ...Shadows.sm,
+            }}
+          >
+            <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.sm }}>
+              Incident submitted
+            </Text>
+            <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, marginBottom: Spacing.lg }}>
+              Thanks for letting us know. We have received your report.
+            </Text>
+            <Pressable
+              onPress={goToProfileAfterSubmit}
+              style={({ pressed }) => ({
+                backgroundColor: Colors.primary,
+                opacity: pressed ? 0.9 : 1,
+                borderRadius: Radius.md,
+                paddingVertical: Spacing.md,
+                alignItems: 'center',
+              })}
+            >
+              <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Back to profile</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ padding: Spacing.lg, paddingBottom: Spacing.xxl }}
+      >
       <View style={{ marginBottom: Spacing.lg, borderRadius: Radius.lg, backgroundColor: Colors.surface, ...Shadows.sm, padding: Spacing.lg }}>
         <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: 6 }}>
           Report Incident
@@ -401,6 +438,7 @@ export function AddIncidentScreen({ navigation }) {
         )}
       </Pressable>
     </ScrollView>
+    </View>
   );
 }
 

@@ -33,6 +33,12 @@ router.get(
 );
 
 router.post(
+  '/managed-participants/:participantId/session-as-participant',
+  [auth, checkCoordinator, param('participantId').isUUID()],
+  coordinatorController.sessionAsManagedParticipant
+);
+
+router.post(
   '/requests/:requestId/reject-participant',
   [auth, checkCoordinator, param('requestId').isUUID()],
   coordinatorController.rejectParticipantInitiatedRequest

@@ -7,6 +7,111 @@ import { useState, useCallback, useEffect } from 'react';
 import { Platform } from 'react-native';
 
 const AUTH_KEY = 'summit_auth';
+const IMPERSONATION_STASH_KEY = 'summit_coordinator_impersonation_stash';
+
+/** In-memory copy of coordinator stash (participant session); web also mirrors to sessionStorage. */
+let impersonationStashMemory = null;
+
+function readImpersonationStashFromWebSession() {
+  if (Platform.OS !== 'web' || typeof window === 'undefined' || !window.sessionStorage) return null;
+  try {
+    const raw = window.sessionStorage.getItem(IMPERSONATION_STASH_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.coordinatorToken || !parsed?.coordinatorUser || !parsed?.participantUserId) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** Clear coordinator→participant impersonation stash (call on logout and before a fresh email login). */
+export function clearCoordinatorImpersonationStashSync() {
+  impersonationStashMemory = null;
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.sessionStorage) {
+    try {
+      window.sessionStorage.removeItem(IMPERSONATION_STASH_KEY);
+    } catch (_) {}
+  }
+  if (Platform.OS !== 'web') {
+    try {
+      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+      AsyncStorage.removeItem(IMPERSONATION_STASH_KEY);
+    } catch (_) {}
+  }
+}
+
+/**
+ * While signed in as coordinator: save coordinator session, then switch auth to participant (same JWT shape as login).
+ */
+export async function stashCoordinatorAndEnterParticipantSession(participantToken, participantUser) {
+  const curToken = state.token;
+  const curUser = state.user;
+  if (!curToken || !curUser || curUser.role !== 'coordinator') {
+    throw new Error('You must be signed in as a coordinator.');
+  }
+  const stash = {
+    coordinatorToken: curToken,
+    coordinatorUser: {
+      id: curUser.id,
+      email: curUser.email,
+      role: curUser.role,
+      email_verified: curUser.email_verified,
+    },
+    participantUserId: participantUser.id,
+  };
+  impersonationStashMemory = stash;
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.sessionStorage) {
+    window.sessionStorage.setItem(IMPERSONATION_STASH_KEY, JSON.stringify(stash));
+  } else {
+    try {
+      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+      await AsyncStorage.setItem(IMPERSONATION_STASH_KEY, JSON.stringify(stash));
+    } catch (_) {}
+  }
+  setState({ token: participantToken, user: participantUser });
+}
+
+/** Restore coordinator session after viewing a managed participant account. */
+export async function restoreCoordinatorFromImpersonationStash() {
+  let stash = impersonationStashMemory || readImpersonationStashFromWebSession();
+  if (!stash && Platform.OS !== 'web') {
+    try {
+      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+      const raw = await AsyncStorage.getItem(IMPERSONATION_STASH_KEY);
+      if (raw) stash = JSON.parse(raw);
+    } catch (_) {}
+  }
+  if (!stash?.coordinatorToken || !stash?.coordinatorUser) return false;
+  impersonationStashMemory = null;
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.sessionStorage) {
+    try {
+      window.sessionStorage.removeItem(IMPERSONATION_STASH_KEY);
+    } catch (_) {}
+  } else {
+    try {
+      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+      await AsyncStorage.removeItem(IMPERSONATION_STASH_KEY);
+    } catch (_) {}
+  }
+  setState({ token: stash.coordinatorToken, user: stash.coordinatorUser });
+  return true;
+}
+
+/** If current user is this participant and a coordinator stash exists, return stash (syncs memory from storage). */
+export async function getActiveCoordinatorImpersonationStash(participantUserId) {
+  let stash = impersonationStashMemory || readImpersonationStashFromWebSession();
+  if (!stash && Platform.OS !== 'web') {
+    try {
+      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+      const raw = await AsyncStorage.getItem(IMPERSONATION_STASH_KEY);
+      if (raw) stash = JSON.parse(raw);
+    } catch (_) {}
+  }
+  if (!stash?.participantUserId || stash.participantUserId !== participantUserId) return null;
+  impersonationStashMemory = stash;
+  return stash;
+}
 
 function loadPersisted() {
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
@@ -69,6 +174,7 @@ export function setAuth(token, user) {
 }
 
 export function logout() {
+  clearCoordinatorImpersonationStashSync();
   setState({ token: null, user: null });
 }
 

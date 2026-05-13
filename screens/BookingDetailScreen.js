@@ -386,7 +386,9 @@ export function BookingDetailScreen({ route, navigation }) {
       return `Clock-in will be enabled at ${new Date(b.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`;
     }
     if (workerDistanceM == null) return 'Enable location access to clock in.';
-    if (!isWithinClockInRadius) return `You must be within 100m to clock in. Current distance: ${Math.round(workerDistanceM)}m.`;
+    if (!isWithinClockInRadius) {
+      return `You must be within 100m of the shift location (using this device's GPS). Current: ${Math.round(workerDistanceM)}m.`;
+    }
     return '';
   })();
   const statusMessage = (isWorker && b.status === 'confirmed')
@@ -494,9 +496,14 @@ export function BookingDetailScreen({ route, navigation }) {
             <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold, fontSize: Typography.fontSize.lg }}> Clock In</Text>
           </Pressable>
           {workerDistanceM != null && (
-            <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs, marginBottom: Spacing.md, textAlign: 'center' }}>
-              Distance to booking: {Math.round(workerDistanceM)}m
-            </Text>
+            <View style={{ marginBottom: Spacing.md }}>
+              <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs, textAlign: 'center' }}>
+                From this device's GPS to shift pin: {Math.round(workerDistanceM)}m
+              </Text>
+              <Text style={{ color: Colors.text.muted, fontSize: 10, textAlign: 'center', marginTop: 4 }}>
+                Not from your saved profile address — clock-in uses your phone or browser location now.
+              </Text>
+            </View>
           )}
         </>
       )}
