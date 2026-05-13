@@ -33,6 +33,7 @@ import { AddComplaintScreen } from '../screens/AddComplaintScreen.js';
 import { CoordinatorParticipantManageScreen } from '../screens/CoordinatorParticipantManageScreen.js';
 import { CoordinatorSearchParticipantScreen } from '../screens/CoordinatorSearchParticipantScreen.js';
 import { ParticipantSearchCoordinatorScreen } from '../screens/ParticipantSearchCoordinatorScreen.js';
+import { EmergencyHubScreen } from '../screens/EmergencyHubScreen.js';
 import { Colors } from '../constants/theme.js';
 import { WorkerGateProvider } from '../context/WorkerGateContext.js';
 
@@ -85,7 +86,9 @@ export function AppNavigator() {
       <Stack.Screen name="AdminDashboard" component={AdminDashboardScreen} options={{ title: 'Admin Panel' }} />
       <Stack.Screen name="Reviews" component={ReviewsScreen} options={{ title: 'Reviews' }} />
       <Stack.Screen name="AvailableShifts" component={AvailableShiftsScreen} options={{ title: 'Find a worker' }} />
+      <Stack.Screen name="Emergency" component={EmergencyHubScreen} options={{ title: 'Emergency' }} />
       <Stack.Screen name="Help" component={HelpScreen} options={{ title: 'Help & Support' }} />
+      <Stack.Screen name="Chatbot" component={HelpScreen} options={{ title: 'Chatbot' }} />
       <Stack.Screen name="Documents" component={DocumentsScreen} options={{ title: 'Documents' }} />
       <Stack.Screen name="Earnings" component={EarningsScreen} options={{ title: 'Earnings' }} />
       <Stack.Screen name="EarningsDashboard" component={EarningsDashboard} options={{ title: 'Earnings Dashboard' }} />

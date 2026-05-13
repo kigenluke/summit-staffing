@@ -356,7 +356,10 @@ const updateWorker = async (req, res) => {
       'monthly_earnings_target',
       'max_travel_km',
       'bio',
-      'profile_image_url'
+      'profile_image_url',
+      'emergency_contact_name',
+      'emergency_contact_phone',
+      'emergency_contact_relationship'
     ];
 
     const fields = [];
@@ -364,7 +367,16 @@ const updateWorker = async (req, res) => {
 
     for (const key of allowed) {
       if (Object.prototype.hasOwnProperty.call(req.body, key)) {
-        params.push(req.body[key]);
+        let value = req.body[key];
+        if (
+          key === 'emergency_contact_name'
+          || key === 'emergency_contact_phone'
+          || key === 'emergency_contact_relationship'
+        ) {
+          value = value == null ? null : String(value).trim();
+          if (value === '') value = null;
+        }
+        params.push(value);
         fields.push(`${key} = $${params.length}`);
       }
     }

@@ -66,7 +66,10 @@ router.put(
     body('monthly_earnings_target').optional({ nullable: true }).isFloat({ min: 0 }).toFloat(),
     body('max_travel_km').optional({ nullable: true }).isFloat({ min: 0, max: 500 }).toFloat(),
     body('bio').optional({ nullable: true }).isString(),
-    body('profile_image_url').optional({ nullable: true }).isString()
+    body('profile_image_url').optional({ nullable: true }).isString(),
+    body('emergency_contact_name').optional({ nullable: true }).isString().isLength({ max: 200 }),
+    body('emergency_contact_phone').optional({ nullable: true }).isString().isLength({ max: 40 }),
+    body('emergency_contact_relationship').optional({ nullable: true }).isString().isLength({ max: 120 })
   ],
   workerController.updateMe
 );
@@ -96,7 +99,10 @@ router.put(
     body('monthly_earnings_target').optional({ nullable: true }).isFloat({ min: 0 }).toFloat(),
     body('max_travel_km').optional({ nullable: true }).isFloat({ min: 0, max: 500 }).toFloat(),
     body('bio').optional({ nullable: true }).isString(),
-    body('profile_image_url').optional({ nullable: true }).isString()
+    body('profile_image_url').optional({ nullable: true }).isString(),
+    body('emergency_contact_name').optional({ nullable: true }).isString().isLength({ max: 200 }),
+    body('emergency_contact_phone').optional({ nullable: true }).isString().isLength({ max: 40 }),
+    body('emergency_contact_relationship').optional({ nullable: true }).isString().isLength({ max: 120 })
   ],
   workerController.updateWorker
 );

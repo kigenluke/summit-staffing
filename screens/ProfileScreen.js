@@ -294,6 +294,11 @@ export function ProfileScreen({ navigation }) {
         )}
       </View>
 
+      <MenuSection>
+        <MenuItem label="Emergency" disabled={false} onPress={() => safeNavigate('Emergency')} />
+        <MenuItem label="Chatbot" disabled={isWorker && restricted} onPress={() => safeNavigate('Chatbot')} />
+      </MenuSection>
+
       {/* Sections with 2 items each; Edit Profile + Payment Details together for participants */}
       <MenuSection>
         <MenuItem label="Notifications" badge={unreadCount} disabled={false} onPress={() => safeNavigate('Notifications')} />
@@ -344,12 +349,11 @@ export function ProfileScreen({ navigation }) {
         </MenuSection>
       )}
 
-      <MenuSection>
-        {isWorker && (
+      {isWorker && (
+        <MenuSection>
           <MenuItem label="My Training" disabled={restricted} onPress={() => safeNavigate('Training')} />
-        )}
-        <MenuItem label="Help & Support" disabled={isWorker && restricted} onPress={() => safeNavigate('Help')} />
-      </MenuSection>
+        </MenuSection>
+      )}
 
       {isWorker && (
         <MenuSection>

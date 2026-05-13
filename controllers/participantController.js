@@ -69,6 +69,9 @@ const safeParticipantForUser = (participant) => {
     monthly_budget: participant.monthly_budget,
     ndis_number: participant.ndis_number,
     about: participant.about,
+    emergency_contact_name: participant.emergency_contact_name,
+    emergency_contact_phone: participant.emergency_contact_phone,
+    emergency_contact_relationship: participant.emergency_contact_relationship,
     profile_image_url: participant.profile_image_url,
     created_at: participant.created_at,
     updated_at: participant.updated_at,
@@ -258,7 +261,10 @@ const updateParticipant = async (req, res) => {
       'plan_manager_phone',
       'monthly_budget',
       'management_type',
-      'about'
+      'about',
+      'emergency_contact_name',
+      'emergency_contact_phone',
+      'emergency_contact_relationship'
     ];
 
     const fields = [];
@@ -273,6 +279,14 @@ const updateParticipant = async (req, res) => {
         }
         if (key === 'ndis_number' && value && !validateNDISNumber(value)) {
           return res.status(400).json({ ok: false, error: 'Invalid NDIS number format' });
+        }
+        if (
+          key === 'emergency_contact_name'
+          || key === 'emergency_contact_phone'
+          || key === 'emergency_contact_relationship'
+        ) {
+          value = value == null ? null : String(value).trim();
+          if (value === '') value = null;
         }
         params.push(value);
         fields.push(`${key} = $${params.length}`);
@@ -302,6 +316,9 @@ const updateParticipant = async (req, res) => {
       management_type: updated.management_type,
       monthly_budget: updated.monthly_budget,
       about: updated.about,
+      emergency_contact_name: updated.emergency_contact_name,
+      emergency_contact_phone: updated.emergency_contact_phone,
+      emergency_contact_relationship: updated.emergency_contact_relationship,
       created_at: updated.created_at,
       updated_at: updated.updated_at
     };

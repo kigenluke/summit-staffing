@@ -126,7 +126,10 @@ router.put(
     body('plan_manager_phone').optional({ nullable: true }).isString(),
     body('monthly_budget').optional({ nullable: true }).isFloat({ min: 0 }).toFloat(),
     body('management_type').optional({ nullable: true }).isIn(['self', 'plan_managed', 'ndia']),
-    body('about').optional({ nullable: true }).isString().isLength({ max: 2000 })
+    body('about').optional({ nullable: true }).isString().isLength({ max: 2000 }),
+    body('emergency_contact_name').optional({ nullable: true }).isString().isLength({ max: 200 }),
+    body('emergency_contact_phone').optional({ nullable: true }).isString().isLength({ max: 40 }),
+    body('emergency_contact_relationship').optional({ nullable: true }).isString().isLength({ max: 120 })
   ],
   participantController.updateParticipant
 );

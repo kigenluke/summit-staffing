@@ -13,7 +13,6 @@ import { BookingsScreen } from '../screens/BookingsScreen.js';
 import { MessagesScreen } from '../screens/MessagesScreen.js';
 import { ProfileScreen } from '../screens/ProfileScreen.js';
 import { WorkerManageScreen } from '../screens/WorkerManageScreen.js';
-import { EmergencyHubScreen } from '../screens/EmergencyHubScreen.js';
 import { Colors } from '../constants/theme.js';
 import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
@@ -164,21 +163,6 @@ function AvailabilityHeaderLeft() {
   );
 }
 
-function EmergencyHeaderLeft() {
-  const nav = useNavigation();
-  return (
-    <Pressable
-      onPress={() => {
-        if (typeof nav.canGoBack === 'function' && nav.canGoBack()) nav.goBack();
-        else nav.navigate('Home' as never);
-      }}
-      style={({ pressed }) => ({ opacity: pressed ? 0.8 : 1, paddingHorizontal: 12, paddingVertical: 8 })}
-    >
-      <NavChevron direction="left" color={Colors.text.white} size={22} />
-    </Pressable>
-  );
-}
-
 export function MainTabs() {
   const { user } = useAuthStore();
   const isWorker = user?.role === 'worker';
@@ -221,11 +205,6 @@ export function MainTabs() {
         name="Home"
         component={isCoordinator ? CoordinatorDashboardScreen : DashboardScreen}
         options={{ title: isCoordinator ? 'Coordinator' : 'Summit Staffing', headerRight: () => <HomeHeaderRight /> }}
-      />
-      <Tab.Screen
-        name="Emergency"
-        component={EmergencyHubScreen}
-        options={{ title: 'Emergency', headerLeft: () => <EmergencyHeaderLeft /> }}
       />
       {!isWorker && !isCoordinator && (
         <Tab.Screen

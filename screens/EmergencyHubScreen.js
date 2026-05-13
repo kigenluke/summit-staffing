@@ -1,5 +1,5 @@
 /**
- * Emergency hub — quick access from main tab bar (000, crisis lines, help & incident).
+ * Emergency hub — 000, crisis lines, help & incident (open from Profile or stack).
  */
 import React from 'react';
 import { View, Text, ScrollView, Pressable, Linking } from 'react-native';
@@ -47,6 +47,27 @@ export function EmergencyHubScreen({ navigation }) {
       <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: Spacing.lg }}>
         If someone is seriously ill or injured, or life or property is threatened, call Triple Zero (000) immediately.
       </Text>
+
+      {canReportIncident ? (
+        <View style={{ marginBottom: Spacing.lg, padding: Spacing.md, backgroundColor: Colors.surfaceSecondary, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.border }}>
+          <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.primary, marginBottom: Spacing.sm }}>
+            Make sure we have someone to call if we cannot reach you — add a friend or family emergency contact in Edit Profile.
+          </Text>
+          <Pressable
+            onPress={() => navigation.navigate('EditProfile')}
+            style={({ pressed }) => ({
+              alignSelf: 'flex-start',
+              paddingVertical: Spacing.sm,
+              paddingHorizontal: Spacing.md,
+              backgroundColor: Colors.primary,
+              borderRadius: Radius.md,
+              opacity: pressed ? 0.88 : 1,
+            })}
+          >
+            <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Edit Profile — emergency contact</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <Pressable onPress={openTel('000')} style={({ pressed }) => btnPrimary(pressed)}>
         <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold, fontSize: Typography.fontSize.lg }}>

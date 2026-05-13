@@ -46,6 +46,7 @@ const Field = ({ label, value, onChangeText, placeholder, keyboardType, editable
 export function EditProfileScreen({ navigation }) {
   const { user } = useAuthStore();
   const isWorker = user?.role === 'worker';
+  const needsEmergencyContact = user?.role === 'worker' || user?.role === 'participant';
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -63,6 +64,9 @@ export function EditProfileScreen({ navigation }) {
   const [maxTravelKm, setMaxTravelKm] = useState('');
   const [ndisNumber, setNdisNumber] = useState('');
   const [about, setAbout] = useState('');
+  const [emergencyName, setEmergencyName] = useState('');
+  const [emergencyPhone, setEmergencyPhone] = useState('');
+  const [emergencyRelationship, setEmergencyRelationship] = useState('');
 
   const placesRef = useRef(null);
   const lastSelectedAddressRef = useRef('');
@@ -103,11 +107,16 @@ export function EditProfileScreen({ navigation }) {
             setNdisNumber(p.ndis_number || '');
             setAbout(p.about || '');
           }
+          if (user?.role === 'worker' || user?.role === 'participant') {
+            setEmergencyName(p.emergency_contact_name || '');
+            setEmergencyPhone(p.emergency_contact_phone || '');
+            setEmergencyRelationship(p.emergency_contact_relationship || '');
+          }
         }
       }
     } catch (e) {}
     setLoading(false);
-  }, [isWorker]);
+  }, [isWorker, user?.role]);
 
   useEffect(() => { loadProfile(); }, [loadProfile]);
 
@@ -122,6 +131,15 @@ export function EditProfileScreen({ navigation }) {
     : undefined;
 
   const saveProfile = async () => {
+    const ecName = emergencyName.trim();
+    const ecPhone = emergencyPhone.trim();
+    if (needsEmergencyContact && (!ecName || !ecPhone)) {
+      Alert.alert(
+        'Emergency contact required',
+        'Please add a friend or family member we can call if we cannot reach you in an emergency (name and phone).',
+      );
+      return;
+    }
     setSaving(true);
     try {
       const profileId = profile?.id;
@@ -158,6 +176,12 @@ export function EditProfileScreen({ navigation }) {
         const cleanedNdis = String(ndisNumber || '').trim();
         body.ndis_number = cleanedNdis || null;
         body.about = (about || '').trim() || null;
+      }
+
+      if (needsEmergencyContact) {
+        body.emergency_contact_name = ecName;
+        body.emergency_contact_phone = ecPhone;
+        body.emergency_contact_relationship = emergencyRelationship.trim() || null;
       }
 
       const { data, error } = await api.put(endpoint, body);
@@ -381,6 +405,36 @@ export function EditProfileScreen({ navigation }) {
           </>
         )}
       </View>
+
+      {needsEmergencyContact ? (
+        <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.md, ...Shadows.sm }}>
+          <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.xs }}>
+            Emergency contact
+          </Text>
+          <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: Spacing.md }}>
+            A friend or family member we can phone if you are unwell or injured and we cannot reach you.
+          </Text>
+          <Field
+            label="Contact name *"
+            value={emergencyName}
+            onChangeText={setEmergencyName}
+            placeholder="Full name"
+          />
+          <Field
+            label="Contact phone *"
+            value={emergencyPhone}
+            onChangeText={setEmergencyPhone}
+            placeholder="Mobile or landline"
+            keyboardType="phone-pad"
+          />
+          <Field
+            label="Relationship (optional)"
+            value={emergencyRelationship}
+            onChangeText={setEmergencyRelationship}
+            placeholder="e.g. Partner, mother, son"
+          />
+        </View>
+      ) : null}
 
       <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.lg, ...Shadows.sm, position: 'relative', zIndex: -9999 }}>
         <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.md }}>

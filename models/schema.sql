@@ -379,6 +379,29 @@ BEGIN
   END IF;
 END $$;
 
+-- Friend/family emergency contact (participant & worker)
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'participants' AND column_name = 'emergency_contact_name') THEN
+    ALTER TABLE participants ADD COLUMN emergency_contact_name TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'participants' AND column_name = 'emergency_contact_phone') THEN
+    ALTER TABLE participants ADD COLUMN emergency_contact_phone TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'participants' AND column_name = 'emergency_contact_relationship') THEN
+    ALTER TABLE participants ADD COLUMN emergency_contact_relationship TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'workers' AND column_name = 'emergency_contact_name') THEN
+    ALTER TABLE workers ADD COLUMN emergency_contact_name TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'workers' AND column_name = 'emergency_contact_phone') THEN
+    ALTER TABLE workers ADD COLUMN emergency_contact_phone TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'workers' AND column_name = 'emergency_contact_relationship') THEN
+    ALTER TABLE workers ADD COLUMN emergency_contact_relationship TEXT;
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS bookings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   participant_id UUID NOT NULL,
