@@ -3,6 +3,57 @@ const pool = require('../config/database');
 const { uploadFile } = require('../services/s3Service');
 const { sendEmail } = require('../services/emailService');
 
+function isS3Configured() {
+  return Boolean(
+    process.env.AWS_REGION
+    && process.env.AWS_ACCESS_KEY_ID
+    && process.env.AWS_SECRET_ACCESS_KEY
+    && process.env.AWS_S3_BUCKET
+  );
+}
+
+/**
+ * Upload incident/complaint images when S3 is configured.
+ * Never blocks saving the report: missing S3 or failed uploads are skipped (logged).
+ */
+const uploadIncidentFiles = async (files, folder) => {
+  const imageUrls = [];
+  const list = Array.isArray(files) ? files : [];
+  if (!list.length) return imageUrls;
+
+  if (!isS3Configured()) {
+    // eslint-disable-next-line no-console
+    console.warn('[incidents] AWS S3 is not configured; saving report without image attachments.');
+    return imageUrls;
+  }
+
+  for (const f of list) {
+    if (!f?.buffer) {
+      // eslint-disable-next-line no-console
+      console.warn('[incidents] Skipping attachment without buffer (check multer / multipart).');
+      continue;
+    }
+    try {
+      imageUrls.push(await uploadFile(f, folder));
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[incidents] Image upload failed:', err?.message || err);
+    }
+  }
+  return imageUrls;
+};
+
+const dbErrorHint = (msg) => {
+  const m = String(msg || '');
+  if (/relation .* does not exist/i.test(m) || m.includes('42P01')) {
+    return 'Database is missing required tables. Run models/schema.sql or scripts/migrate_incidents_live.js on this database.';
+  }
+  if (/column .* does not exist/i.test(m) || m.includes('42703')) {
+    return 'Database schema is outdated. Apply the latest migrations from models/schema.sql.';
+  }
+  return undefined;
+};
+
 const respondValidation = (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -57,12 +108,7 @@ const createIncident = async (req, res) => {
     const incident_status = triage === 'abuse_or_neglect' ? 'handover_to_admin' : 'received';
 
     const folder = `worker-incidents/${worker.id}`;
-    const imageUrls = [];
-    for (const f of files) {
-      // uploadFile expects a multer memory file (with .buffer)
-      const url = await uploadFile(f, folder);
-      imageUrls.push(url);
-    }
+    const imageUrls = await uploadIncidentFiles(files, folder);
 
     const insertRes = await pool.query(
       `INSERT INTO worker_incidents (
@@ -76,7 +122,7 @@ const createIncident = async (req, res) => {
         priority,
         incident_status
       )
-       VALUES ($1, $2, $3, COALESCE($4, '{}'), $5, $6, $7, $8, $9)
+       VALUES ($1, $2, $3, COALESCE($4::text[], '{}'::text[]), $5, $6, $7, $8, $9)
        RETURNING id, worker_id, incident_name, incident_details, image_urls, triage_category, called_000, is_reportable, priority, incident_status, created_at`,
       [worker.id, incident_name, incident_details, imageUrls, triage, called000, is_reportable, priority, incident_status]
     );
@@ -111,10 +157,13 @@ const createIncident = async (req, res) => {
 
     return res.status(201).json({ ok: true, incident: insertRes.rows[0] });
   } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('createIncident', err);
+    const hint = dbErrorHint(err?.message);
     const details = process.env.NODE_ENV !== 'production'
       ? String(err?.message || '').slice(0, 300)
       : undefined;
-    return res.status(500).json({ ok: false, error: 'Failed to submit incident', details });
+    return res.status(500).json({ ok: false, error: 'Failed to submit incident', ...(hint ? { hint } : {}), ...(details ? { details } : {}) });
   }
 };
 
@@ -151,11 +200,7 @@ const createParticipantIncident = async (req, res) => {
     const incident_status = triage === 'abuse_or_neglect' ? 'handover_to_admin' : 'received';
 
     const folder = `participant-incidents/${participant.id}`;
-    const imageUrls = [];
-    for (const f of files) {
-      const url = await uploadFile(f, folder);
-      imageUrls.push(url);
-    }
+    const imageUrls = await uploadIncidentFiles(files, folder);
 
     const insertRes = await pool.query(
       `INSERT INTO participant_incidents (
@@ -169,7 +214,7 @@ const createParticipantIncident = async (req, res) => {
         priority,
         incident_status
       )
-       VALUES ($1, $2, $3, COALESCE($4, '{}'), $5, $6, $7, $8, $9)
+       VALUES ($1, $2, $3, COALESCE($4::text[], '{}'::text[]), $5, $6, $7, $8, $9)
        RETURNING id, participant_id, incident_name, incident_details, image_urls, triage_category, called_000, is_reportable, priority, incident_status, created_at`,
       [participant.id, incident_name, incident_details, imageUrls, triage, called000, is_reportable, priority, incident_status]
     );
@@ -199,10 +244,13 @@ const createParticipantIncident = async (req, res) => {
 
     return res.status(201).json({ ok: true, incident: insertRes.rows[0] });
   } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('createParticipantIncident', err);
+    const hint = dbErrorHint(err?.message);
     const details = process.env.NODE_ENV !== 'production'
       ? String(err?.message || '').slice(0, 300)
       : undefined;
-    return res.status(500).json({ ok: false, error: 'Failed to submit incident', details });
+    return res.status(500).json({ ok: false, error: 'Failed to submit incident', ...(hint ? { hint } : {}), ...(details ? { details } : {}) });
   }
 };
 
@@ -218,25 +266,24 @@ const createComplaint = async (req, res) => {
     const files = Array.isArray(req.files) ? req.files : [];
 
     const folder = `worker-complaints/${worker.id}`;
-    const imageUrls = [];
-    for (const f of files) {
-      const url = await uploadFile(f, folder);
-      imageUrls.push(url);
-    }
+    const imageUrls = await uploadIncidentFiles(files, folder);
 
     const insertRes = await pool.query(
       `INSERT INTO worker_complaints (worker_id, complaint_details, image_urls)
-       VALUES ($1, $2, COALESCE($3, '{}'))
+       VALUES ($1, $2, COALESCE($3::text[], '{}'::text[]))
        RETURNING id, worker_id, complaint_details, image_urls, created_at`,
       [worker.id, complaint_details, imageUrls]
     );
 
     return res.status(201).json({ ok: true, complaint: insertRes.rows[0] });
   } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('createComplaint', err);
+    const hint = dbErrorHint(err?.message);
     const details = process.env.NODE_ENV !== 'production'
       ? String(err?.message || '').slice(0, 300)
       : undefined;
-    return res.status(500).json({ ok: false, error: 'Failed to submit complaint', details });
+    return res.status(500).json({ ok: false, error: 'Failed to submit complaint', ...(hint ? { hint } : {}), ...(details ? { details } : {}) });
   }
 };
 
@@ -252,25 +299,24 @@ const createParticipantComplaint = async (req, res) => {
     const files = Array.isArray(req.files) ? req.files : [];
 
     const folder = `participant-complaints/${participant.id}`;
-    const imageUrls = [];
-    for (const f of files) {
-      const url = await uploadFile(f, folder);
-      imageUrls.push(url);
-    }
+    const imageUrls = await uploadIncidentFiles(files, folder);
 
     const insertRes = await pool.query(
       `INSERT INTO participant_complaints (participant_id, complaint_details, image_urls)
-       VALUES ($1, $2, COALESCE($3, '{}'))
+       VALUES ($1, $2, COALESCE($3::text[], '{}'::text[]))
        RETURNING id, participant_id, complaint_details, image_urls, created_at`,
       [participant.id, complaint_details, imageUrls]
     );
 
     return res.status(201).json({ ok: true, complaint: insertRes.rows[0] });
   } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('createParticipantComplaint', err);
+    const hint = dbErrorHint(err?.message);
     const details = process.env.NODE_ENV !== 'production'
       ? String(err?.message || '').slice(0, 300)
       : undefined;
-    return res.status(500).json({ ok: false, error: 'Failed to submit complaint', details });
+    return res.status(500).json({ ok: false, error: 'Failed to submit complaint', ...(hint ? { hint } : {}), ...(details ? { details } : {}) });
   }
 };
 

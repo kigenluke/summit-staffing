@@ -136,6 +136,7 @@ export async function request(method, path, body = null, options = {}) {
           ? data.errors.map((e) => e?.msg || e?.message).filter(Boolean).join(' ')
           : null)
         || data?.message
+        || (res.status === 429 ? 'Too many requests. Please try again shortly.' : null)
         || `Request failed: ${res.status}`;
       const error = new Error(errorMsg);
       error.status = res.status;

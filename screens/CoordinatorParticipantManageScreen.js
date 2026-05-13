@@ -5,6 +5,7 @@ import { Colors, Radius, Shadows, Spacing, Typography } from '../constants/theme
 export function CoordinatorParticipantManageScreen({ route, navigation }) {
   const participant = route.params?.participant || {};
   const name = `${participant.first_name || ''} ${participant.last_name || ''}`.trim() || 'Participant';
+  const participantId = participant.id;
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: Colors.background }} contentContainerStyle={{ padding: Spacing.lg }}>
@@ -21,6 +22,26 @@ export function CoordinatorParticipantManageScreen({ route, navigation }) {
         <Text style={{ color: Colors.text.primary, fontWeight: Typography.fontWeight.semibold, marginBottom: Spacing.sm }}>
           Management Actions
         </Text>
+        <Pressable
+          onPress={() => {
+            if (participantId) {
+              navigation.navigate('CoordinatorParticipantProfile', { participantId });
+            }
+          }}
+          disabled={!participantId}
+          style={({ pressed }) => ({
+            backgroundColor: Colors.primaryDark,
+            borderRadius: Radius.md,
+            paddingVertical: 12,
+            alignItems: 'center',
+            opacity: pressed ? 0.85 : !participantId ? 0.5 : 1,
+            marginBottom: Spacing.sm,
+          })}
+        >
+          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>
+            View full participant profile
+          </Text>
+        </Pressable>
         <Pressable
           onPress={() => navigation.navigate('Bookings')}
           style={({ pressed }) => ({

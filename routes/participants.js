@@ -76,6 +76,39 @@ router.get(
 
 router.get('/me', [auth, checkParticipant], participantController.getMe);
 
+router.put(
+  '/me',
+  [
+    auth,
+    checkParticipant,
+    body('ndis_number').optional({ nullable: true }).isString(),
+    body('first_name').optional({ nullable: true }).isString(),
+    body('last_name').optional({ nullable: true }).isString(),
+    body('phone').optional({ nullable: true }).isString(),
+    body('address').optional({ nullable: true }).isString(),
+    body('latitude').optional({ nullable: true }).isFloat({ min: -90, max: 90 }).toFloat(),
+    body('longitude').optional({ nullable: true }).isFloat({ min: -180, max: 180 }).toFloat(),
+    body('plan_manager_name').optional({ nullable: true }).isString(),
+    body('plan_manager_email').optional({ nullable: true }).isEmail().normalizeEmail(),
+    body('plan_manager_phone').optional({ nullable: true }).isString(),
+    body('monthly_budget').optional({ nullable: true }).isFloat({ min: 0 }).toFloat(),
+    body('management_type').optional({ nullable: true }).isIn(['self', 'plan_managed', 'ndia']),
+    body('about').optional({ nullable: true }).isString().isLength({ max: 2000 }),
+    body('emergency_contact_name').optional({ nullable: true }).isString().isLength({ max: 200 }),
+    body('emergency_contact_phone').optional({ nullable: true }).isString().isLength({ max: 40 }),
+    body('emergency_contact_relationship').optional({ nullable: true }).isString().isLength({ max: 120 })
+  ],
+  participantController.updateMe
+);
+
+router.get('/me/access-requests', [auth, checkParticipant], participantController.listMyAccessRequests);
+
+router.post(
+  '/me/access-requests/:requestId/reject',
+  [auth, checkParticipant, param('requestId').isUUID()],
+  participantController.rejectCoordinatorAccessRequest
+);
+
 router.post(
   '/me/incidents',
   participantIncidentMiddlewares,

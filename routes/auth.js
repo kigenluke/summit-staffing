@@ -2,6 +2,7 @@ const express = require('express');
 const { body } = require('express-validator');
 
 const auth = require('../middleware/auth');
+const { authWriteLimiter } = require('../middleware/rateLimits');
 const authController = require('../controllers/authController');
 
 const router = express.Router();
@@ -20,6 +21,7 @@ const passwordValidator = body('password')
 
 router.post(
   '/register',
+  authWriteLimiter,
   [
     emailValidator,
     passwordValidator,
@@ -68,12 +70,13 @@ router.post(
   authController.register
 );
 
-router.post('/login', [emailValidator, body('password').isString()], authController.login);
+router.post('/login', authWriteLimiter, [emailValidator, body('password').isString()], authController.login);
 
-router.post('/forgot-password', [emailValidatorForgot], authController.forgotPassword);
+router.post('/forgot-password', authWriteLimiter, [emailValidatorForgot], authController.forgotPassword);
 
 router.post(
   '/reset-password',
+  authWriteLimiter,
   [
     body('token').isString().isLength({ min: 10 }).withMessage('Reset token is required'),
     body('newPassword')
@@ -84,7 +87,12 @@ router.post(
   authController.resetPassword
 );
 
-router.post('/verify-email', [body('token').isString().isLength({ min: 10 }).withMessage('Verification token is required')], authController.verifyEmail);
+router.post(
+  '/verify-email',
+  authWriteLimiter,
+  [body('token').isString().isLength({ min: 10 }).withMessage('Verification token is required')],
+  authController.verifyEmail
+);
 
 router.post('/refresh', auth, authController.refreshToken);
 router.delete('/account', auth, authController.deleteAccount);

@@ -3,6 +3,7 @@
  */
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, Text, ScrollView, TextInput, Pressable, Alert, ActivityIndicator, Platform, StyleSheet } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import * as PlacesPkg from 'react-native-google-places-autocomplete';
 import { useAuthStore } from '../store/authStore.js';
 import { api, ApiConfig } from '../services/api.js';
@@ -46,6 +47,8 @@ const Field = ({ label, value, onChangeText, placeholder, keyboardType, editable
 export function EditProfileScreen({ navigation }) {
   const { user } = useAuthStore();
   const isWorker = user?.role === 'worker';
+  const isCoordinator = user?.role === 'coordinator';
+  const isParticipantRole = user?.role === 'participant';
   const needsEmergencyContact = user?.role === 'worker' || user?.role === 'participant';
 
   const [loading, setLoading] = useState(true);
@@ -86,9 +89,41 @@ export function EditProfileScreen({ navigation }) {
   const placesQueryKey = googleKey || 'places-proxy-key';
 
   const loadProfile = useCallback(async () => {
+    setLoading(true);
     try {
+      if (isCoordinator) {
+        const { data, error } = await api.get('/api/coordinator/me/profile');
+        if (error) {
+          if (__DEV__) {
+            // eslint-disable-next-line no-console
+            console.warn('EditProfile loadProfile (coordinator)', error.message, error.status);
+          }
+          return;
+        }
+        if (data?.ok) {
+          const p = data.coordinator;
+          if (p) {
+            setProfile(p);
+            setFirstName(p.first_name || '');
+            setLastName(p.last_name || '');
+            setPhone(p.phone || '');
+            setAddress(p.address || '');
+            setLatitude(p.latitude != null ? Number(p.latitude) : null);
+            setLongitude(p.longitude != null ? Number(p.longitude) : null);
+          }
+        }
+        return;
+      }
+
       const endpoint = isWorker ? '/api/workers/me' : '/api/participants/me';
-      const { data } = await api.get(endpoint);
+      const { data, error } = await api.get(endpoint);
+      if (error) {
+        if (__DEV__) {
+          // eslint-disable-next-line no-console
+          console.warn('EditProfile loadProfile', error.message, error.status);
+        }
+        return;
+      }
       if (data?.ok) {
         const p = isWorker ? data.worker : data.participant;
         if (p) {
@@ -114,11 +149,21 @@ export function EditProfileScreen({ navigation }) {
           }
         }
       }
-    } catch (e) {}
-    setLoading(false);
-  }, [isWorker, user?.role]);
+    } catch (e) {
+      if (__DEV__) {
+        // eslint-disable-next-line no-console
+        console.warn('EditProfile loadProfile', e);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [isWorker, isCoordinator, user?.role]);
 
-  useEffect(() => { loadProfile(); }, [loadProfile]);
+  useFocusEffect(
+    useCallback(() => {
+      loadProfile();
+    }, [loadProfile])
+  );
 
   useEffect(() => {
     if (!loading && address && placesRef.current?.setAddressText) {
@@ -131,6 +176,7 @@ export function EditProfileScreen({ navigation }) {
     : undefined;
 
   const saveProfile = async () => {
+    if (saving) return;
     const ecName = emergencyName.trim();
     const ecPhone = emergencyPhone.trim();
     if (needsEmergencyContact && (!ecName || !ecPhone)) {
@@ -142,13 +188,58 @@ export function EditProfileScreen({ navigation }) {
     }
     setSaving(true);
     try {
+      if (isCoordinator) {
+        if (!user?.id) {
+          Alert.alert('Error', 'Unable to save profile right now. Please refresh and try again.');
+          setSaving(false);
+          return;
+        }
+        const body = { first_name: firstName, last_name: lastName, phone, address };
+        const originalLat = profile?.latitude != null ? Number(profile.latitude) : null;
+        const originalLng = profile?.longitude != null ? Number(profile.longitude) : null;
+        const addressChanged = (profile?.address || '') !== (address || '');
+        if (!addressChanged) {
+          body.latitude = originalLat;
+          body.longitude = originalLng;
+        } else if (latitude != null && longitude != null) {
+          body.latitude = latitude;
+          body.longitude = longitude;
+        } else {
+          body.latitude = null;
+          body.longitude = null;
+        }
+        const { data, error } = await api.put('/api/coordinator/me/profile', body);
+        if (error) {
+          const msg =
+            error.status === 429
+              ? 'Too many requests. Please wait a minute and try again.'
+              : error.message || 'Failed to save';
+          Alert.alert('Error', msg);
+        } else {
+          const p = data?.coordinator;
+          if (p) {
+            setProfile(p);
+            setFirstName(p.first_name || '');
+            setLastName(p.last_name || '');
+            setPhone(p.phone || '');
+            setAddress(p.address || '');
+            setLatitude(p.latitude != null ? Number(p.latitude) : null);
+            setLongitude(p.longitude != null ? Number(p.longitude) : null);
+          }
+          Alert.alert('Success', 'Profile updated!');
+          navigation.goBack();
+        }
+        setSaving(false);
+        return;
+      }
+
       const profileId = profile?.id;
       if (!profileId) {
         Alert.alert('Error', 'Unable to save profile right now. Please refresh and try again.');
         setSaving(false);
         return;
       }
-      const endpoint = isWorker ? '/api/workers/me' : `/api/participants/${profileId}`;
+      const endpoint = isWorker ? '/api/workers/me' : '/api/participants/me';
       const body = { first_name: firstName, last_name: lastName, phone, address };
 
       // Preserve geo coords when user edits other fields only.
@@ -186,8 +277,21 @@ export function EditProfileScreen({ navigation }) {
 
       const { data, error } = await api.put(endpoint, body);
       if (error) {
-        Alert.alert('Error', error.message || 'Failed to save');
+        const msg =
+          error.status === 429
+            ? 'Too many requests. Please wait a minute and try again.'
+            : error.message || 'Failed to save';
+        Alert.alert('Error', msg);
       } else {
+        const p = isWorker ? data?.worker : data?.participant;
+        if (p) {
+          if (needsEmergencyContact) {
+            setEmergencyName(p.emergency_contact_name || '');
+            setEmergencyPhone(p.emergency_contact_phone || '');
+            setEmergencyRelationship(p.emergency_contact_relationship || '');
+          }
+          setProfile((prev) => (prev ? { ...prev, ...p } : prev));
+        }
         Alert.alert('Success', 'Profile updated!');
         navigation.goBack();
       }
@@ -374,7 +478,7 @@ export function EditProfileScreen({ navigation }) {
             <Field label="Travel Distance (km)" value={maxTravelKm} onChangeText={setMaxTravelKm} placeholder="e.g. 20" keyboardType="numeric" />
           </>
         )}
-        {!isWorker && (
+        {isParticipantRole && (
           <>
             <Field label="NDIS Number" value={ndisNumber} onChangeText={setNdisNumber} placeholder="10-digit NDIS number" />
             <View style={{ marginBottom: Spacing.md }}>

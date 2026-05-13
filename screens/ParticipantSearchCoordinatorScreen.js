@@ -44,6 +44,14 @@ export function ParticipantSearchCoordinatorScreen() {
   const [hasSearched, setHasSearched] = useState(false);
   const [result, setResult] = useState(null);
   const [statusBanner, setStatusBanner] = useState(null);
+  /** Lowercased email: invite / invite+lookup flow already completed successfully for this address (no repeat Send). */
+  const [inviteCompletedForEmail, setInviteCompletedForEmail] = useState(null);
+  /** Coordinator user_id: access request already sent successfully (no repeat Request). */
+  const [requestSentForCoordinatorUserId, setRequestSentForCoordinatorUserId] = useState(null);
+
+  const emailKey = email.trim().toLowerCase();
+  const inviteSendLocked = Boolean(inviteCompletedForEmail && emailKey === inviteCompletedForEmail);
+  const requestLocked = Boolean(result?.user_id && requestSentForCoordinatorUserId === result.user_id);
 
   const runSearch = async () => {
     const q = email.trim();
@@ -75,6 +83,10 @@ export function ParticipantSearchCoordinatorScreen() {
       notifyUser('Email required', 'Enter a valid email address.');
       return;
     }
+    if (inviteSendLocked) {
+      notifyUser('Already sent', 'You already sent an invitation or completed this step for this email.');
+      return;
+    }
     setInviting(true);
     setStatusBanner(null);
     setResult(null);
@@ -92,6 +104,7 @@ export function ParticipantSearchCoordinatorScreen() {
         return;
       }
       if (data.mode === 'existing_coordinator' && data.coordinator) {
+        setInviteCompletedForEmail(q.toLowerCase());
         setResult(data.coordinator);
         setStatusBanner({
           variant: 'info',
@@ -106,6 +119,7 @@ export function ParticipantSearchCoordinatorScreen() {
         return;
       }
       if (data.mode === 'invited') {
+        setInviteCompletedForEmail(q.toLowerCase());
         setStatusBanner({
           variant: 'success',
           title: 'Invitation sent',
@@ -125,6 +139,10 @@ export function ParticipantSearchCoordinatorScreen() {
 
   const sendRequest = async () => {
     if (!result?.user_id) return;
+    if (requestLocked) {
+      notifyUser('Already sent', 'You already sent a request to this coordinator.');
+      return;
+    }
     setRequesting(true);
     try {
       const { data, error } = await api.post('/api/participants/request-coordinator', {
@@ -135,6 +153,9 @@ export function ParticipantSearchCoordinatorScreen() {
         setRequesting(false);
         return;
       }
+      setRequestSentForCoordinatorUserId(result.user_id);
+      const lockEmail = String(result.email || email || '').trim().toLowerCase();
+      if (lockEmail) setInviteCompletedForEmail(lockEmail);
       setStatusBanner({
         variant: 'success',
         title: 'Request sent',
@@ -210,20 +231,22 @@ export function ParticipantSearchCoordinatorScreen() {
 
         <Pressable
           onPress={sendInviteEmail}
-          disabled={inviting}
+          disabled={inviting || inviteSendLocked}
           style={({ pressed }) => ({
-            backgroundColor: Colors.primary,
+            backgroundColor: inviteSendLocked ? Colors.text.muted : Colors.primary,
             borderRadius: Radius.md,
             paddingVertical: Spacing.md,
             alignItems: 'center',
-            opacity: pressed || inviting ? 0.85 : 1,
+            opacity: pressed || inviting || inviteSendLocked ? 0.85 : 1,
             marginBottom: Spacing.sm,
           })}
         >
           {inviting ? (
             <ActivityIndicator color={Colors.text.white} />
           ) : (
-            <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Send email invitation</Text>
+            <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>
+              {inviteSendLocked ? 'Invitation already sent' : 'Send email invitation'}
+            </Text>
           )}
         </Pressable>
 
@@ -261,20 +284,22 @@ export function ParticipantSearchCoordinatorScreen() {
             <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: Spacing.xs }}>{result.email}</Text>
             <Pressable
               onPress={sendRequest}
-              disabled={requesting}
+              disabled={requesting || requestLocked}
               style={({ pressed }) => ({
                 marginTop: Spacing.md,
-                backgroundColor: Colors.status.success,
+                backgroundColor: requestLocked ? Colors.text.muted : Colors.status.success,
                 borderRadius: Radius.md,
                 paddingVertical: Spacing.md,
                 alignItems: 'center',
-                opacity: pressed || requesting ? 0.85 : 1,
+                opacity: pressed || requesting || requestLocked ? 0.85 : 1,
               })}
             >
               {requesting ? (
                 <ActivityIndicator color={Colors.text.white} />
               ) : (
-                <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Request to manage my account</Text>
+                <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>
+                  {requestLocked ? 'Request already sent' : 'Request to manage my account'}
+                </Text>
               )}
             </Pressable>
           </View>

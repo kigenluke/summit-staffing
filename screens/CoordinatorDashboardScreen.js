@@ -109,16 +109,18 @@ export function CoordinatorDashboardScreen({ navigation }) {
         first_name: participant.first_name,
         last_name: participant.last_name,
         email: participant.email,
+        phone: participant.phone,
+        address: participant.address,
       },
     });
   };
 
-  const goProfile = () => {
-    navigation.navigate('MainTabs', { screen: 'Profile' });
+  const goAccessRequests = () => {
+    navigation.navigate('AccessRequests');
   };
 
-  const goNotifications = () => {
-    navigation.navigate('Notifications');
+  const goProfile = () => {
+    navigation.navigate('MainTabs', { screen: 'Profile' });
   };
 
   return (
@@ -159,10 +161,32 @@ export function CoordinatorDashboardScreen({ navigation }) {
           label="Pending requests"
           value={stats.pending_requests}
           color={Colors.primary}
-          onPress={goNotifications}
+          onPress={goAccessRequests}
           filled
         />
       </View>
+
+      <Card style={{ marginBottom: Spacing.md }}>
+        <Text style={{ fontSize: Typography.fontSize.base, fontWeight: Typography.fontWeight.semibold, color: Colors.text.primary }}>
+          Connection requests
+        </Text>
+        <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: Spacing.xs }}>
+          Approve or decline participant access requests in one place. This list stays available after you read notifications.
+        </Text>
+        <Pressable
+          onPress={goAccessRequests}
+          style={({ pressed }) => ({
+            marginTop: Spacing.md,
+            backgroundColor: Colors.primaryDark,
+            borderRadius: Radius.md,
+            paddingVertical: Spacing.sm,
+            alignItems: 'center',
+            opacity: pressed ? 0.85 : 1,
+          })}
+        >
+          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Open requests</Text>
+        </Pressable>
+      </Card>
 
       <Card style={{ marginBottom: Spacing.md }}>
         <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>

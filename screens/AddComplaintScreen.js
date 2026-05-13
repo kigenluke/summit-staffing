@@ -94,7 +94,8 @@ export function AddComplaintScreen({ navigation }) {
       const { error } = await api.post(complaintEndpoint, form);
 
       if (error) {
-        Alert.alert('Error', error.message || 'Could not submit complaint');
+        const hint = error.response?.hint;
+        Alert.alert('Error', hint ? `${error.message}\n\n${hint}` : error.message || 'Could not submit complaint');
         return;
       }
 

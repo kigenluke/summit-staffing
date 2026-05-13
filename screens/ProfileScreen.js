@@ -295,15 +295,23 @@ export function ProfileScreen({ navigation }) {
       </View>
 
       <MenuSection>
-        <MenuItem label="Emergency" disabled={false} onPress={() => safeNavigate('Emergency')} />
-        <MenuItem label="Chatbot" disabled={isWorker && restricted} onPress={() => safeNavigate('Chatbot')} />
-      </MenuSection>
-
-      {/* Sections with 2 items each; Edit Profile + Payment Details together for participants */}
-      <MenuSection>
         <MenuItem label="Notifications" badge={unreadCount} disabled={false} onPress={() => safeNavigate('Notifications')} />
         <MenuItem label="Inbox" disabled={restricted} onPress={() => safeNavigate('Messages')} />
       </MenuSection>
+
+      {(isCoordinator || isParticipant) && (
+        <MenuSection>
+          <MenuItem label="Requests" disabled={false} onPress={() => safeNavigate('AccessRequests')} />
+        </MenuSection>
+      )}
+
+      <MenuSection>
+        <MenuItem label="Emergency" disabled={false} onPress={() => safeNavigate('Emergency')} />
+        {/* <MenuItem label="Chatbot" disabled={isWorker && restricted} onPress={() => safeNavigate('Chatbot')} /> */}
+      </MenuSection>
+
+      
+      
 
       {(isWorker || isParticipant) && (
         <MenuSection>

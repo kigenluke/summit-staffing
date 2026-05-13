@@ -34,6 +34,8 @@ import { CoordinatorParticipantManageScreen } from '../screens/CoordinatorPartic
 import { CoordinatorSearchParticipantScreen } from '../screens/CoordinatorSearchParticipantScreen.js';
 import { ParticipantSearchCoordinatorScreen } from '../screens/ParticipantSearchCoordinatorScreen.js';
 import { EmergencyHubScreen } from '../screens/EmergencyHubScreen.js';
+import { AccessRequestsScreen } from '../screens/AccessRequestsScreen.js';
+import { CoordinatorParticipantProfileScreen } from '../screens/CoordinatorParticipantProfileScreen.js';
 import { Colors } from '../constants/theme.js';
 import { WorkerGateProvider } from '../context/WorkerGateContext.js';
 
@@ -98,6 +100,8 @@ export function AppNavigator() {
       <Stack.Screen name="AddIncident" component={AddIncidentScreen} options={{ title: 'Incident Report' }} />
       <Stack.Screen name="AddComplaint" component={AddComplaintScreen} options={{ title: 'Complaint Report' }} />
       <Stack.Screen name="CoordinatorParticipantManage" component={CoordinatorParticipantManageScreen} options={{ title: 'Manage Participant' }} />
+      <Stack.Screen name="CoordinatorParticipantProfile" component={CoordinatorParticipantProfileScreen} options={{ title: 'Participant profile' }} />
+      <Stack.Screen name="AccessRequests" component={AccessRequestsScreen} options={{ title: 'Requests' }} />
       <Stack.Screen name="CoordinatorSearchParticipant" component={CoordinatorSearchParticipantScreen} options={{ title: 'Request participant' }} />
       <Stack.Screen name="ParticipantSearchCoordinator" component={ParticipantSearchCoordinatorScreen} options={{ title: 'Invite coordinator' }} />
     </Stack.Navigator>

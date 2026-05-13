@@ -217,6 +217,9 @@ const getParticipantById = async (req, res) => {
         management_type: participant.management_type,
         monthly_budget: participant.monthly_budget,
         about: participant.about,
+        emergency_contact_name: participant.emergency_contact_name,
+        emergency_contact_phone: participant.emergency_contact_phone,
+        emergency_contact_relationship: participant.emergency_contact_relationship,
         created_at: participant.created_at,
         updated_at: participant.updated_at,
         email: participant.email,
@@ -329,6 +332,22 @@ const updateParticipant = async (req, res) => {
   }
 };
 
+const updateMe = async (req, res) => {
+  try {
+    if (!req.user?.userId) {
+      return res.status(401).json({ ok: false, error: 'Unauthorized' });
+    }
+    const participantRes = await pool.query('SELECT id FROM participants WHERE user_id = $1 LIMIT 1', [req.user.userId]);
+    if (participantRes.rowCount === 0) {
+      return res.status(404).json({ ok: false, error: 'Participant not found' });
+    }
+    req.params.id = participantRes.rows[0].id;
+    return updateParticipant(req, res);
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: 'Failed to update participant' });
+  }
+};
+
 const verifyNDIS = async (req, res) => {
   try {
     if (respondValidation(req, res)) return;
@@ -370,6 +389,109 @@ const searchCoordinatorByEmail = async (req, res) => {
     });
   } catch (err) {
     return res.status(500).json({ ok: false, error: 'Search failed' });
+  }
+};
+
+const mapAccessRowForParticipant = (row) => ({
+  id: row.id,
+  status: row.status,
+  requested_at: row.requested_at,
+  initiator: row.initiator || null,
+  coordinator: {
+    user_id: row.coordinator_user_id,
+    email: row.coordinator_email,
+    display_name: (row.coordinator_email || '').split('@')[0],
+  },
+});
+
+const listMyAccessRequests = async (req, res) => {
+  try {
+    const participantUserId = req.user.userId;
+    const participant = await getParticipantForUser(participantUserId);
+    if (!participant) {
+      return res.status(404).json({ ok: false, error: 'Participant not found' });
+    }
+    const hasInitiator = await hasInitiatorColumn();
+    const baseSelect = `
+      SELECT
+        cpa.id,
+        cpa.status,
+        cpa.requested_at,
+        ${hasInitiator ? 'cpa.initiator' : `NULL::text AS initiator`},
+        cpa.coordinator_user_id,
+        uc.email AS coordinator_email
+      FROM coordinator_participant_access cpa
+      JOIN users uc ON uc.id = cpa.coordinator_user_id
+      WHERE cpa.participant_user_id = $1 AND cpa.status = 'pending'
+    `;
+    if (hasInitiator) {
+      const [inc, out] = await Promise.all([
+        pool.query(`${baseSelect} AND cpa.initiator = 'coordinator' ORDER BY cpa.requested_at DESC`, [participantUserId]),
+        pool.query(`${baseSelect} AND cpa.initiator = 'participant' ORDER BY cpa.requested_at DESC`, [participantUserId]),
+      ]);
+      return res.status(200).json({
+        ok: true,
+        incoming: inc.rows.map(mapAccessRowForParticipant),
+        outgoing: out.rows.map(mapAccessRowForParticipant),
+      });
+    }
+    const all = await pool.query(`${baseSelect} ORDER BY cpa.requested_at DESC`, [participantUserId]);
+    const rows = all.rows.map(mapAccessRowForParticipant);
+    return res.status(200).json({ ok: true, incoming: rows, outgoing: [], legacy_no_initiator_column: true });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('listMyAccessRequests', err);
+    return res.status(500).json({ ok: false, error: 'Failed to list access requests' });
+  }
+};
+
+const rejectCoordinatorAccessRequest = async (req, res) => {
+  try {
+    if (respondValidation(req, res)) return;
+    const participantUserId = req.user.userId;
+    const { requestId } = req.params;
+
+    const hasInitiator = await hasInitiatorColumn();
+    if (!hasInitiator) {
+      return res.status(400).json({ ok: false, error: 'Decline requires initiator column migration' });
+    }
+
+    const requestRes = await pool.query(
+      `SELECT cpa.id, cpa.coordinator_user_id, cpa.participant_user_id, cpa.status, cpa.initiator
+       FROM coordinator_participant_access cpa WHERE cpa.id = $1 LIMIT 1`,
+      [requestId]
+    );
+    if (requestRes.rowCount === 0) {
+      return res.status(404).json({ ok: false, error: 'Request not found' });
+    }
+    const accessRequest = requestRes.rows[0];
+    if (accessRequest.participant_user_id !== participantUserId) {
+      return res.status(403).json({ ok: false, error: 'Forbidden' });
+    }
+    if (accessRequest.status !== 'pending') {
+      return res.status(400).json({ ok: false, error: 'Request is no longer pending' });
+    }
+    if (accessRequest.initiator !== 'coordinator') {
+      return res.status(400).json({ ok: false, error: 'Only incoming coordinator requests can be declined here' });
+    }
+
+    await pool.query(
+      `UPDATE coordinator_participant_access
+       SET status = 'rejected', rejected_at = now(), approved_at = NULL
+       WHERE id = $1`,
+      [requestId]
+    );
+
+    await sendPushNotification(
+      accessRequest.coordinator_user_id,
+      'Participant declined',
+      'The participant declined your request to manage their account.',
+      { type: 'coordinator_access_rejected', requestId: accessRequest.id }
+    );
+
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: 'Failed to reject request' });
   }
 };
 
@@ -543,9 +665,12 @@ module.exports = {
   getParticipantById,
   getMe,
   updateParticipant,
+  updateMe,
   uploadProfilePhoto,
   verifyNDIS,
   searchCoordinatorByEmail,
+  listMyAccessRequests,
+  rejectCoordinatorAccessRequest,
   requestCoordinatorAccess,
   inviteCoordinatorByEmail,
 };

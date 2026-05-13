@@ -739,6 +739,19 @@ CREATE TABLE IF NOT EXISTS coordinator_email_invites (
 CREATE INDEX IF NOT EXISTS coordinator_email_invites_token_idx ON coordinator_email_invites (token);
 CREATE INDEX IF NOT EXISTS coordinator_email_invites_participant_email_idx ON coordinator_email_invites (participant_user_id, lower(invited_email));
 
+-- Coordinator profile (users with role coordinator have no participants/workers row)
+CREATE TABLE IF NOT EXISTS coordinator_profiles (
+  user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  first_name TEXT,
+  last_name TEXT,
+  phone TEXT,
+  address TEXT,
+  latitude DOUBLE PRECISION,
+  longitude DOUBLE PRECISION,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- ============================================================
 -- Worker Incidents & Complaints
 -- ============================================================

@@ -4,7 +4,6 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
-const rateLimit = require('express-rate-limit');
 
 const authRoutes = require('./routes/auth');
 const workerRoutes = require('./routes/workers');
@@ -38,6 +37,10 @@ const allowedOrigins = [
 
 const app = express();
 
+// Railway / reverse proxies: without this, req.ip is often the same for all users,
+// so a global IP rate limiter becomes one shared bucket and triggers 429 for everyone.
+app.set('trust proxy', 1);
+
 // 1) morgan
 app.use(morgan('dev'));
 
@@ -63,15 +66,6 @@ app.post('/api/payments/webhook', express.raw({ type: 'application/json' }), pay
 // 5) JSON + 6) urlencoded
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
-
-// 7) rate-limit
-app.use(
-  rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 100,
-    message: 'Too many requests, please try again later'
-  })
-);
 
 // health
 app.get('/health', (req, res) => {

@@ -114,9 +114,27 @@ export function NotificationsScreen({ navigation }) {
         return;
       }
       await markAsRead(notification.id);
+      await loadNotifications();
       Alert.alert('Approved', 'Coordinator access approved successfully.');
     } catch (_) {
       Alert.alert('Approval failed', 'Could not approve request');
+    }
+  };
+
+  const declineCoordinatorRequest = async (notification) => {
+    const requestId = getNotifData(notification).requestId;
+    if (!requestId) return;
+    try {
+      const { data, error } = await api.post(`/api/participants/me/access-requests/${requestId}/reject`);
+      if (error || !data?.ok) {
+        Alert.alert('Decline failed', error?.message || data?.error || 'Could not decline request');
+        return;
+      }
+      await markAsRead(notification.id);
+      await loadNotifications();
+      Alert.alert('Declined', 'The coordinator was notified.');
+    } catch (_) {
+      Alert.alert('Decline failed', 'Could not decline request');
     }
   };
 
@@ -130,9 +148,27 @@ export function NotificationsScreen({ navigation }) {
         return;
       }
       await markAsRead(notification.id);
+      await loadNotifications();
       Alert.alert('Approved', 'You can now help manage this participant account.');
     } catch (_) {
       Alert.alert('Approval failed', 'Could not approve request');
+    }
+  };
+
+  const declineParticipantCoordinatorRequest = async (notification) => {
+    const requestId = getNotifData(notification).requestId;
+    if (!requestId) return;
+    try {
+      const { data, error } = await api.post(`/api/coordinator/requests/${requestId}/reject-participant`);
+      if (error || !data?.ok) {
+        Alert.alert('Decline failed', error?.message || data?.error || 'Could not decline request');
+        return;
+      }
+      await markAsRead(notification.id);
+      await loadNotifications();
+      Alert.alert('Declined', 'The participant was notified.');
+    } catch (_) {
+      Alert.alert('Decline failed', 'Could not decline request');
     }
   };
 
@@ -200,41 +236,65 @@ export function NotificationsScreen({ navigation }) {
                 {n.body ? (
                   <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: 2 }}>{n.body}</Text>
                 ) : null}
-                {n.type === 'coordinator_access_request' && !n.read ? (
-                  <Pressable
-                    onPress={() => approveCoordinatorRequest(n)}
-                    style={({ pressed }) => ({
-                      marginTop: Spacing.sm,
-                      alignSelf: 'flex-start',
-                      backgroundColor: Colors.primary,
-                      borderRadius: Radius.md,
-                      paddingVertical: 8,
-                      paddingHorizontal: 12,
-                      opacity: pressed ? 0.85 : 1,
-                    })}
-                  >
-                    <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>
-                      Approve
-                    </Text>
-                  </Pressable>
+                {n.type === 'coordinator_access_request' ? (
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginTop: Spacing.sm }}>
+                    <Pressable
+                      onPress={() => approveCoordinatorRequest(n)}
+                      style={({ pressed }) => ({
+                        alignSelf: 'flex-start',
+                        backgroundColor: Colors.status.success,
+                        borderRadius: Radius.md,
+                        paddingVertical: 8,
+                        paddingHorizontal: 12,
+                        opacity: pressed ? 0.85 : 1,
+                      })}
+                    >
+                      <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Approve</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => declineCoordinatorRequest(n)}
+                      style={({ pressed }) => ({
+                        alignSelf: 'flex-start',
+                        backgroundColor: Colors.status.error,
+                        borderRadius: Radius.md,
+                        paddingVertical: 8,
+                        paddingHorizontal: 12,
+                        opacity: pressed ? 0.85 : 1,
+                      })}
+                    >
+                      <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Decline</Text>
+                    </Pressable>
+                  </View>
                 ) : null}
-                {n.type === 'participant_access_request' && !n.read ? (
-                  <Pressable
-                    onPress={() => approveParticipantCoordinatorRequest(n)}
-                    style={({ pressed }) => ({
-                      marginTop: Spacing.sm,
-                      alignSelf: 'flex-start',
-                      backgroundColor: Colors.primary,
-                      borderRadius: Radius.md,
-                      paddingVertical: 8,
-                      paddingHorizontal: 12,
-                      opacity: pressed ? 0.85 : 1,
-                    })}
-                  >
-                    <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>
-                      Approve
-                    </Text>
-                  </Pressable>
+                {n.type === 'participant_access_request' ? (
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginTop: Spacing.sm }}>
+                    <Pressable
+                      onPress={() => approveParticipantCoordinatorRequest(n)}
+                      style={({ pressed }) => ({
+                        alignSelf: 'flex-start',
+                        backgroundColor: Colors.status.success,
+                        borderRadius: Radius.md,
+                        paddingVertical: 8,
+                        paddingHorizontal: 12,
+                        opacity: pressed ? 0.85 : 1,
+                      })}
+                    >
+                      <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Approve</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => declineParticipantCoordinatorRequest(n)}
+                      style={({ pressed }) => ({
+                        alignSelf: 'flex-start',
+                        backgroundColor: Colors.status.error,
+                        borderRadius: Radius.md,
+                        paddingVertical: 8,
+                        paddingHorizontal: 12,
+                        opacity: pressed ? 0.85 : 1,
+                      })}
+                    >
+                      <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Decline</Text>
+                    </Pressable>
+                  </View>
                 ) : null}
                 <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: 4 }}>
                   {getRelativeTime(n.created_at)}

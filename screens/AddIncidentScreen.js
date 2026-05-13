@@ -75,7 +75,8 @@ export function AddIncidentScreen({ navigation }) {
       const { error } = await api.post(incidentEndpoint, form);
 
       if (error) {
-        Alert.alert('Error', error.message || 'Could not submit incident');
+        const hint = error.response?.hint;
+        Alert.alert('Error', hint ? `${error.message}\n\n${hint}` : error.message || 'Could not submit incident');
         return;
       }
 
