@@ -6,7 +6,8 @@ const pool = require('../config/database');
 const { generateToken } = require('../utils/jwt');
 const {
   sendPasswordResetEmail,
-  sendVerificationEmail
+  sendVerificationEmail,
+  isOutboundEmailConfigured,
 } = require('../services/emailService');
 
 const SALT_ROUNDS = 12;
@@ -250,6 +251,16 @@ const forgotPassword = async (req, res) => {
 
     const user = userRes.rows[0];
 
+    if (!isOutboundEmailConfigured()) {
+      // eslint-disable-next-line no-console
+      console.error('forgotPassword: MAILGUN_API_KEY / MAILGUN_DOMAIN not set');
+      return res.status(503).json({
+        ok: false,
+        error:
+          'We could not send the reset email because outbound mail is not configured on the server (MAILGUN_API_KEY, MAILGUN_DOMAIN).',
+      });
+    }
+
     const resetToken = crypto.randomBytes(TOKEN_BYTES).toString('hex');
     const resetTokenHash = sha256(resetToken);
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
@@ -263,10 +274,15 @@ const forgotPassword = async (req, res) => {
     try {
       await sendPasswordResetEmail(user.email, resetToken);
     } catch (emailErr) {
-      // Do not fail forgot-password flow if email provider is misconfigured or temporarily unavailable.
-      // Keep response generic and successful to avoid user-facing hard failures and account enumeration.
+      // User exists but outbound mail failed — do not pretend success (they would never get the link).
+      await pool.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [user.id]);
       // eslint-disable-next-line no-console
       console.error('sendPasswordResetEmail failed:', emailErr?.message || emailErr);
+      return res.status(503).json({
+        ok: false,
+        error:
+          'We could not send the reset email. Check Spam / Promotions in Gmail, then try again. If it still fails, your host may need Mailgun (MAILGUN_API_KEY, MAILGUN_DOMAIN) and a verified sending domain.',
+      });
     }
 
     return res.status(200).json({ ok: true, message: 'If the email exists, a reset link has been sent.' });

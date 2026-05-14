@@ -2,6 +2,12 @@ require('dotenv').config();
 
 const mailgun = require('mailgun-js');
 
+/** Railway / some hosts use MAILGUN_FROM_EMAIL; local .env often uses MAILGUN_FROM. */
+const getMailgunFrom = () => {
+  const raw = String(process.env.MAILGUN_FROM || process.env.MAILGUN_FROM_EMAIL || '').trim();
+  return raw || 'Summit Staffing <info@summitstaffing.com.au>';
+};
+
 const getClient = () => {
   const apiKey = process.env.MAILGUN_API_KEY;
   const domain = process.env.MAILGUN_DOMAIN;
@@ -13,9 +19,9 @@ const getClient = () => {
   return mailgun({ apiKey, domain });
 };
 
-const sendEmail = async (to, subject, html, attachments = []) => {
+const sendEmail = async (to, subject, html, attachments = [], text = null) => {
   const mg = getClient();
-  const from = process.env.MAILGUN_FROM || 'Summit Staffing <info@summitstaffing.com.au>';
+  const from = getMailgunFrom();
 
   const data = {
     from,
@@ -24,6 +30,7 @@ const sendEmail = async (to, subject, html, attachments = []) => {
     html,
     attachment: attachments
   };
+  if (text) data.text = text;
 
   return mg.messages().send(data);
 };
@@ -52,9 +59,10 @@ const sendPasswordResetEmail = async (email, resetToken) => {
   const resetUrl = `${appUrl}/reset-password?token=${encodeURIComponent(resetToken)}`;
 
   const subject = 'Reset your password';
-  const html = `<p>You requested a password reset.</p><p>Use this link to reset your password:</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>This link expires in 1 hour.</p>`;
+  const html = `<p>You requested a password reset.</p><p>Use this link to reset your password:</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>This link expires in 1 hour.</p><p>If you did not request this, you can ignore this email.</p>`;
+  const text = `Reset your Summit Staffing password (expires in 1 hour):\n\n${resetUrl}\n\nIf you did not request this, ignore this email.`;
 
-  return sendEmail(email, subject, html);
+  return sendEmail(email, subject, html, [], text);
 };
 
 const sendVerificationEmail = async (email, verificationToken) => {
@@ -93,11 +101,16 @@ const sendInvoiceEmail = async (to, invoiceNumber, pdfBuffer) => {
   return sendEmail(to, subject, html, attachments);
 };
 
+/** True when Mailgun env vars are present (does not verify the domain is approved in Mailgun). */
+const isOutboundEmailConfigured = () =>
+  Boolean(String(process.env.MAILGUN_API_KEY || '').trim() && String(process.env.MAILGUN_DOMAIN || '').trim());
+
 module.exports = {
   sendEmail,
   createAttachment,
   sendPasswordResetEmail,
   sendVerificationEmail,
   sendCoordinatorInviteEmail,
-  sendInvoiceEmail
+  sendInvoiceEmail,
+  isOutboundEmailConfigured,
 };

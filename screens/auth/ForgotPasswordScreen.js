@@ -76,9 +76,14 @@ export function ForgotPasswordScreen({ navigation }) {
         </Text>
 
         {sent ? (
-          <Text style={{ fontSize: Typography.fontSize.base, color: Colors.status.success, marginBottom: Spacing.lg }}>
-            Check your email for the reset link.
-          </Text>
+          <>
+            <Text style={{ fontSize: Typography.fontSize.base, color: Colors.status.success, marginBottom: Spacing.sm }}>
+              If that email is registered, we sent a reset link.
+            </Text>
+            <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: Spacing.lg }}>
+              In Gmail, also check Spam and the Promotions tab. The email subject is: Reset your password.
+            </Text>
+          </>
         ) : (
           <>
             <Text style={{ fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.medium, color: Colors.text.primary, marginBottom: Spacing.sm }}>
