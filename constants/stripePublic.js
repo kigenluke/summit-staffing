@@ -25,3 +25,15 @@ export function getStripePublishableKeyFromEnv() {
   }
   return readVite();
 }
+
+/** Native (CLI) builds: `react-native-config` reads STRIPE_PUBLISHABLE_KEY from `.env`. */
+export function getStripePublishableKeyForNative() {
+  try {
+    const cfg = require('react-native-config'); // bundled only on native; web stub excludes real module
+    const k = cfg.default?.STRIPE_PUBLISHABLE_KEY;
+    if (k) return String(k).trim();
+  } catch (_) {
+    /* web / missing module */
+  }
+  return getStripePublishableKeyFromEnv();
+}

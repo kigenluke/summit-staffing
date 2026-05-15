@@ -12,6 +12,7 @@ const {
   createTransfer,
   verifyWebhookSignature
 } = require('../services/stripeService');
+const { userFacingPaymentMessage } = require('../utils/userFacingPaymentError');
 
 const respondValidation = (req, res) => {
   const errors = validationResult(req);
@@ -60,7 +61,7 @@ const computeCommissionBreakdown = (amount) => {
   return { total, commission, workerPayout };
 };
 
-const ensurePaymentRecordForIntent = async (paymentIntentId, paymentIntent) => {
+const ensurePaymentRecordForIntent = async (paymentIntentId, paymentIntent, options = {}) => {
   const existing = await pool.query(
     'SELECT id, worker_payout, stripe_transfer_id FROM payments WHERE stripe_payment_intent_id = $1 LIMIT 1',
     [paymentIntentId]
@@ -68,7 +69,8 @@ const ensurePaymentRecordForIntent = async (paymentIntentId, paymentIntent) => {
   if (existing.rowCount > 0) return existing.rows[0];
 
   const pi = paymentIntent || await stripe.paymentIntents.retrieve(paymentIntentId);
-  const bookingId = pi?.metadata?.bookingId;
+  const fallbackBooking = options.fallbackBookingId != null ? String(options.fallbackBookingId) : '';
+  const bookingId = (pi?.metadata?.bookingId && String(pi.metadata.bookingId)) || fallbackBooking;
   if (!bookingId) {
     throw new Error('Missing bookingId metadata');
   }
@@ -117,8 +119,7 @@ const createConnectAccount = async (req, res) => {
     console.error('createConnectAccount fetch worker:', err);
     return res.status(500).json({
       ok: false,
-      error: pickErrorMessage(err) || 'Database error',
-      step: 'fetch_worker',
+      error: userFacingPaymentMessage(pickErrorMessage(err) || err, 500) || 'Could not load your profile. Please try again.',
     });
   }
 
@@ -141,12 +142,7 @@ const createConnectAccount = async (req, res) => {
       console.error('createConnectAccount Stripe accounts.create:', err);
       return res.status(500).json({
         ok: false,
-        error: pickErrorMessage(err) || 'Failed to Connect account',
-        step: 'stripe_accounts_create',
-        code: err.code || err.type,
-        stripeMessage: err?.raw?.message || err?.message || String(err),
-        stripeType: err?.type,
-        stripeParam: err?.raw?.param,
+        error: userFacingPaymentMessage(pickErrorMessage(err) || err, 500) || 'Could not connect Stripe. Please try again.',
       });
     }
 
@@ -157,8 +153,7 @@ const createConnectAccount = async (req, res) => {
       console.error('createConnectAccount save stripe_account_id:', err);
       return res.status(500).json({
         ok: false,
-        error: pickErrorMessage(err) || 'Could not save Stripe account',
-        step: 'save_stripe_account_id',
+        error: userFacingPaymentMessage(pickErrorMessage(err) || err, 500) || 'Could not save Stripe connection. Please try again.',
       });
     }
   }
@@ -187,9 +182,7 @@ const createConnectAccount = async (req, res) => {
         console.error('createConnectAccount account recovery failed:', recoverErr);
         return res.status(502).json({
           ok: false,
-          error: pickErrorMessage(recoverErr) || 'Failed to recover Stripe account',
-          step: 'stripe_account_recovery',
-          code: recoverErr.code || recoverErr.type,
+          error: userFacingPaymentMessage(pickErrorMessage(recoverErr) || recoverErr, 502) || 'Could not connect Stripe. Please try again.',
         });
       }
     }
@@ -198,11 +191,9 @@ const createConnectAccount = async (req, res) => {
     console.error('createConnectAccount Stripe accountLinks.create:', err);
     return res.status(502).json({
       ok: false,
-      error: pickErrorMessage(err) || 'Failed to Connect account',
-      step: 'stripe_account_links_create',
-      code: err.code || err.type,
+      error: userFacingPaymentMessage(pickErrorMessage(err) || err, 502) || 'Could not open Stripe setup. Please try again.',
       hint:
-        'Set APP_URL on Railway to your public site URL (https://…). Return/refresh URLs must be valid https in production.',
+        'If this keeps happening, ask your admin to set APP_URL on the server to your public https address (not localhost).',
     });
   }
 
@@ -313,7 +304,10 @@ const createConnectLoginLinkHandler = async (req, res) => {
     const loginLink = await createAccountLoginLink(workerRes.rows[0].stripe_account_id);
     return res.status(200).json({ ok: true, loginUrl: loginLink.url });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: pickErrorMessage(err) || 'Failed to open Stripe dashboard' });
+    return res.status(500).json({
+      ok: false,
+      error: userFacingPaymentMessage(pickErrorMessage(err) || err, 500) || 'Could not open Stripe dashboard.',
+    });
   }
 };
 
@@ -335,7 +329,10 @@ const disconnectConnectAccountHandler = async (req, res) => {
     );
     return res.status(200).json({ ok: true, disconnected: true });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: pickErrorMessage(err) || 'Failed to disconnect Stripe account' });
+    return res.status(500).json({
+      ok: false,
+      error: userFacingPaymentMessage(pickErrorMessage(err) || err, 500) || 'Could not disconnect Stripe.',
+    });
   }
 };
 
@@ -346,7 +343,7 @@ const createPaymentIntentHandler = async (req, res) => {
 
     const participantRes = await pool.query('SELECT id FROM participants WHERE user_id = $1 LIMIT 1', [req.user.userId]);
     if (participantRes.rowCount === 0) {
-      return res.status(403).json({ ok: false, error: 'Forbidden' });
+      return res.status(403).json({ ok: false, error: 'Only participant accounts can start a payment for a booking.' });
     }
 
     const participantId = participantRes.rows[0].id;
@@ -368,7 +365,7 @@ const createPaymentIntentHandler = async (req, res) => {
     const booking = bookingRes.rows[0];
 
     if (booking.participant_id !== participantId) {
-      return res.status(403).json({ ok: false, error: 'Forbidden' });
+      return res.status(403).json({ ok: false, error: 'You can only pay for your own bookings.' });
     }
 
     if (!['confirmed', 'completed'].includes(booking.status)) {
@@ -410,7 +407,12 @@ const createPaymentIntentHandler = async (req, res) => {
       publishable_key: publishableKey,
     });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: 'Failed to create payment intent' });
+    // eslint-disable-next-line no-console
+    console.error('createPaymentIntentHandler:', err);
+    return res.status(500).json({
+      ok: false,
+      error: userFacingPaymentMessage(pickErrorMessage(err) || err, 500) || 'Could not start payment. Please try again.',
+    });
   }
 };
 
@@ -421,7 +423,7 @@ const createCheckoutSessionHandler = async (req, res) => {
 
     const participantRes = await pool.query('SELECT id FROM participants WHERE user_id = $1 LIMIT 1', [req.user.userId]);
     if (participantRes.rowCount === 0) {
-      return res.status(403).json({ ok: false, error: 'Forbidden' });
+      return res.status(403).json({ ok: false, error: 'Only participant accounts can pay through checkout.' });
     }
     const participantId = participantRes.rows[0].id;
     const { bookingId } = req.body;
@@ -438,7 +440,7 @@ const createCheckoutSessionHandler = async (req, res) => {
     }
     const booking = bookingRes.rows[0];
     if (booking.participant_id !== participantId) {
-      return res.status(403).json({ ok: false, error: 'Forbidden' });
+      return res.status(403).json({ ok: false, error: 'You can only pay for your own bookings.' });
     }
     if (!['confirmed', 'completed'].includes(booking.status)) {
       return res.status(400).json({ ok: false, error: 'Booking must be confirmed (or completed) before payment' });
@@ -477,11 +479,16 @@ const createCheckoutSessionHandler = async (req, res) => {
       checkout_session_id: session.id,
     });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: pickErrorMessage(err) || 'Failed to create checkout session' });
+    // eslint-disable-next-line no-console
+    console.error('createCheckoutSessionHandler:', err);
+    return res.status(500).json({
+      ok: false,
+      error: userFacingPaymentMessage(pickErrorMessage(err) || err, 500) || 'Could not start checkout. Please try again.',
+    });
   }
 };
 
-const createTransferForPaymentIntent = async (paymentIntentId) => {
+const createTransferForPaymentIntent = async (paymentIntentId, fallbackBookingId = null) => {
   if (!stripe) {
     throw new Error('Stripe is not configured');
   }
@@ -490,7 +497,16 @@ const createTransferForPaymentIntent = async (paymentIntentId) => {
     throw new Error('PaymentIntent not succeeded');
   }
 
-  const bookingId = pi.metadata?.bookingId;
+  let bookingId = (pi.metadata?.bookingId && String(pi.metadata.bookingId)) || fallbackBookingId;
+  if (!bookingId) {
+    const payRes = await pool.query(
+      'SELECT booking_id FROM payments WHERE stripe_payment_intent_id = $1 LIMIT 1',
+      [paymentIntentId]
+    );
+    if (payRes.rowCount > 0) {
+      bookingId = String(payRes.rows[0].booking_id);
+    }
+  }
   if (!bookingId) {
     throw new Error('Missing bookingId metadata');
   }
@@ -513,7 +529,7 @@ const createTransferForPaymentIntent = async (paymentIntentId) => {
     throw new Error('Worker Stripe account not set');
   }
 
-  const payment = await ensurePaymentRecordForIntent(paymentIntentId, pi);
+  const payment = await ensurePaymentRecordForIntent(paymentIntentId, pi, { fallbackBookingId: bookingId });
 
   if (payment.stripe_transfer_id) {
     return { alreadyTransferred: true, transferId: payment.stripe_transfer_id };
@@ -597,15 +613,16 @@ const handleWebhook = async (req, res) => {
       case 'checkout.session.completed': {
         const session = event.data.object;
         const paymentIntentId = typeof session.payment_intent === 'string' ? session.payment_intent : null;
+        const sessionBookingId = session.metadata?.bookingId || null;
         if (paymentIntentId) {
           const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
-          await ensurePaymentRecordForIntent(paymentIntentId, pi);
+          await ensurePaymentRecordForIntent(paymentIntentId, pi, { fallbackBookingId: sessionBookingId });
           await pool.query(
             "UPDATE payments SET status = 'succeeded', payment_date = now() WHERE stripe_payment_intent_id = $1",
             [paymentIntentId]
           );
           try {
-            await createTransferForPaymentIntent(paymentIntentId);
+            await createTransferForPaymentIntent(paymentIntentId, sessionBookingId);
           } catch (err) {
             // ignore transfer retry failures in webhook path
           }

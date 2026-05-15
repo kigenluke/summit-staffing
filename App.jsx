@@ -7,6 +7,7 @@ import React, { useEffect, useCallback } from 'react';
 import { View, Text, ScrollView, Platform, Linking } from 'react-native';
 import { NavigationContainer, createNavigationContainerRef, CommonActions } from '@react-navigation/native';
 import { ToastProvider } from './components/Toast.js';
+import RootWithOptionalStripe from './components/RootWithOptionalStripe';
 import { AppNavigator } from './navigation/AppNavigator';
 import { Colors } from './constants/theme.js';
 import { rehydrateAuth } from './store/authStore.js';
@@ -110,9 +111,11 @@ export default function App() {
     <ErrorBoundary>
       <View style={appWrapperStyle}>
         <ToastProvider>
-          <NavigationContainer ref={navigationRef} theme={navTheme} onReady={onNavReady}>
-            <AppNavigator />
-          </NavigationContainer>
+          <RootWithOptionalStripe>
+            <NavigationContainer ref={navigationRef} theme={navTheme} onReady={onNavReady}>
+              <AppNavigator />
+            </NavigationContainer>
+          </RootWithOptionalStripe>
         </ToastProvider>
       </View>
     </ErrorBoundary>

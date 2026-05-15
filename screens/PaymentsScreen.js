@@ -53,12 +53,16 @@ export function PaymentsScreen() {
       const { data, error } = await api.post('/api/payments/connect/onboard');
       if (error) {
         const res = error.response;
-        const detail = res?.error || error.message;
-        const hint = res?.hint;
+        const detail =
+          typeof res?.error === 'string'
+            ? res.error
+            : (res?.error && typeof res.error?.message === 'string' ? res.error.message : null)
+            || error.message;
+        const hint = typeof res?.hint === 'string' ? res.hint : '';
         const lines = [detail, hint].filter(Boolean);
         Alert.alert(
-          'Failed to Connect account',
-          lines.length ? lines.join('\n\n') : 'Please try again later.'
+          'Could not connect Stripe',
+          lines.length ? lines.join('\n\n') : 'Please try again later or contact support.',
         );
         return;
       }

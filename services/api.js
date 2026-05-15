@@ -70,6 +70,20 @@ export function getHeaders(customHeaders = {}) {
   return headers;
 }
 
+/** Turn JSON `{ error }` into a readable string (avoids `[object Object]` in alerts). */
+function coerceBodyErrorMessage(value) {
+  if (value == null || value === '') return null;
+  if (typeof value === 'string') {
+    const t = value.trim();
+    return t.length ? t : null;
+  }
+  if (typeof value === 'object' && typeof value.message === 'string') {
+    const t = String(value.message).trim();
+    return t.length ? t : null;
+  }
+  return null;
+}
+
 /**
  * Low-level request helper. Returns { data, error, status }.
  * Does not throw; parse response and surface errors for callers.
@@ -131,13 +145,13 @@ export async function request(method, path, body = null, options = {}) {
         try { logout(); } catch (_) {}
       }
       const errorMsg =
-        data?.error
+        coerceBodyErrorMessage(data?.error)
         || (Array.isArray(data?.errors) && data.errors.length
           ? data.errors.map((e) => e?.msg || e?.message).filter(Boolean).join(' ')
           : null)
         || data?.message
         || (res.status === 429 ? 'Too many requests. Please try again shortly.' : null)
-        || `Request failed: ${res.status}`;
+        || `Something went wrong (${res.status}). Please try again.`;
       const error = new Error(errorMsg);
       error.status = res.status;
       error.response = data;

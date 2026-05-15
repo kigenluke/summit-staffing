@@ -222,7 +222,7 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo }) {
   const [title, setTitle] = useState('');
   const [serviceType, setServiceType] = useState('');
   const [showServicePicker, setShowServicePicker] = useState(false);
-  const [hourlyRate, setHourlyRate] = useState('70.23');
+  const [hourlyRate, setHourlyRate] = useState('');
   const [date, setDate] = useState('');
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
@@ -293,7 +293,7 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo }) {
   }, [visible]);
 
   const reset = () => {
-    setTitle(''); setServiceType(''); setHourlyRate('70.23'); setDate('');
+    setTitle(''); setServiceType(''); setHourlyRate(''); setDate('');
     setStartTime(''); setEndTime(''); setLocation(''); setDescription('');
     setLocationLat(null); setLocationLng(null);
     setCommonShiftPreset('');
@@ -831,7 +831,7 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo }) {
         value={hourlyRate}
         onChangeText={setHourlyRate}
         keyboardType="decimal-pad"
-        placeholder="e.g. 70.23"
+        placeholder="e.g. 70"
         placeholderTextColor={Colors.text.muted}
       />
       {liveHourlyRateHint.main ? (
@@ -1722,7 +1722,6 @@ function ShiftCard({ shift, onApply, isWorker, isParticipant, onOpenApplications
 
           <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>
             ${Number(shift.hourly_rate || 0).toFixed(2)}/hr • ~${payEst.estimatedTotal.toFixed(2)} total
-            {hasUnpaidBreakDeduction ? ' (pay for paid time only)' : ''}
             {payEst.breakIsPaid && payEst.breakPay > 0 ? ' (includes break pay)' : ''}
           </Text>
         </>

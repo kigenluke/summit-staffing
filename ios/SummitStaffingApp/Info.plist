@@ -51,5 +51,16 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<false/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.summitstaffing.app.stripe</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>summitstaffing</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>
