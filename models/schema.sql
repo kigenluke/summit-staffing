@@ -748,9 +748,20 @@ CREATE TABLE IF NOT EXISTS coordinator_profiles (
   address TEXT,
   latitude DOUBLE PRECISION,
   longitude DOUBLE PRECISION,
+  profile_image_url TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'coordinator_profiles' AND column_name = 'profile_image_url'
+  ) THEN
+    ALTER TABLE coordinator_profiles ADD COLUMN profile_image_url TEXT;
+  END IF;
+END $$;
 
 -- ============================================================
 -- Worker Incidents & Complaints

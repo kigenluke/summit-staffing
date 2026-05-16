@@ -4,9 +4,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, ScrollView, Pressable, FlatList, Alert,
-  RefreshControl, Modal, TextInput, ActivityIndicator,
+  RefreshControl, Modal, TextInput, ActivityIndicator, Image,
 } from 'react-native';
 import { api } from '../services/api.js';
+import { DocumentViewLink } from '../components/DocumentViewLink.js';
+import { DOC_TYPE_LABELS } from '../utils/complianceProgress.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { formatDateDMY } from '../utils/dateFormat.js';
 import { useAuthStore } from '../store/authStore.js';
@@ -23,6 +25,35 @@ function StatCard({ label, value, color }) {
 
 /* ───── tabs ───── */
 const TABS = ['Overview', 'Documents', 'Users', 'Revenue'];
+
+function UserAvatar({ url, name, email, size = 40 }) {
+  const letter = (name || email || '?')[0].toUpperCase();
+  const radius = size / 2;
+  if (url) {
+    return (
+      <Image
+        source={{ uri: String(url) }}
+        style={{ width: size, height: size, borderRadius: radius, marginRight: Spacing.sm, backgroundColor: Colors.border }}
+        resizeMode="cover"
+      />
+    );
+  }
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: radius,
+        marginRight: Spacing.sm,
+        backgroundColor: Colors.primary,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>{letter}</Text>
+    </View>
+  );
+}
 
 export function AdminDashboardScreen({ navigation }) {
   const { user } = useAuthStore();
@@ -121,6 +152,9 @@ export function AdminDashboardScreen({ navigation }) {
       setComplianceItems([]);
     } else {
       setComplianceItems(data?.items || []);
+      if (data?.worker) {
+        setComplianceUser((prev) => (prev ? { ...prev, ...data.worker, name: data.worker.name || prev.name } : prev));
+      }
     }
     setComplianceLoading(false);
   };
@@ -195,12 +229,25 @@ export function AdminDashboardScreen({ navigation }) {
             <Text style={{ fontSize: Typography.fontSize.xl, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.md }}>Pending Documents</Text>
             {docs.length === 0 && <Text style={{ color: Colors.text.muted, textAlign: 'center', marginTop: 40 }}>No pending documents</Text>}
             {docs.map(d => (
-              <View key={d.id} style={{ backgroundColor: Colors.surface, borderRadius: Radius.md, padding: Spacing.md, marginBottom: Spacing.sm, ...Shadows.sm }}>
-                <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>{d.document_type || d.type}</Text>
+              <View key={d.id} style={{ backgroundColor: Colors.surface, borderRadius: Radius.md, padding: Spacing.md, marginBottom: Spacing.sm, ...Shadows.sm, flexDirection: 'row' }}>
+                <UserAvatar
+                  url={d.profile_image_url}
+                  name={d.first_name ? `${d.first_name} ${d.last_name || ''}` : ''}
+                  email={d.email}
+                />
+                <View style={{ flex: 1 }}>
+                <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>
+                  {DOC_TYPE_LABELS[d.document_type] || d.document_type || d.type}
+                </Text>
                 <Text style={{ color: Colors.text.secondary, marginVertical: 4 }}>
                   {(d.account_type === 'participant' ? 'Participant' : 'Worker')}: {d.first_name ? `${d.first_name} ${d.last_name || ''}` : `ID: ${d.subject_id || d.worker_id}`}
                 </Text>
                 <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs }}>Uploaded: {formatDateDMY(d.created_at || d.uploaded_at)}</Text>
+                {d.file_url ? (
+                  <View style={{ marginTop: Spacing.xs }}>
+                    <DocumentViewLink url={d.file_url} label="Open document" />
+                  </View>
+                ) : null}
                 <View style={{ flexDirection: 'row', marginTop: Spacing.sm }}>
                   <Pressable onPress={() => handleDoc(d.id, 'approve', d.account_type || 'worker')}
                     style={{ flex: 1, backgroundColor: '#10B981', padding: Spacing.sm, borderRadius: Radius.sm, alignItems: 'center', marginRight: Spacing.xs }}>
@@ -210,6 +257,7 @@ export function AdminDashboardScreen({ navigation }) {
                     style={{ flex: 1, backgroundColor: '#EF4444', padding: Spacing.sm, borderRadius: Radius.sm, alignItems: 'center' }}>
                     <Text style={{ color: '#fff', fontWeight: Typography.fontWeight.bold }}>Reject</Text>
                   </Pressable>
+                </View>
                 </View>
               </View>
             ))}
@@ -225,6 +273,11 @@ export function AdminDashboardScreen({ navigation }) {
             {users.length === 0 && <Text style={{ color: Colors.text.muted, textAlign: 'center', marginTop: 30 }}>No users found</Text>}
             {users.map(u => (
               <View key={u.id} style={{ backgroundColor: Colors.surface, borderRadius: Radius.md, padding: Spacing.md, marginBottom: Spacing.sm, ...Shadows.sm, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <UserAvatar
+                  url={u.profile_image_url}
+                  name={u.first_name && u.last_name ? `${u.first_name} ${u.last_name}` : u.first_name}
+                  email={u.email}
+                />
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>{u.email}</Text>
                   <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs }}>{u.role} • {u.is_suspended ? ' Suspended' : ' Active'} • Joined {formatDateDMY(u.created_at)}</Text>
@@ -317,7 +370,18 @@ export function AdminDashboardScreen({ navigation }) {
                 <Text style={{ fontSize: 22, color: Colors.text.muted }}>✕</Text>
               </Pressable>
             </View>
-            <Text style={{ color: Colors.text.secondary, marginBottom: Spacing.md }}>{complianceUser?.email || ''}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: Spacing.md }}>
+              <UserAvatar
+                url={complianceUser?.profile_image_url}
+                name={complianceUser?.name}
+                email={complianceUser?.email}
+                size={48}
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>{complianceUser?.name || 'Worker'}</Text>
+                <Text style={{ color: Colors.text.secondary }}>{complianceUser?.email || ''}</Text>
+              </View>
+            </View>
 
             {complianceLoading ? (
               <ActivityIndicator color={Colors.primary} style={{ marginTop: Spacing.lg }} />
@@ -332,6 +396,15 @@ export function AdminDashboardScreen({ navigation }) {
                     {!!item.reason && (
                       <Text style={{ color: Colors.status.error, fontSize: Typography.fontSize.xs, marginTop: 2 }}>
                         Reason: {item.reason}
+                      </Text>
+                    )}
+                    {item.fileUrl ? (
+                      <View style={{ marginTop: Spacing.xs }}>
+                        <DocumentViewLink url={item.fileUrl} label="Open uploaded document" />
+                      </View>
+                    ) : (
+                      <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs, marginTop: Spacing.xs }}>
+                        No file uploaded yet
                       </Text>
                     )}
                     {item.actionable && (

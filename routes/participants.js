@@ -7,6 +7,7 @@ const checkAdmin = require('../middleware/checkAdmin');
 const checkParticipant = require('../middleware/checkParticipant');
 const participantController = require('../controllers/participantController');
 const incidentsController = require('../controllers/incidentsController');
+const { complianceUpload } = require('../middleware/complianceMulter');
 
 const router = express.Router();
 
@@ -22,18 +23,6 @@ const upload = multer({
     }
     return cb(null, true);
   }
-});
-
-const complianceUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    const allowed = ['application/pdf', 'image/jpeg', 'image/png'];
-    if (!allowed.includes(file.mimetype)) {
-      return cb(new Error('Invalid file type. Only PDF, JPG, PNG are allowed.'));
-    }
-    return cb(null, true);
-  },
 });
 
 const incidentImagesUpload = multer({
@@ -94,8 +83,8 @@ const participantDocumentValidators = [
   body('documentType')
     .isIn(['ndis_screening', 'wwcc', 'yellow_card', 'police_check', 'first_aid', 'manual_handling', 'insurance', 'other'])
     .withMessage('Invalid documentType'),
-  body('issue_date').optional({ nullable: true }).isISO8601().toDate(),
-  body('expiry_date').optional({ nullable: true }).isISO8601().toDate(),
+  body('issue_date').optional({ checkFalsy: true }).isISO8601().toDate(),
+  body('expiry_date').optional({ checkFalsy: true }).isISO8601().toDate(),
 ];
 
 router.post(

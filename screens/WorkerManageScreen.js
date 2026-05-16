@@ -8,7 +8,8 @@ import { api } from '../services/api.js';
 import { useAuthStore } from '../store/authStore.js';
 import { useAccountAccess } from '../context/WorkerGateContext.js';
 import { ComplianceSubmitPanel } from '../components/ComplianceSubmitPanel.js';
-import { getComplianceProgress, REQUIRED_WORKER_COMPLIANCE_DOCS } from '../utils/complianceProgress.js';
+import { getComplianceProgress, getLatestDocumentForType, REQUIRED_WORKER_COMPLIANCE_DOCS } from '../utils/complianceProgress.js';
+import { DocumentViewLink } from '../components/DocumentViewLink.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { formatDateDMY } from '../utils/dateFormat.js';
 import { SERVICE_TYPES } from '../constants/serviceTypes.js';
@@ -725,20 +726,32 @@ export function WorkerManageScreen({ route, navigation }) {
       {/* Documents – upload info */}
       <Section title=" Documents (upload here)">
         {DOC_TYPES.map(dt => {
-          const doc = (worker.documents || []).find(d => d.document_type === dt.key);
+          const doc = getLatestDocumentForType(worker.documents || [], dt.key);
           return (
-            <View key={dt.key} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: Spacing.sm, borderBottomWidth: 1, borderBottomColor: Colors.borderLight }}>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: Colors.text.primary, fontWeight: Typography.fontWeight.medium }}>{dt.label}</Text>
-                {doc?.expiry_date && <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted }}>Expires: {formatDateDMY(doc.expiry_date)}</Text>}
-              </View>
-              {doc ? (
-                <View style={{ backgroundColor: DOC_STATUS_COLORS[doc.status] || Colors.text.muted, paddingHorizontal: Spacing.sm, paddingVertical: 2, borderRadius: Radius.full }}>
-                  <Text style={{ color: Colors.text.white, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.bold, textTransform: 'uppercase' }}>{doc.status}</Text>
+            <View key={dt.key} style={{ paddingVertical: Spacing.sm, borderBottomWidth: 1, borderBottomColor: Colors.borderLight }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: Colors.text.primary, fontWeight: Typography.fontWeight.medium }}>{dt.label}</Text>
+                  {doc?.expiry_date && <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted }}>Expires: {formatDateDMY(doc.expiry_date)}</Text>}
                 </View>
-              ) : (
-                <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted }}>Not uploaded</Text>
-              )}
+                {doc ? (
+                  <View style={{ backgroundColor: DOC_STATUS_COLORS[doc.status] || Colors.text.muted, paddingHorizontal: Spacing.sm, paddingVertical: 2, borderRadius: Radius.full }}>
+                    <Text style={{ color: Colors.text.white, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.bold, textTransform: 'uppercase' }}>{doc.status}</Text>
+                  </View>
+                ) : (
+                  <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted }}>Not uploaded</Text>
+                )}
+              </View>
+              {doc?.file_url ? (
+                <View style={{ marginTop: 4 }}>
+                  <DocumentViewLink url={doc.file_url} label="View uploaded file" />
+                  {doc.rejection_reason ? (
+                    <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.status.error, marginTop: 2 }}>
+                      Rejected: {doc.rejection_reason}
+                    </Text>
+                  ) : null}
+                </View>
+              ) : null}
             </View>
           );
         })}

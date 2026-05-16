@@ -8,7 +8,8 @@ import { api } from '../services/api.js';
 import { useAccountAccess } from '../context/WorkerGateContext.js';
 import { ComplianceSubmitPanel } from '../components/ComplianceSubmitPanel.js';
 import { Colors, Spacing, Typography, Radius } from '../constants/theme.js';
-import { getComplianceProgress, REQUIRED_PARTICIPANT_COMPLIANCE_DOCS } from '../utils/complianceProgress.js';
+import { getComplianceProgress, getLatestDocumentForType, REQUIRED_PARTICIPANT_COMPLIANCE_DOCS } from '../utils/complianceProgress.js';
+import { DocumentViewLink } from '../components/DocumentViewLink.js';
 
 const DOC_TYPES = [
   { key: 'ndis_screening', label: 'NDIS Screening' },
@@ -124,27 +125,36 @@ export function ParticipantComplianceScreen() {
       </Text>
 
       {DOC_TYPES.map((dt) => {
-        const doc = documents.find((d) => d.document_type === dt.key);
+        const doc = getLatestDocumentForType(documents, dt.key);
         return (
           <View
             key={dt.key}
             style={{
-              flexDirection: 'row',
-              justifyContent: 'space-between',
-              alignItems: 'center',
               paddingVertical: Spacing.sm,
               borderBottomWidth: 1,
               borderBottomColor: Colors.borderLight,
             }}
           >
-            <Text style={{ color: Colors.text.primary, flex: 1 }}>{dt.label}</Text>
-            {doc ? (
-              <View style={{ backgroundColor: DOC_STATUS_COLORS[doc.status] || Colors.text.muted, paddingHorizontal: Spacing.sm, paddingVertical: 2, borderRadius: Radius.full }}>
-                <Text style={{ color: Colors.text.white, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.bold }}>{doc.status}</Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={{ color: Colors.text.primary, flex: 1 }}>{dt.label}</Text>
+              {doc ? (
+                <View style={{ backgroundColor: DOC_STATUS_COLORS[doc.status] || Colors.text.muted, paddingHorizontal: Spacing.sm, paddingVertical: 2, borderRadius: Radius.full }}>
+                  <Text style={{ color: Colors.text.white, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.bold }}>{doc.status}</Text>
+                </View>
+              ) : (
+                <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted }}>Required</Text>
+              )}
+            </View>
+            {doc?.file_url ? (
+              <View style={{ marginTop: 4 }}>
+                <DocumentViewLink url={doc.file_url} label="View uploaded file" />
+                {doc.rejection_reason ? (
+                  <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.status.error, marginTop: 2 }}>
+                    Rejected: {doc.rejection_reason}
+                  </Text>
+                ) : null}
               </View>
-            ) : (
-              <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted }}>Required</Text>
-            )}
+            ) : null}
           </View>
         );
       })}

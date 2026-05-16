@@ -14,6 +14,7 @@ import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { useWorkerGate } from '../context/WorkerGateContext.js';
 import { showVerificationRequiredAlert } from '../utils/verificationPrompt.js';
+import { ProfilePhotoPicker } from '../components/ProfilePhotoPicker.js';
 import { ALLOWED_ROUTES_WHILE_RESTRICTED } from '../hooks/useGuardedNavigation.js';
 
 // ── Menu Item Component ─────────────────────────────────────────
@@ -71,7 +72,7 @@ export function ProfileScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [profileImage, setProfileImage] = useState(null);
+  const [profileImageUrl, setProfileImageUrl] = useState(null);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [incidentMenuOpen, setIncidentMenuOpen] = useState(false);
   const [confirmModal, setConfirmModal] = useState({ visible: false, title: '', message: '', confirmText: 'Confirm', destructive: false });
@@ -101,30 +102,13 @@ export function ProfileScreen({ navigation }) {
     }
   }, [navigation, restricted]);
 
-  const pickImage = () => {
-    try {
-      const pickerLib = require('react-native-image-picker');
-      const launch = pickerLib?.launchImageLibrary;
-      if (typeof launch !== 'function') {
-        Alert.alert('Unavailable', 'Image picker is not available on this device.');
-        return;
-      }
-      launch(
-        { mediaType: 'photo', maxWidth: 400, maxHeight: 400, quality: 0.8 },
-        (response) => {
-          if (response?.didCancel) return;
-          if (response?.errorCode) {
-            Alert.alert('Error', response.errorMessage || 'Failed to pick image');
-            return;
-          }
-          const uri = response?.assets?.[0]?.uri;
-          if (uri) setProfileImage(uri);
-        },
-      );
-    } catch (_) {
-      Alert.alert('Unavailable', 'Image picker is not available right now.');
-    }
-  };
+  const profilePhotoUploadPath = isWorker
+    ? '/api/workers/me/profile-photo'
+    : isParticipant
+      ? '/api/participants/me/profile-photo'
+      : isCoordinator
+        ? '/api/coordinator/me/profile-photo'
+        : null;
 
   const loadProfile = useCallback(async () => {
     try {
@@ -137,6 +121,7 @@ export function ProfileScreen({ navigation }) {
           const p = isWorker ? data.worker : data.participant;
           if (p) {
             setProfile(p);
+            setProfileImageUrl(p.profile_image_url || null);
             if (isWorker) syncFromWorkerProfile(p, data.documents || []);
             if (isParticipant) syncFromParticipantProfile(p, data.documents || []);
           }
@@ -335,19 +320,27 @@ export function ProfileScreen({ navigation }) {
         backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg,
         marginBottom: Spacing.md, alignItems: 'center', ...Shadows.md,
       }}>
-        <Pressable onPress={pickImage} style={{
-          width: 96, height: 96, borderRadius: 48, backgroundColor: Colors.primary,
-          alignItems: 'center', justifyContent: 'center', marginBottom: Spacing.md, overflow: 'hidden',
-        }}>
-          {profileImage ? (
-            <Image source={{ uri: profileImage }} style={{ width: 96, height: 96, borderRadius: 48 }} />
-          ) : (
+        {profilePhotoUploadPath ? (
+          <ProfilePhotoPicker
+            imageUrl={profileImageUrl}
+            onImageUrlChange={(url) => {
+              setProfileImageUrl(url);
+              setProfile((prev) => (prev ? { ...prev, profile_image_url: url } : prev));
+            }}
+            uploadPath={profilePhotoUploadPath}
+            fallbackLetter={(profile?.first_name || user?.email || '?')[0]}
+            size={96}
+          />
+        ) : (
+          <View style={{
+            width: 96, height: 96, borderRadius: 48, backgroundColor: Colors.primary,
+            alignItems: 'center', justifyContent: 'center', marginBottom: Spacing.md,
+          }}>
             <Text style={{ fontSize: 40, color: Colors.text.white }}>
-              {(firstName || user?.email || '?')[0].toUpperCase()}
+              {(profile?.first_name || user?.email || '?')[0].toUpperCase()}
             </Text>
-          )}
-        </Pressable>
-        <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.primary, marginBottom: Spacing.sm }}>Tap to change photo</Text>
+          </View>
+        )}
         <Text style={{ fontSize: Typography.fontSize.xxl, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>
           {fullName}
         </Text>

@@ -74,14 +74,14 @@ const getPendingDocuments = async (req, res) => {
 
     const docsRes = await pool.query(
       `SELECT d.id, d.worker_id AS subject_id, 'worker' AS account_type, d.document_type, d.file_url, d.issue_date, d.expiry_date, d.status, d.created_at,
-              w.first_name, w.last_name, w.abn, u.email
+              w.first_name, w.last_name, w.abn, w.profile_image_url, u.email
        FROM worker_documents d
        JOIN workers w ON w.id = d.worker_id
        JOIN users u ON u.id = w.user_id
        WHERE d.status = 'pending'
        UNION ALL
        SELECT d.id, d.participant_id AS subject_id, 'participant' AS account_type, d.document_type, d.file_url, d.issue_date, d.expiry_date, d.status, d.created_at,
-              p.first_name, p.last_name, NULL AS abn, u.email
+              p.first_name, p.last_name, NULL AS abn, p.profile_image_url, u.email
        FROM participant_documents d
        JOIN participants p ON p.id = d.participant_id
        JOIN users u ON u.id = p.user_id
@@ -293,10 +293,16 @@ const getUserList = async (req, res) => {
     const countRes = await pool.query(`SELECT COUNT(*)::int AS total FROM users ${whereSql}`, params);
 
     const listRes = await pool.query(
-      `SELECT id, email, role, email_verified, is_suspended, suspended_reason, suspended_at, last_login_at, created_at
-       FROM users
-       ${whereSql}
-       ORDER BY created_at DESC
+      `SELECT u.id, u.email, u.role, u.email_verified, u.is_suspended, u.suspended_reason, u.suspended_at, u.last_login_at, u.created_at,
+              COALESCE(w.first_name, p.first_name, cp.first_name) AS first_name,
+              COALESCE(w.last_name, p.last_name, cp.last_name) AS last_name,
+              COALESCE(w.profile_image_url, p.profile_image_url, cp.profile_image_url) AS profile_image_url
+       FROM users u
+       LEFT JOIN workers w ON w.user_id = u.id AND u.role = 'worker'
+       LEFT JOIN participants p ON p.user_id = u.id AND u.role = 'participant'
+       LEFT JOIN coordinator_profiles cp ON cp.user_id = u.id AND u.role = 'coordinator'
+       ${whereSql.replace(/\brole\b/g, 'u.role').replace(/\bis_suspended\b/g, 'u.is_suspended').replace(/\bemail\b/g, 'u.email')}
+       ORDER BY u.created_at DESC
        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
       [...params, limit, offset]
     );
@@ -447,7 +453,7 @@ const getUserComplianceStatus = async (req, res) => {
     const userId = req.params.id;
 
     const workerRes = await pool.query(
-      `SELECT w.id AS worker_id, w.user_id, w.first_name, w.last_name, w.abn, w.verification_status, u.email
+      `SELECT w.id AS worker_id, w.user_id, w.first_name, w.last_name, w.abn, w.verification_status, w.profile_image_url, u.email
        FROM workers w
        JOIN users u ON u.id = w.user_id
        WHERE w.user_id = $1
@@ -460,7 +466,7 @@ const getUserComplianceStatus = async (req, res) => {
     const worker = workerRes.rows[0];
 
     const docsRes = await pool.query(
-      `SELECT id, document_type, status, rejection_reason, created_at, updated_at
+      `SELECT id, document_type, file_url, status, rejection_reason, created_at, updated_at
        FROM worker_documents
        WHERE worker_id = $1
        ORDER BY created_at DESC`,
@@ -481,6 +487,7 @@ const getUserComplianceStatus = async (req, res) => {
         actionable: true,
         documentType: def.documentType,
         documentId: doc?.id || null,
+        fileUrl: doc?.file_url || null,
         reason: doc?.rejection_reason || null,
         lastUpdatedAt: doc?.updated_at || doc?.created_at || null,
       };
@@ -494,6 +501,7 @@ const getUserComplianceStatus = async (req, res) => {
         name: `${worker.first_name || ''} ${worker.last_name || ''}`.trim(),
         email: worker.email,
         verification_status: worker.verification_status,
+        profile_image_url: worker.profile_image_url,
       },
       items,
     });

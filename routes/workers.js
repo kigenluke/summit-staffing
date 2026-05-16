@@ -5,6 +5,7 @@ const { body, param, query } = require('express-validator');
 const auth = require('../middleware/auth');
 const checkWorker = require('../middleware/checkWorker');
 const workerController = require('../controllers/workerController');
+const { complianceUpload } = require('../middleware/complianceMulter');
 
 const router = express.Router();
 
@@ -14,9 +15,9 @@ const upload = multer({
     fileSize: 10 * 1024 * 1024
   },
   fileFilter: (req, file, cb) => {
-    const allowed = ['application/pdf', 'image/jpeg', 'image/png'];
+    const allowed = ['image/jpeg', 'image/png', 'image/jpg'];
     if (!allowed.includes(file.mimetype)) {
-      return cb(new Error('Invalid file type. Only PDF, JPG, PNG are allowed.'));
+      return cb(new Error('Invalid file type. Only JPG, PNG are allowed.'));
     }
     return cb(null, true);
   }
@@ -51,18 +52,24 @@ router.get('/me', [auth, checkWorker], workerController.getMe);
 router.post('/me/submit-verification', [auth, checkWorker], workerController.submitVerification);
 
 const workerDocumentValidators = [
-  upload.single('file'),
+  complianceUpload.single('file'),
   body('documentType')
     .isIn(['ndis_screening', 'wwcc', 'yellow_card', 'police_check', 'first_aid', 'manual_handling', 'insurance', 'other'])
     .withMessage('Invalid documentType'),
-  body('issue_date').optional({ nullable: true }).isISO8601().toDate(),
-  body('expiry_date').optional({ nullable: true }).isISO8601().toDate(),
+  body('issue_date').optional({ checkFalsy: true }).isISO8601().toDate(),
+  body('expiry_date').optional({ checkFalsy: true }).isISO8601().toDate(),
 ];
 
 router.post(
   '/me/documents',
   [auth, checkWorker, ...workerDocumentValidators],
   workerController.uploadDocumentMe
+);
+
+router.post(
+  '/me/profile-photo',
+  [auth, checkWorker, upload.single('file')],
+  workerController.uploadProfilePhotoMe
 );
 
 // Update current worker (no workerId needed)

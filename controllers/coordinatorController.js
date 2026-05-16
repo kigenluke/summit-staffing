@@ -2,6 +2,7 @@ const { validationResult } = require('express-validator');
 const pool = require('../config/database');
 const { generateToken } = require('../utils/jwt');
 const { sendPushNotification } = require('../services/notificationService');
+const { uploadFile } = require('../services/s3Service');
 let initiatorColumnAvailable = null;
 
 const respondValidation = (req, res) => {
@@ -26,7 +27,7 @@ const getMyProfile = async (req, res) => {
     let row = {};
     try {
       const pRes = await pool.query(
-        'SELECT user_id, first_name, last_name, phone, address, latitude, longitude FROM coordinator_profiles WHERE user_id = $1 LIMIT 1',
+        'SELECT user_id, first_name, last_name, phone, address, latitude, longitude, profile_image_url FROM coordinator_profiles WHERE user_id = $1 LIMIT 1',
         [userId]
       );
       if (pRes.rowCount) row = pRes.rows[0];
@@ -49,6 +50,7 @@ const getMyProfile = async (req, res) => {
       address: row.address ?? null,
       latitude: row.latitude != null ? Number(row.latitude) : null,
       longitude: row.longitude != null ? Number(row.longitude) : null,
+      profile_image_url: row.profile_image_url ?? null,
       email: uRes.rows[0].email,
     };
     return res.status(200).json({ ok: true, coordinator });
@@ -105,6 +107,7 @@ const updateMyProfile = async (req, res) => {
       address: row.address ?? null,
       latitude: row.latitude != null ? Number(row.latitude) : null,
       longitude: row.longitude != null ? Number(row.longitude) : null,
+      profile_image_url: row.profile_image_url ?? null,
     };
     return res.status(200).json({ ok: true, coordinator });
   } catch (err) {
@@ -117,6 +120,48 @@ const updateMyProfile = async (req, res) => {
       });
     }
     return res.status(500).json({ ok: false, error: 'Failed to update profile' });
+  }
+};
+
+const uploadMyProfilePhoto = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) return res.status(401).json({ ok: false, error: 'Unauthorized' });
+    if (!req.file) return res.status(400).json({ ok: false, error: 'File is required' });
+
+    const fileUrl = await uploadFile(req.file, `coordinator-profiles/${userId}`);
+
+    await pool.query(
+      `INSERT INTO coordinator_profiles (user_id, profile_image_url, updated_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (user_id) DO UPDATE SET profile_image_url = EXCLUDED.profile_image_url, updated_at = now()`,
+      [userId, fileUrl]
+    );
+
+    const pRes = await pool.query(
+      'SELECT user_id, first_name, last_name, phone, address, latitude, longitude, profile_image_url FROM coordinator_profiles WHERE user_id = $1 LIMIT 1',
+      [userId]
+    );
+    const row = pRes.rows[0] || {};
+    const uRes = await pool.query('SELECT email FROM users WHERE id = $1 LIMIT 1', [userId]);
+
+    return res.status(200).json({
+      ok: true,
+      coordinator: {
+        id: userId,
+        user_id: userId,
+        first_name: row.first_name ?? null,
+        last_name: row.last_name ?? null,
+        phone: row.phone ?? null,
+        address: row.address ?? null,
+        latitude: row.latitude != null ? Number(row.latitude) : null,
+        longitude: row.longitude != null ? Number(row.longitude) : null,
+        profile_image_url: row.profile_image_url ?? fileUrl,
+        email: uRes.rows[0]?.email,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: 'Failed to upload profile photo' });
   }
 };
 
@@ -769,6 +814,7 @@ const approveParticipantInitiatedRequest = async (req, res) => {
 module.exports = {
   getMyProfile,
   updateMyProfile,
+  uploadMyProfilePhoto,
   getStats,
   searchParticipantByEmail,
   listMyManagedParticipants,

@@ -1,7 +1,9 @@
 require('dotenv').config();
 
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
+const { isCloudinaryConfigured, isS3Configured } = require('./services/s3Service');
 const helmet = require('helmet');
 const morgan = require('morgan');
 
@@ -66,6 +68,15 @@ app.post('/api/payments/webhook', express.raw({ type: 'application/json' }), pay
 // 5) JSON + 6) urlencoded
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+if (!isCloudinaryConfigured() && !isS3Configured()) {
+  // eslint-disable-next-line no-console
+  console.warn(
+    '[storage] Cloudinary/S3 not configured — uploads use local /uploads (dev only). Set CLOUDINARY_* or AWS_* on Railway for production.'
+  );
+}
 
 // health
 app.get('/health', (req, res) => {

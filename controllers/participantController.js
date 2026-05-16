@@ -3,7 +3,10 @@ const { validationResult } = require('express-validator');
 
 const pool = require('../config/database');
 const { uploadFile } = require('../services/s3Service');
+const { respondUploadFailure } = require('../utils/uploadResponse');
+const { replaceStaleComplianceUpload } = require('../utils/complianceDocumentDb');
 const { validateNDISNumber } = require('../utils/ndisValidator');
+const { validateGatedProfile } = require('../utils/profileValidation.cjs');
 const { sendPushNotification } = require('../services/notificationService');
 const { sendCoordinatorInviteEmail } = require('../services/emailService');
 const { submitParticipantVerification } = require('../services/complianceService');
@@ -175,6 +178,12 @@ const uploadDocument = async (req, res) => {
       return res.status(400).json({ ok: false, error: 'File is required' });
     }
 
+    await replaceStaleComplianceUpload(pool, {
+      table: 'participant',
+      subjectId: participant.id,
+      documentType,
+    });
+
     const folder = `participant-documents/${participant.id}/${documentType}`;
     const fileUrl = await uploadFile(req.file, folder);
 
@@ -187,7 +196,7 @@ const uploadDocument = async (req, res) => {
 
     return res.status(201).json({ ok: true, document: insertRes.rows[0] });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: 'Failed to upload document' });
+    return respondUploadFailure(res, err, 'participant.uploadDocument');
   }
 };
 
@@ -334,7 +343,7 @@ const updateParticipant = async (req, res) => {
 
     const { id } = req.params;
 
-    const participantRes = await pool.query('SELECT id, user_id FROM participants WHERE id = $1 LIMIT 1', [id]);
+    const participantRes = await pool.query('SELECT * FROM participants WHERE id = $1 LIMIT 1', [id]);
     if (participantRes.rowCount === 0) {
       return res.status(404).json({ ok: false, error: 'Participant not found' });
     }
@@ -394,6 +403,30 @@ const updateParticipant = async (req, res) => {
       return res.status(400).json({ ok: false, error: 'No fields to update' });
     }
 
+    const merged = { ...participant };
+    for (const key of allowed) {
+      if (Object.prototype.hasOwnProperty.call(req.body, key)) {
+        merged[key] = req.body[key];
+        if (key === 'ndis_number') {
+          merged[key] = req.body[key] == null ? null : String(req.body[key]).trim();
+          if (merged[key] === '') merged[key] = null;
+        }
+        if (
+          key === 'emergency_contact_name'
+          || key === 'emergency_contact_phone'
+          || key === 'emergency_contact_relationship'
+        ) {
+          merged[key] = req.body[key] == null ? null : String(req.body[key]).trim();
+          if (merged[key] === '') merged[key] = null;
+        }
+      }
+    }
+
+    const profileCheck = validateGatedProfile(merged, { requireNdis: true });
+    if (!profileCheck.ok) {
+      return res.status(400).json({ ok: false, error: profileCheck.message, errors: profileCheck.errors });
+    }
+
     params.push(id);
 
     const updateSql = `UPDATE participants SET ${fields.join(', ')}, updated_at = now() WHERE id = $${params.length} RETURNING *`;
@@ -412,6 +445,7 @@ const updateParticipant = async (req, res) => {
       longitude: updated.longitude,
       management_type: updated.management_type,
       monthly_budget: updated.monthly_budget,
+      ndis_number: updated.ndis_number,
       about: updated.about,
       emergency_contact_name: updated.emergency_contact_name,
       emergency_contact_phone: updated.emergency_contact_phone,
