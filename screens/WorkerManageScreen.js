@@ -6,6 +6,9 @@ import React, { useEffect, useState, useCallback, useMemo, createElement } from 
 import { View, Text, ScrollView, Pressable, TextInput, Alert, ActivityIndicator, RefreshControl, Platform, Modal } from 'react-native';
 import { api } from '../services/api.js';
 import { useAuthStore } from '../store/authStore.js';
+import { useAccountAccess } from '../context/WorkerGateContext.js';
+import { ComplianceSubmitPanel } from '../components/ComplianceSubmitPanel.js';
+import { getComplianceProgress, REQUIRED_WORKER_COMPLIANCE_DOCS } from '../utils/complianceProgress.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { formatDateDMY } from '../utils/dateFormat.js';
 import { SERVICE_TYPES } from '../constants/serviceTypes.js';
@@ -99,6 +102,7 @@ const normalizeTime24 = (value, fallback = '09:00') => {
 };
 
 export function WorkerManageScreen({ route, navigation }) {
+  const { refresh, syncFromWorkerProfile } = useAccountAccess();
   const passedWorkerId = route?.params?.workerId;
   const availabilityOnly = route?.params?.availabilityOnly === true;
   const [workerId, setWorkerId] = useState(passedWorkerId || null);
@@ -150,6 +154,7 @@ export function WorkerManageScreen({ route, navigation }) {
           setWorkerId(wId);
           setWorker(w);
           setAvailability(w.availability);
+          syncFromWorkerProfile(w, w.documents);
           try {
             const pay = await api.get('/api/payments/connect/status');
             if (pay.data?.ok) setConnectStatus(pay.data);
@@ -413,22 +418,28 @@ export function WorkerManageScreen({ route, navigation }) {
     setUploadingDoc(true);
     try {
       const form = new FormData();
-      form.append('file', selectedDocFile);
+      if (Platform.OS === 'web') {
+        form.append('file', selectedDocFile, selectedDocFile.name || 'document');
+      } else {
+        form.append('file', selectedDocFile);
+      }
       form.append('documentType', selectedDocType);
       if (docIssueDate) form.append('issue_date', docIssueDate);
       if (docExpiryDate) form.append('expiry_date', docExpiryDate);
 
-      const { error } = await api.post(`/api/workers/${workerId}/documents`, form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      const uploadPath = workerId
+        ? `/api/workers/${workerId}/documents`
+        : '/api/workers/me/documents';
+      const { error } = await api.post(uploadPath, form);
       if (error) {
         Alert.alert('Upload failed', error.message || 'Could not upload document');
       } else {
-        Alert.alert('Success', 'Document uploaded and sent for review.');
+        Alert.alert('Uploaded', 'Document saved. Upload all required documents, then tap Submit for verification.');
         setSelectedDocFile(null);
         setDocIssueDate('');
         setDocExpiryDate('');
-        load();
+        await load();
+        await refresh();
       }
     } catch (e) {
       Alert.alert('Upload failed', 'Could not upload document');
@@ -814,6 +825,24 @@ export function WorkerManageScreen({ route, navigation }) {
             </Text>
           </Pressable>
         </View>
+
+        <ComplianceSubmitPanel
+          progress={getComplianceProgress(worker?.documents || [], REQUIRED_WORKER_COMPLIANCE_DOCS)}
+          verificationSubmittedAt={worker?.verification_submitted_at}
+          verificationStatus={worker?.verification_status}
+          onSubmit={async () => {
+            const { data, error } = await api.post('/api/workers/me/submit-verification', {});
+            if (error) {
+              Alert.alert('Submit failed', error.message || 'Could not submit');
+              return;
+            }
+            if (data?.ok) {
+              Alert.alert('Submitted', data.message || 'Awaiting verification. An admin will review your documents.');
+              await load();
+              await refresh();
+            }
+          }}
+        />
       </Section>
         </>
       )}

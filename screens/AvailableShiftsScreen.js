@@ -8,7 +8,10 @@ import {
 } from 'react-native';
 import * as PlacesPkg from 'react-native-google-places-autocomplete';
 import NativeDatePicker from '../components/NativeDatePicker.js';
+import { useFocusEffect } from '@react-navigation/native';
 import { useAuthStore } from '../store/authStore.js';
+import { useWorkerGate } from '../context/WorkerGateContext.js';
+import { showVerificationRequiredAlert } from '../utils/verificationPrompt.js';
 import { api, ApiConfig } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { SERVICE_TYPES } from '../constants/serviceTypes.js';
@@ -1803,8 +1806,19 @@ function ShiftCard({ shift, onApply, isWorker, isParticipant, onOpenApplications
 // ── Main Screen ───────────────────────────────────────────────────────────────
 export function AvailableShiftsScreen({ navigation }) {
   const { user } = useAuthStore();
+  const { restricted } = useWorkerGate();
   const isWorker = user?.role === 'worker';
   const isParticipant = user?.role === 'participant';
+
+  useFocusEffect(
+    useCallback(() => {
+      if (restricted) {
+        showVerificationRequiredAlert();
+        if (navigation.canGoBack()) navigation.goBack();
+        else navigation.navigate('MainTabs', { screen: 'Profile' });
+      }
+    }, [restricted, navigation])
+  );
 
   const [shifts, setShifts] = useState([]);
   const [loading, setLoading] = useState(true);

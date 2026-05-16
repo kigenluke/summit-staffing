@@ -3,10 +3,13 @@ const router = express.Router();
 const auth = require('../middleware/auth');
 const checkParticipant = require('../middleware/checkParticipant');
 const checkWorker = require('../middleware/checkWorker');
+const requireAccountVerified = require('../middleware/requireAccountVerified');
 const shiftController = require('../controllers/shiftController');
 
+const gate = [requireAccountVerified];
+
 // Create shift (participants only) - must be defined before GET routes
-router.post('/', auth, checkParticipant, shiftController.createShift);
+router.post('/', auth, checkParticipant, ...gate, shiftController.createShift);
 
 // My shifts (participant's own posted shifts)
 router.get('/mine', auth, shiftController.getMyShifts);
@@ -18,10 +21,10 @@ router.get('/', auth, shiftController.getAvailableShifts);
 router.get('/:id', auth, shiftController.getShiftById);
 
 // Apply for shift (workers only)
-router.post('/:id/apply', auth, checkWorker, shiftController.applyForShift);
+router.post('/:id/apply', auth, checkWorker, ...gate, shiftController.applyForShift);
 
 // Accept an application (participant who created the shift)
-router.put('/:id/applications/:applicationId/accept', auth, shiftController.acceptApplication);
+router.put('/:id/applications/:applicationId/accept', auth, ...gate, shiftController.acceptApplication);
 
 // Cancel a shift
 router.put('/:id/cancel', auth, shiftController.cancelShift);

@@ -647,7 +647,6 @@ const handleWebhook = async (req, res) => {
       }
       case 'account.updated': {
         const account = event.data.object;
-        // status can be inferred at read-time; keep as no-op for now
         void account;
         break;
       }

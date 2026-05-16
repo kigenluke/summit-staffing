@@ -24,6 +24,18 @@ const upload = multer({
   }
 });
 
+const complianceUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = ['application/pdf', 'image/jpeg', 'image/png'];
+    if (!allowed.includes(file.mimetype)) {
+      return cb(new Error('Invalid file type. Only PDF, JPG, PNG are allowed.'));
+    }
+    return cb(null, true);
+  },
+});
+
 const incidentImagesUpload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -75,6 +87,22 @@ router.get(
 );
 
 router.get('/me', [auth, checkParticipant], participantController.getMe);
+router.post('/me/submit-verification', [auth, checkParticipant], participantController.submitVerification);
+
+const participantDocumentValidators = [
+  complianceUpload.single('file'),
+  body('documentType')
+    .isIn(['ndis_screening', 'wwcc', 'yellow_card', 'police_check', 'first_aid', 'manual_handling', 'insurance', 'other'])
+    .withMessage('Invalid documentType'),
+  body('issue_date').optional({ nullable: true }).isISO8601().toDate(),
+  body('expiry_date').optional({ nullable: true }).isISO8601().toDate(),
+];
+
+router.post(
+  '/me/documents',
+  [auth, checkParticipant, ...participantDocumentValidators],
+  participantController.uploadDocumentMe
+);
 
 router.put(
   '/me',
@@ -177,6 +205,12 @@ router.post(
   '/me/profile-photo',
   [auth, checkParticipant, upload.single('file')],
   participantController.uploadProfilePhoto
+);
+
+router.post(
+  '/:id/documents',
+  [auth, checkParticipant, param('id').isUUID(), ...participantDocumentValidators],
+  participantController.uploadDocument
 );
 
 module.exports = router;

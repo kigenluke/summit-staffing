@@ -3,7 +3,7 @@
  */
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text, Pressable } from 'react-native';
+import { Text, Pressable, View, ActivityIndicator } from 'react-native';
 import { NavChevron } from '../components/NavChevron.js';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { DashboardScreen } from '../screens/DashboardScreen.js';
@@ -15,12 +15,15 @@ import { ProfileScreen } from '../screens/ProfileScreen.js';
 import { WorkerManageScreen } from '../screens/WorkerManageScreen.js';
 import { Colors } from '../constants/theme.js';
 import { useAuthStore } from '../store/authStore.js';
+import { useAccountAccess } from '../context/WorkerGateContext.js';
+import { showVerificationRequiredAlert } from '../utils/verificationPrompt.js';
 import { api } from '../services/api.js';
 
 const Tab = createBottomTabNavigator();
 
 function HomeHeaderRight() {
   const nav = useNavigation();
+  const { restricted } = useAccountAccess();
   const [unreadCount, setUnreadCount] = React.useState(0);
 
   const loadUnreadCount = React.useCallback(async () => {
@@ -43,7 +46,13 @@ function HomeHeaderRight() {
 
   return (
     <Pressable
-      onPress={() => nav.navigate('Notifications' as never)}
+      onPress={() => {
+        if (restricted) {
+          showVerificationRequiredAlert();
+          return;
+        }
+        nav.navigate('Notifications' as never);
+      }}
       style={({ pressed }) => ({
         opacity: pressed ? 0.8 : 1,
         paddingHorizontal: 12,
@@ -78,9 +87,16 @@ function HomeHeaderRight() {
 
 function MessagesHeaderRight() {
   const nav = useNavigation();
+  const { restricted } = useAccountAccess();
   return (
     <Pressable
-      onPress={() => nav.navigate('SelectMessageRecipient' as never)}
+      onPress={() => {
+        if (restricted) {
+          showVerificationRequiredAlert();
+          return;
+        }
+        nav.navigate('SelectMessageRecipient' as never);
+      }}
       style={({ pressed }) => ({ opacity: pressed ? 0.8 : 1, paddingHorizontal: 12, paddingVertical: 8 })}
     >
       <Text style={{ color: Colors.text.white, fontWeight: '600', fontSize: 15 }}>New</Text>
@@ -165,8 +181,19 @@ function AvailabilityHeaderLeft() {
 
 export function MainTabs() {
   const { user } = useAuthStore();
+  const { restricted, accessChecking } = useAccountAccess();
   const isWorker = user?.role === 'worker';
   const isCoordinator = user?.role === 'coordinator';
+  const isGatedRole = isWorker || user?.role === 'participant';
+
+  if (isGatedRole && accessChecking) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background }}>
+        <ActivityIndicator size="large" color={Colors.primary} />
+        <Text style={{ marginTop: 12, color: Colors.text.secondary, fontSize: 14 }}>Checking your account…</Text>
+      </View>
+    );
+  }
 
   return (
     <Tab.Navigator

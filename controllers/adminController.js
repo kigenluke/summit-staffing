@@ -26,7 +26,12 @@ const getDashboardStats = async (req, res) => {
         "SELECT COALESCE(SUM(total_amount),0)::numeric AS revenue, COALESCE(SUM(commission_amount),0)::numeric AS commission FROM bookings WHERE status = 'completed' AND start_time >= date_trunc('week', now())"
       ),
       pool.query("SELECT COUNT(*)::int AS total FROM users WHERE last_login_at IS NOT NULL AND last_login_at >= now() - interval '30 days'"),
-      pool.query("SELECT COUNT(*)::int AS total FROM worker_documents WHERE status = 'pending'")
+      pool.query(
+        `SELECT (
+           (SELECT COUNT(*)::int FROM worker_documents WHERE status = 'pending')
+           + (SELECT COUNT(*)::int FROM participant_documents WHERE status = 'pending')
+         ) AS total`
+      )
     ]);
 
     const bookings = bookingsByStatus.rows.reduce((acc, r) => {
@@ -60,16 +65,28 @@ const getPendingDocuments = async (req, res) => {
     const limit = Math.min(Number(req.query.limit) || 20, 100);
     const offset = Math.max(Number(req.query.offset) || 0, 0);
 
-    const countRes = await pool.query("SELECT COUNT(*)::int AS total FROM worker_documents WHERE status = 'pending'");
+    const countRes = await pool.query(
+      `SELECT (
+         (SELECT COUNT(*)::int FROM worker_documents WHERE status = 'pending')
+         + (SELECT COUNT(*)::int FROM participant_documents WHERE status = 'pending')
+       ) AS total`
+    );
 
     const docsRes = await pool.query(
-      `SELECT d.id, d.worker_id, d.document_type, d.file_url, d.issue_date, d.expiry_date, d.status, d.created_at,
+      `SELECT d.id, d.worker_id AS subject_id, 'worker' AS account_type, d.document_type, d.file_url, d.issue_date, d.expiry_date, d.status, d.created_at,
               w.first_name, w.last_name, w.abn, u.email
        FROM worker_documents d
        JOIN workers w ON w.id = d.worker_id
        JOIN users u ON u.id = w.user_id
        WHERE d.status = 'pending'
-       ORDER BY d.created_at ASC
+       UNION ALL
+       SELECT d.id, d.participant_id AS subject_id, 'participant' AS account_type, d.document_type, d.file_url, d.issue_date, d.expiry_date, d.status, d.created_at,
+              p.first_name, p.last_name, NULL AS abn, u.email
+       FROM participant_documents d
+       JOIN participants p ON p.id = d.participant_id
+       JOIN users u ON u.id = p.user_id
+       WHERE d.status = 'pending'
+       ORDER BY created_at ASC
        LIMIT $1 OFFSET $2`,
       [limit, offset]
     );
@@ -102,6 +119,38 @@ const recomputeWorkerVerification = async (workerId) => {
 
 const approveDocument = async (req, res) => {
   try {
+    const accountType = String(req.query.account_type || req.body?.account_type || 'worker').toLowerCase();
+
+    if (accountType === 'participant') {
+      const docRes = await pool.query(
+        `SELECT d.id, d.participant_id, d.document_type, p.user_id, u.email, p.first_name
+         FROM participant_documents d
+         JOIN participants p ON p.id = d.participant_id
+         JOIN users u ON u.id = p.user_id
+         WHERE d.id = $1
+         LIMIT 1`,
+        [req.params.id]
+      );
+      if (docRes.rowCount === 0) return res.status(404).json({ ok: false, error: 'Document not found' });
+      const doc = docRes.rows[0];
+      await pool.query(
+        `UPDATE participant_documents SET status = 'approved', rejection_reason = NULL, updated_at = now() WHERE id = $1`,
+        [doc.id]
+      );
+      const { recomputeParticipantVerification } = require('./participantController');
+      const status = await recomputeParticipantVerification(doc.participant_id);
+      try {
+        await sendEmail(
+          doc.email,
+          'Document approved - Summit Staffing',
+          `<p>Hi ${doc.first_name || 'there'},</p><p>Your document <strong>${doc.document_type}</strong> has been approved.</p>`
+        );
+      } catch (e) {
+        void e;
+      }
+      return res.status(200).json({ ok: true, participantVerification: status });
+    }
+
     const docRes = await pool.query(
       `SELECT d.id, d.worker_id, d.document_type, w.user_id, u.email, w.first_name
        FROM worker_documents d
@@ -132,7 +181,7 @@ const approveDocument = async (req, res) => {
         `<p>Hi ${doc.first_name || 'there'},</p><p>Your document <strong>${doc.document_type}</strong> has been approved.</p>`
       );
     } catch (e) {
-      // ignore email failures
+      void e;
     }
 
     return res.status(200).json({ ok: true, workerVerification: status });
@@ -146,6 +195,37 @@ const rejectDocument = async (req, res) => {
     if (respondValidation(req, res)) return;
 
     const { reason } = req.body;
+
+    const accountType = String(req.query.account_type || req.body?.account_type || 'worker').toLowerCase();
+
+    if (accountType === 'participant') {
+      const docRes = await pool.query(
+        `SELECT d.id, d.participant_id, d.document_type, p.user_id, u.email, p.first_name
+         FROM participant_documents d
+         JOIN participants p ON p.id = d.participant_id
+         JOIN users u ON u.id = p.user_id
+         WHERE d.id = $1
+         LIMIT 1`,
+        [req.params.id]
+      );
+      if (docRes.rowCount === 0) return res.status(404).json({ ok: false, error: 'Document not found' });
+      const doc = docRes.rows[0];
+      await pool.query(
+        `UPDATE participant_documents SET status = 'rejected', rejection_reason = $2, updated_at = now() WHERE id = $1`,
+        [doc.id, reason || null]
+      );
+      await pool.query("UPDATE participants SET verification_status = 'pending', updated_at = now() WHERE id = $1", [doc.participant_id]);
+      try {
+        await sendEmail(
+          doc.email,
+          'Document rejected - Summit Staffing',
+          `<p>Hi ${doc.first_name || 'there'},</p><p>Your document <strong>${doc.document_type}</strong> was rejected.</p><p>Reason: ${reason || 'Not provided'}</p>`
+        );
+      } catch (e) {
+        void e;
+      }
+      return res.status(200).json({ ok: true });
+    }
 
     const docRes = await pool.query(
       `SELECT d.id, d.worker_id, d.document_type, w.user_id, u.email, w.first_name

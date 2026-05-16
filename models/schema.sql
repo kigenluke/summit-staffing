@@ -851,4 +851,68 @@ BEGIN
   END IF;
 END $$;
 
+-- Participant verification (same flow as workers)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'participants' AND column_name = 'verification_status'
+  ) THEN
+    ALTER TABLE participants
+      ADD COLUMN verification_status worker_verification_status NOT NULL DEFAULT 'pending';
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS participant_documents (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  participant_id UUID NOT NULL,
+  document_type worker_document_type NOT NULL,
+  file_url TEXT NOT NULL,
+  issue_date DATE,
+  expiry_date DATE,
+  status worker_document_status NOT NULL DEFAULT 'pending',
+  rejection_reason TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT participant_documents_participant_fk FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE,
+  CONSTRAINT participant_documents_expiry_after_issue_chk CHECK (issue_date IS NULL OR expiry_date IS NULL OR expiry_date >= issue_date)
+);
+
+CREATE INDEX IF NOT EXISTS participant_documents_participant_id_idx ON participant_documents (participant_id);
+CREATE INDEX IF NOT EXISTS participant_documents_status_idx ON participant_documents (status);
+
+-- When user taps "Submit for verification" after all required docs are uploaded
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'workers' AND column_name = 'verification_submitted_at'
+  ) THEN
+    ALTER TABLE workers ADD COLUMN verification_submitted_at TIMESTAMPTZ;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'participants' AND column_name = 'verification_submitted_at'
+  ) THEN
+    ALTER TABLE participants ADD COLUMN verification_submitted_at TIMESTAMPTZ;
+  END IF;
+END $$;
+
+-- Platform subscription (3-day trial then Stripe Billing)
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'stripe_customer_id') THEN
+    ALTER TABLE users ADD COLUMN stripe_customer_id TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'stripe_subscription_id') THEN
+    ALTER TABLE users ADD COLUMN stripe_subscription_id TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'subscription_status') THEN
+    ALTER TABLE users ADD COLUMN subscription_status TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'trial_ends_at') THEN
+    ALTER TABLE users ADD COLUMN trial_ends_at TIMESTAMPTZ;
+  END IF;
+END $$;
+
 COMMIT;

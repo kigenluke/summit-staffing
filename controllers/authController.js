@@ -54,6 +54,15 @@ const register = async (req, res) => {
 
       if (role === 'worker') {
         const { abn, first_name, last_name, phone, address, work_as, vendor_categories } = req.body;
+        const { verifyAbn } = require('../services/abnService');
+        const abnCheck = await verifyAbn(abn);
+        if (!abnCheck.valid) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({
+            ok: false,
+            error: abnCheck.error || 'Invalid Australian ABN',
+          });
+        }
         const workerInsert = await client.query(
           'INSERT INTO workers (user_id, abn, first_name, last_name, phone, address) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
           [user.id, abn, first_name, last_name, phone || null, address || null]

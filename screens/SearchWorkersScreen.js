@@ -7,6 +7,8 @@ import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { getServiceTypeSuggestions } from '../constants/serviceTypes.js';
 import { VENDOR_CATEGORIES } from '../constants/vendorCategories.js';
+import { useGuardedNavigation } from '../hooks/useGuardedNavigation.js';
+import { VerificationBanner } from '../components/VerificationBanner.js';
 
 const toRad = (deg) => (Number(deg) * Math.PI) / 180;
 const distanceMeters = (lat1, lon1, lat2, lon2) => {
@@ -89,7 +91,8 @@ const WorkerCard = ({ worker, onPress, isVendorMode = false }) => (
   </Pressable>
 );
 
-export function SearchWorkersScreen({ navigation }) {
+export function SearchWorkersScreen() {
+  const navigation = useGuardedNavigation();
   const [mode, setMode] = useState('worker');
   const [workers, setWorkers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -187,6 +190,9 @@ export function SearchWorkersScreen({ navigation }) {
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
+      <View style={{ paddingHorizontal: Spacing.md, paddingTop: Spacing.sm }}>
+        <VerificationBanner />
+      </View>
       <View style={{ flexDirection: 'row', paddingHorizontal: Spacing.md, paddingTop: Spacing.sm, gap: Spacing.sm }}>
         <Pressable
           onPress={() => setMode('worker')}

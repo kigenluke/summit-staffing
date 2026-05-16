@@ -14,6 +14,7 @@ import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { useWorkerGate } from '../context/WorkerGateContext.js';
 import { showVerificationRequiredAlert } from '../utils/verificationPrompt.js';
+import { ALLOWED_ROUTES_WHILE_RESTRICTED } from '../hooks/useGuardedNavigation.js';
 
 // ── Menu Item Component ─────────────────────────────────────────
 const MenuItem = ({ label, badge, onPress, disabled }) => (
@@ -64,7 +65,7 @@ export function ProfileScreen({ navigation }) {
   const isParticipant = user?.role === 'participant';
   const isCoordinator = user?.role === 'coordinator';
   const isAdmin = user?.role === 'admin';
-  const { restricted, syncFromWorkerProfile } = useWorkerGate();
+  const { restricted, syncFromWorkerProfile, syncFromParticipantProfile, accessPhase } = useWorkerGate();
 
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -88,13 +89,17 @@ export function ProfileScreen({ navigation }) {
   }, []);
 
   const safeNavigate = useCallback((routeName) => {
+    if (restricted && !ALLOWED_ROUTES_WHILE_RESTRICTED.has(routeName)) {
+      showVerificationRequiredAlert();
+      return;
+    }
     try {
       navigation.navigate(routeName);
     } catch (_) {
       if (Platform.OS === 'web' && typeof window !== 'undefined') window.alert('This screen is not available right now.');
       else Alert.alert('Navigation error', 'This screen is not available right now.');
     }
-  }, [navigation]);
+  }, [navigation, restricted]);
 
   const pickImage = () => {
     try {
@@ -132,13 +137,14 @@ export function ProfileScreen({ navigation }) {
           const p = isWorker ? data.worker : data.participant;
           if (p) {
             setProfile(p);
-            if (isWorker) syncFromWorkerProfile(p);
+            if (isWorker) syncFromWorkerProfile(p, data.documents || []);
+            if (isParticipant) syncFromParticipantProfile(p, data.documents || []);
           }
         }
       }
     } catch (e) {}
     setLoading(false);
-  }, [isWorker, isCoordinator, syncFromWorkerProfile]);
+  }, [isWorker, isParticipant, isCoordinator, syncFromWorkerProfile, syncFromParticipantProfile]);
 
   const loadUnreadCount = useCallback(async () => {
     try {
@@ -189,7 +195,7 @@ export function ProfileScreen({ navigation }) {
         }),
       );
     }
-  }, [navigation]);
+  }, [navigation, restricted]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -356,29 +362,35 @@ export function ProfileScreen({ navigation }) {
             {isWorker ? 'WORKER' : isCoordinator ? 'COORDINATOR' : 'PARTICIPANT'}
           </Text>
         </View>
-        {isWorker && profile?.verification_status && (
+        {(isWorker || isParticipant) && profile?.verification_status && (
           <Text style={{
             marginTop: Spacing.sm, fontSize: Typography.fontSize.sm,
             color: profile.verification_status === 'verified' ? Colors.status.success : Colors.status.warning,
           }}>
-            {profile.verification_status === 'verified' ? 'Verified Worker' : 'Verification ' + profile.verification_status}
+            {profile.verification_status === 'verified'
+              ? 'Verified account'
+              : accessPhase === 'needs_documents'
+                ? 'Upload documents to continue'
+                : accessPhase === 'ready_to_submit'
+                  ? 'Submit documents for verification'
+                  : 'Awaiting verification'}
           </Text>
         )}
       </View>
 
       <MenuSection>
-        <MenuItem label="Notifications" badge={unreadCount} disabled={false} onPress={() => safeNavigate('Notifications')} />
+        <MenuItem label="Notifications" badge={unreadCount} disabled={restricted} onPress={() => safeNavigate('Notifications')} />
         <MenuItem label="Inbox" disabled={restricted} onPress={() => safeNavigate('Messages')} />
       </MenuSection>
 
       {(isCoordinator || isParticipant) && (
         <MenuSection>
-          <MenuItem label="Requests" disabled={false} onPress={() => safeNavigate('AccessRequests')} />
+          <MenuItem label="Requests" disabled={restricted} onPress={() => safeNavigate('AccessRequests')} />
         </MenuSection>
       )}
 
       <MenuSection>
-        <MenuItem label="Emergency" disabled={false} onPress={() => safeNavigate('Emergency')} />
+        <MenuItem label="Emergency" disabled={restricted} onPress={() => safeNavigate('Emergency')} />
         {/* <MenuItem label="Chatbot" disabled={isWorker && restricted} onPress={() => safeNavigate('Chatbot')} /> */}
       </MenuSection>
 
@@ -389,33 +401,36 @@ export function ProfileScreen({ navigation }) {
         <MenuSection>
           <MenuItem
             label="Incident & Complain reports"
-            disabled={false}
+            disabled={restricted}
             onPress={() => setIncidentMenuOpen((p) => !p)}
           />
 
           {incidentMenuOpen && (
             <View style={{ paddingLeft: Spacing.md }}>
-              <MenuItem label="Report an Incident" onPress={() => safeNavigate('AddIncident')} />
-              <MenuItem label="Add Complaint" onPress={() => safeNavigate('AddComplaint')} />
+              <MenuItem label="Report an Incident" disabled={restricted} onPress={() => safeNavigate('AddIncident')} />
+              <MenuItem label="Add Complaint" disabled={restricted} onPress={() => safeNavigate('AddComplaint')} />
             </View>
           )}
         </MenuSection>
       )}
 
       <MenuSection>
-        <MenuItem label="Edit Profile" onPress={() => safeNavigate('EditProfile')} />
+        <MenuItem label="Edit Profile" disabled={false} onPress={() => safeNavigate('EditProfile')} />
         {isWorker ? (
-          <MenuItem label="Documents" onPress={() => safeNavigate('Documents')} />
+          <MenuItem label="Upload documents" disabled={false} onPress={() => safeNavigate('WorkerManage')} />
+        ) : isParticipant ? (
+          <MenuItem label="Upload documents" disabled={false} onPress={() => safeNavigate('ParticipantCompliance')} />
         ) : (
-          <MenuItem label="Payment Details" onPress={() => safeNavigate('Payments')} />
+          <MenuItem label="Payment Details" disabled={restricted} onPress={() => safeNavigate('Payments')} />
         )}
       </MenuSection>
 
       {isParticipant && (
         <MenuSection>
+          <MenuItem label="Payment Details" disabled={false} onPress={() => safeNavigate('Payments')} />
           <MenuItem
             label="Invite a coordinator"
-            disabled={false}
+            disabled={restricted}
             onPress={() => safeNavigate('ParticipantSearchCoordinator')}
           />
         </MenuSection>

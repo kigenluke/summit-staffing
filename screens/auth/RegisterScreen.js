@@ -58,6 +58,9 @@ export function RegisterScreen({ navigation, route }) {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [abn, setAbn] = useState('');
+  const [abnChecking, setAbnChecking] = useState(false);
+  const [abnVerified, setAbnVerified] = useState(null);
+  const [abnEntityName, setAbnEntityName] = useState('');
   const [ndisNumber, setNdisNumber] = useState('');
   const [phone, setPhone] = useState('');
   const [coordinatorInviteToken, setCoordinatorInviteToken] = useState(
@@ -98,7 +101,14 @@ export function RegisterScreen({ navigation, route }) {
     if (role === 'worker') {
       body.abn = abn.replace(/\D/g, '').slice(0, 11);
       if (body.abn?.length !== 11) {
-        handleError(new Error('ABN must be 11 digits'));
+        handleError(new Error('ABN must be 11 digits (Australian Business Number only)'));
+        return;
+      }
+      setAbnChecking(true);
+      const abnRes = await api.post('/api/workers/verify-abn', { abn: body.abn });
+      setAbnChecking(false);
+      if (abnRes.error || !abnRes.data?.valid) {
+        handleError(new Error(abnRes.data?.error || abnRes.error?.message || 'Invalid Australian ABN. Summit Staffing is Australia-only.'));
         return;
       }
       body.work_as = workAs;
@@ -345,8 +355,53 @@ export function RegisterScreen({ navigation, route }) {
 
         {role === 'worker' && (
           <>
-            <Text style={labelStyle}>ABN (11 digits) *</Text>
-            <TextInput style={[inputStyle, { marginBottom: Spacing.md }]} placeholder="12345678901" placeholderTextColor={Colors.text.muted} value={abn} onChangeText={setAbn} keyboardType="number-pad" maxLength={11} editable={!isLoading} />
+            <Text style={labelStyle}>Australian ABN (11 digits) *</Text>
+            <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.secondary, marginBottom: Spacing.sm }}>
+              Workers must use a valid Australian Business Number. Random or overseas numbers are not accepted.
+            </Text>
+            <TextInput
+              style={[inputStyle, { marginBottom: Spacing.xs }]}
+              placeholder="e.g. 73690199501"
+              placeholderTextColor={Colors.text.muted}
+              value={abn}
+              onChangeText={(v) => {
+                setAbn(v.replace(/\D/g, '').slice(0, 11));
+                setAbnVerified(null);
+                setAbnEntityName('');
+              }}
+              keyboardType="number-pad"
+              maxLength={11}
+              editable={!isLoading && !abnChecking}
+            />
+            {abn.replace(/\D/g, '').length === 11 && (
+              <Pressable
+                onPress={async () => {
+                  const digits = abn.replace(/\D/g, '');
+                  setAbnChecking(true);
+                  const { data, error: abnErr } = await api.post('/api/workers/verify-abn', { abn: digits });
+                  setAbnChecking(false);
+                  if (abnErr || !data?.valid) {
+                    setAbnVerified(false);
+                    setAbnEntityName('');
+                    handleError(new Error(data?.error || abnErr?.message || 'Invalid Australian ABN'));
+                    return;
+                  }
+                  setAbnVerified(true);
+                  setAbnEntityName(data.entity_name || '');
+                  clearError();
+                }}
+                style={({ pressed }) => ({ marginBottom: Spacing.md, opacity: pressed ? 0.8 : 1 })}
+              >
+                <Text style={{ color: Colors.primary, fontWeight: Typography.fontWeight.semibold, fontSize: Typography.fontSize.sm }}>
+                  {abnChecking ? 'Checking ABN…' : 'Verify ABN (Australia)'}
+                </Text>
+              </Pressable>
+            )}
+            {abnVerified === true && (
+              <Text style={{ color: Colors.status.success, fontSize: Typography.fontSize.sm, marginBottom: Spacing.md }}>
+                Valid Australian ABN{abnEntityName ? `: ${abnEntityName}` : ''}
+              </Text>
+            )}
           </>
         )}
         {role === 'participant' && (

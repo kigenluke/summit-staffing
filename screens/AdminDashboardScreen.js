@@ -89,8 +89,8 @@ export function AdminDashboardScreen({ navigation }) {
   useEffect(() => { refresh(); }, [tab]);
 
   /* ── actions ── */
-  const handleDoc = async (docId, action) => {
-    const url = `/api/admin/documents/${docId}/${action}`;
+  const handleDoc = async (docId, action, accountType = 'worker') => {
+    const url = `/api/admin/documents/${docId}/${action}?account_type=${encodeURIComponent(accountType)}`;
     const { error } = await api.put(url);
     if (error) Alert.alert('Error', error.message);
     else { Alert.alert('Success', `Document ${action}d`); loadDocs(); }
@@ -197,14 +197,16 @@ export function AdminDashboardScreen({ navigation }) {
             {docs.map(d => (
               <View key={d.id} style={{ backgroundColor: Colors.surface, borderRadius: Radius.md, padding: Spacing.md, marginBottom: Spacing.sm, ...Shadows.sm }}>
                 <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>{d.document_type || d.type}</Text>
-                <Text style={{ color: Colors.text.secondary, marginVertical: 4 }}>Worker: {d.first_name ? `${d.first_name} ${d.last_name || ''}` : d.worker_name || `ID: ${d.worker_id}`}</Text>
+                <Text style={{ color: Colors.text.secondary, marginVertical: 4 }}>
+                  {(d.account_type === 'participant' ? 'Participant' : 'Worker')}: {d.first_name ? `${d.first_name} ${d.last_name || ''}` : `ID: ${d.subject_id || d.worker_id}`}
+                </Text>
                 <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs }}>Uploaded: {formatDateDMY(d.created_at || d.uploaded_at)}</Text>
                 <View style={{ flexDirection: 'row', marginTop: Spacing.sm }}>
-                  <Pressable onPress={() => handleDoc(d.id, 'approve')}
+                  <Pressable onPress={() => handleDoc(d.id, 'approve', d.account_type || 'worker')}
                     style={{ flex: 1, backgroundColor: '#10B981', padding: Spacing.sm, borderRadius: Radius.sm, alignItems: 'center', marginRight: Spacing.xs }}>
                     <Text style={{ color: '#fff', fontWeight: Typography.fontWeight.bold }}>Approve</Text>
                   </Pressable>
-                  <Pressable onPress={() => handleDoc(d.id, 'reject')}
+                  <Pressable onPress={() => handleDoc(d.id, 'reject', d.account_type || 'worker')}
                     style={{ flex: 1, backgroundColor: '#EF4444', padding: Spacing.sm, borderRadius: Radius.sm, alignItems: 'center' }}>
                     <Text style={{ color: '#fff', fontWeight: Typography.fontWeight.bold }}>Reject</Text>
                   </Pressable>

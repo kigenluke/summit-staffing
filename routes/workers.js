@@ -48,6 +48,22 @@ router.get(
 );
 
 router.get('/me', [auth, checkWorker], workerController.getMe);
+router.post('/me/submit-verification', [auth, checkWorker], workerController.submitVerification);
+
+const workerDocumentValidators = [
+  upload.single('file'),
+  body('documentType')
+    .isIn(['ndis_screening', 'wwcc', 'yellow_card', 'police_check', 'first_aid', 'manual_handling', 'insurance', 'other'])
+    .withMessage('Invalid documentType'),
+  body('issue_date').optional({ nullable: true }).isISO8601().toDate(),
+  body('expiry_date').optional({ nullable: true }).isISO8601().toDate(),
+];
+
+router.post(
+  '/me/documents',
+  [auth, checkWorker, ...workerDocumentValidators],
+  workerController.uploadDocumentMe
+);
 
 // Update current worker (no workerId needed)
 router.put(
@@ -109,17 +125,7 @@ router.put(
 
 router.post(
   '/:id/documents',
-  [
-    auth,
-    checkWorker,
-    param('id').isUUID(),
-    upload.single('file'),
-    body('documentType')
-      .isIn(['ndis_screening', 'wwcc', 'yellow_card', 'police_check', 'first_aid', 'manual_handling', 'insurance', 'other'])
-      .withMessage('Invalid documentType'),
-    body('issue_date').optional({ nullable: true }).isISO8601().toDate(),
-    body('expiry_date').optional({ nullable: true }).isISO8601().toDate()
-  ],
+  [auth, checkWorker, param('id').isUUID(), ...workerDocumentValidators],
   workerController.uploadDocument
 );
 

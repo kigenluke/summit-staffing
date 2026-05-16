@@ -6,6 +6,7 @@ const { uploadFile } = require('../services/s3Service');
 const { validateNDISNumber } = require('../utils/ndisValidator');
 const { sendPushNotification } = require('../services/notificationService');
 const { sendCoordinatorInviteEmail } = require('../services/emailService');
+const { submitParticipantVerification } = require('../services/complianceService');
 let initiatorColumnAvailable = null;
 
 const respondValidation = (req, res) => {
@@ -73,11 +74,46 @@ const safeParticipantForUser = (participant) => {
     emergency_contact_phone: participant.emergency_contact_phone,
     emergency_contact_relationship: participant.emergency_contact_relationship,
     profile_image_url: participant.profile_image_url,
+    verification_status: participant.verification_status,
+    verification_submitted_at: participant.verification_submitted_at,
     created_at: participant.created_at,
     updated_at: participant.updated_at,
     email: participant.email,
     email_verified: participant.email_verified
   };
+};
+
+const VALID_DOCUMENT_TYPES = ['ndis_screening', 'wwcc', 'yellow_card', 'police_check', 'first_aid', 'manual_handling', 'insurance', 'other'];
+
+const submitVerification = async (req, res) => {
+  try {
+    const participant = await getParticipantForUser(req.user.userId);
+    if (!participant) {
+      return res.status(404).json({ ok: false, error: 'Participant not found' });
+    }
+    const outcome = await submitParticipantVerification(participant.id);
+    if (!outcome.ok) {
+      return res.status(outcome.status || 400).json({ ok: false, error: outcome.error, progress: outcome.progress });
+    }
+    return res.status(200).json({ ok: true, message: outcome.message, progress: outcome.progress });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: 'Failed to submit for verification' });
+  }
+};
+
+const recomputeParticipantVerification = async (participantId) => {
+  const required = ['ndis_screening', 'wwcc', 'police_check', 'first_aid', 'insurance'];
+  const agg = await pool.query(
+    `SELECT document_type, status FROM participant_documents WHERE participant_id = $1`,
+    [participantId]
+  );
+  const approvedSet = new Set(agg.rows.filter((r) => r.status === 'approved').map((r) => r.document_type));
+  const allApproved = required.every((t) => approvedSet.has(t));
+  await pool.query(
+    'UPDATE participants SET verification_status = $2, updated_at = now() WHERE id = $1',
+    [participantId, allApproved ? 'verified' : 'pending']
+  );
+  return { allApproved };
 };
 
 const getMe = async (req, res) => {
@@ -91,9 +127,67 @@ const getMe = async (req, res) => {
       return res.status(404).json({ ok: false, error: 'Participant not found' });
     }
 
-    return res.status(200).json({ ok: true, participant: safeParticipantForUser(participant) });
+    const documentsRes = await pool.query(
+      `SELECT id, participant_id, document_type, file_url, issue_date, expiry_date, status, rejection_reason, created_at, updated_at
+       FROM participant_documents
+       WHERE participant_id = $1
+       ORDER BY created_at DESC`,
+      [participant.id]
+    );
+
+    return res.status(200).json({
+      ok: true,
+      participant: safeParticipantForUser(participant),
+      documents: documentsRes.rows,
+    });
   } catch (err) {
     return res.status(500).json({ ok: false, error: 'Failed to fetch participant' });
+  }
+};
+
+const uploadDocumentMe = async (req, res) => {
+  const participant = await getParticipantForUser(req.user.userId);
+  if (!participant) {
+    return res.status(404).json({ ok: false, error: 'Participant not found' });
+  }
+  req.params.id = participant.id;
+  return uploadDocument(req, res);
+};
+
+const uploadDocument = async (req, res) => {
+  try {
+    if (respondValidation(req, res)) return;
+
+    const { id } = req.params;
+    const documentType = req.body?.documentType;
+    const { issue_date, expiry_date } = req.body;
+
+    const participant = await getParticipantForUser(req.user.userId);
+    if (!participant || participant.id !== id) {
+      return res.status(403).json({ ok: false, error: 'Forbidden' });
+    }
+
+    if (!VALID_DOCUMENT_TYPES.includes(documentType)) {
+      return res.status(400).json({ ok: false, error: 'Invalid document type' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ ok: false, error: 'File is required' });
+    }
+
+    const folder = `participant-documents/${participant.id}/${documentType}`;
+    const fileUrl = await uploadFile(req.file, folder);
+
+    const insertRes = await pool.query(
+      `INSERT INTO participant_documents (participant_id, document_type, file_url, issue_date, expiry_date, status)
+       VALUES ($1, $2, $3, $4, $5, 'pending')
+       RETURNING *`,
+      [participant.id, documentType, fileUrl, issue_date || null, expiry_date || null]
+    );
+
+    return res.status(201).json({ ok: true, document: insertRes.rows[0] });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: 'Failed to upload document' });
   }
 };
 
@@ -673,4 +767,8 @@ module.exports = {
   rejectCoordinatorAccessRequest,
   requestCoordinatorAccess,
   inviteCoordinatorByEmail,
+  uploadDocument,
+  uploadDocumentMe,
+  submitVerification,
+  recomputeParticipantVerification,
 };

@@ -4,10 +4,12 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, ScrollView, Pressable, RefreshControl, ActivityIndicator, Linking, Platform, Alert } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { useGuardedNavigation } from '../hooks/useGuardedNavigation.js';
 import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { formatDateDMY, formatTime12h } from '../utils/dateFormat.js';
+import { VerificationBanner } from '../components/VerificationBanner.js';
 
 const Card = ({ children, style }) => (
   <View style={[{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.md }, style]}>
@@ -29,7 +31,8 @@ const getTimeGreeting = () => {
   return 'Good evening';
 };
 
-export function DashboardScreen({ navigation }) {
+export function DashboardScreen() {
+  const navigation = useGuardedNavigation();
   const { user } = useAuthStore();
   const [stats, setStats] = useState({ upcoming: 0, completed: 0, pending: 0 });
   const [upcomingBookings, setUpcomingBookings] = useState([]);
@@ -191,6 +194,8 @@ export function DashboardScreen({ navigation }) {
       contentContainerStyle={{ padding: Spacing.lg, paddingBottom: 100 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
     >
+      <VerificationBanner />
+
       {/* Greeting */}
       <Card style={{ marginBottom: Spacing.lg, backgroundColor: Colors.primary }}>
         <Text style={{ fontSize: Typography.fontSize.lg, color: Colors.text.white, fontWeight: Typography.fontWeight.medium }}>

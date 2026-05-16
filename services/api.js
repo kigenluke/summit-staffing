@@ -144,7 +144,7 @@ export async function request(method, path, body = null, options = {}) {
       if (res.status === 401) {
         try { logout(); } catch (_) {}
       }
-      const errorMsg =
+      let errorMsg =
         coerceBodyErrorMessage(data?.error)
         || (Array.isArray(data?.errors) && data.errors.length
           ? data.errors.map((e) => e?.msg || e?.message).filter(Boolean).join(' ')
@@ -152,6 +152,10 @@ export async function request(method, path, body = null, options = {}) {
         || data?.message
         || (res.status === 429 ? 'Too many requests. Please try again shortly.' : null)
         || `Something went wrong (${res.status}). Please try again.`;
+      if (res.status === 404 && /route not found/i.test(String(errorMsg))) {
+        errorMsg =
+          'API route not found. Run the local API with `npm run dev` (port 3000) and ensure VITE_PROXY_TARGET is not pointing at old Railway code.';
+      }
       const error = new Error(errorMsg);
       error.status = res.status;
       error.response = data;

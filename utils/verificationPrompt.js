@@ -1,8 +1,8 @@
 import { Alert, Platform } from 'react-native';
 
-const TITLE = 'Verification required';
+const TITLE = 'Documents required';
 const MESSAGE =
-  'Upload your documents and complete verification. Until your account is verified, you can use Edit Profile and Documents in the Profile tab.';
+  'Please upload your documents to get access. Go to Profile → Upload documents, then submit for verification.';
 
 export function showVerificationRequiredAlert() {
   if (Platform.OS === 'web' && typeof window !== 'undefined') {

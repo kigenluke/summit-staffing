@@ -2,7 +2,8 @@ const { validationResult } = require('express-validator');
 
 const pool = require('../config/database');
 const { uploadFile } = require('../services/s3Service');
-const { validateABN } = require('../services/abnService');
+const { verifyAbn } = require('../services/abnService');
+const { submitWorkerVerification } = require('../services/complianceService');
 
 const respondValidation = (req, res) => {
   const errors = validationResult(req);
@@ -216,11 +217,17 @@ const setupWorkerProfile = async (req, res) => {
     const namePart = (email && email.split('@')[0]) ? email.split('@')[0].replace(/[^a-zA-Z]/g, ' ') : 'Worker';
     const firstName = (first_name && String(first_name).trim()) || namePart || 'Worker';
     const lastName = (last_name && String(last_name).trim()) || 'User';
-    const abnVal = (abn && String(abn).replace(/\D/g, '').slice(0, 11)) || '00000000000';
-    const abnPadded = abnVal.padEnd(11, '0').slice(0, 11);
+    const abnVal = String(abn || '').replace(/\D/g, '').slice(0, 11);
+    const abnCheck = await verifyAbn(abnVal);
+    if (!abnCheck.valid) {
+      return res.status(400).json({
+        ok: false,
+        error: abnCheck.error || 'A valid Australian ABN is required',
+      });
+    }
     await pool.query(
       'INSERT INTO workers (user_id, abn, first_name, last_name) VALUES ($1, $2, $3, $4)',
-      [userId, abnPadded, firstName, lastName]
+      [userId, abnCheck.abn || abnVal, firstName, lastName]
     );
     const workerRes = await pool.query(
       'SELECT w.*, u.email, u.role, u.email_verified FROM workers w JOIN users u ON u.id = w.user_id WHERE w.user_id = $1 LIMIT 1',
@@ -419,12 +426,25 @@ const updateMe = async (req, res) => {
   }
 };
 
+const uploadDocumentMe = async (req, res) => {
+  if (!req.user?.userId) {
+    return res.status(401).json({ ok: false, error: 'Unauthorized' });
+  }
+  const workerRes = await pool.query('SELECT id FROM workers WHERE user_id = $1 LIMIT 1', [req.user.userId]);
+  if (workerRes.rowCount === 0) {
+    return res.status(404).json({ ok: false, error: 'Worker not found' });
+  }
+  req.params.id = workerRes.rows[0].id;
+  return uploadDocument(req, res);
+};
+
 const uploadDocument = async (req, res) => {
   try {
     if (respondValidation(req, res)) return;
 
     const { id } = req.params;
-    const { documentType, issue_date, expiry_date } = req.body;
+    const documentType = req.body?.documentType;
+    const { issue_date, expiry_date } = req.body;
 
     const workerRes = await pool.query('SELECT id, user_id FROM workers WHERE id = $1 LIMIT 1', [id]);
     if (workerRes.rowCount === 0) {
@@ -754,9 +774,29 @@ const verifyABN = async (req, res) => {
   try {
     if (respondValidation(req, res)) return;
     const { abn } = req.body;
-    return res.status(200).json({ ok: true, valid: validateABN(abn) });
+    const result = await verifyAbn(abn);
+    return res.status(200).json({ ok: true, ...result });
   } catch (err) {
     return res.status(500).json({ ok: false, error: 'Failed to verify ABN' });
+  }
+};
+
+const submitVerification = async (req, res) => {
+  try {
+    if (!req.user?.userId) {
+      return res.status(401).json({ ok: false, error: 'Unauthorized' });
+    }
+    const workerRes = await pool.query('SELECT id FROM workers WHERE user_id = $1 LIMIT 1', [req.user.userId]);
+    if (workerRes.rowCount === 0) {
+      return res.status(404).json({ ok: false, error: 'Worker not found' });
+    }
+    const outcome = await submitWorkerVerification(workerRes.rows[0].id);
+    if (!outcome.ok) {
+      return res.status(outcome.status || 400).json({ ok: false, error: outcome.error, progress: outcome.progress });
+    }
+    return res.status(200).json({ ok: true, message: outcome.message, progress: outcome.progress });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: 'Failed to submit for verification' });
   }
 };
 
@@ -769,10 +809,12 @@ module.exports = {
   updateMe,
   uploadProfilePhoto,
   uploadDocument,
+  uploadDocumentMe,
   uploadDocumentsBulk,
   addSkill,
   removeSkill,
   updateAvailability,
   searchWorkers,
-  verifyABN
+  verifyABN,
+  submitVerification,
 };
