@@ -7,22 +7,11 @@ import { Colors, Spacing, Typography, Radius } from '../constants/theme.js';
 
 const STRIPE_RETURN_URL = 'summitstaffing://stripe-redirect';
 
-/**
- * Native: Stripe Payment Sheet (card + wallets) via PaymentIntent from your API.
- */
-export function StripePayBookingButton({ bookingId, onPaid }) {
+function StripePayBookingButtonInner({ bookingId, onPaid }) {
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
   const [busy, setBusy] = useState(false);
 
   const onPress = async () => {
-    if (!getStripePublishableKeyForNative()) {
-      Alert.alert(
-        'Payments not configured',
-        'Add STRIPE_PUBLISHABLE_KEY to your .env and rebuild the app (same key as STRIPE_PUBLISHABLE_KEY on the server).',
-      );
-      return;
-    }
-
     setBusy(true);
     try {
       const { data, error } = await api.post('/api/payments/create-intent', { bookingId });
@@ -93,4 +82,35 @@ export function StripePayBookingButton({ bookingId, onPaid }) {
       )}
     </Pressable>
   );
+}
+
+/**
+ * Native: Stripe Payment Sheet when STRIPE_PUBLISHABLE_KEY is configured.
+ */
+export function StripePayBookingButton({ bookingId, onPaid }) {
+  const publishableKey = getStripePublishableKeyForNative();
+
+  if (!publishableKey) {
+    return (
+      <Pressable
+        onPress={() => {
+          Alert.alert(
+            'Payments not configured',
+            'Add STRIPE_PUBLISHABLE_KEY to .env, rebuild the APK, then try again.',
+          );
+        }}
+        style={{
+          backgroundColor: Colors.text.muted,
+          paddingVertical: Spacing.md,
+          borderRadius: Radius.md,
+          alignItems: 'center',
+          marginBottom: Spacing.md,
+        }}
+      >
+        <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Pay with card</Text>
+      </Pressable>
+    );
+  }
+
+  return <StripePayBookingButtonInner bookingId={bookingId} onPaid={onPaid} />;
 }

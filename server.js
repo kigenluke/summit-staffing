@@ -28,6 +28,13 @@ const validateEnv = () => {
     console.warn(`Warning: missing recommended env vars: ${missingRecommended.join(', ')}`);
   }
 
+  const { classifyStripeSecretKey } = require('./utils/stripeKeyValidation');
+  const stripeSecret = classifyStripeSecretKey(process.env.STRIPE_SECRET_KEY);
+  if (process.env.STRIPE_SECRET_KEY && !stripeSecret.valid) {
+    // eslint-disable-next-line no-console
+    console.error(`[stripe] ${stripeSecret.message}`);
+  }
+
   // eslint-disable-next-line no-console
   console.log(`CORS allowed origins: ${allowedOrigins.join(', ')}`);
 };

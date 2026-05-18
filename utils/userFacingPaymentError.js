@@ -46,6 +46,10 @@ function userFacingPaymentMessage(input, httpStatus) {
     return 'Payments are not fully set up yet. Please try again later or contact support.';
   }
 
+  if (/does not have the required permissions|restricted key|rk_live_|rk_test_/i.test(msg)) {
+    return 'Payment server is using the wrong Stripe key type. Ask your admin to set STRIPE_SECRET_KEY to the Secret key (sk_live_...), not a Restricted key (rk_...).';
+  }
+
   if (/webhook_secret|stripe-signature/i.test(lower)) {
     return DEFAULT_500;
   }

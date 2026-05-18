@@ -1,17 +1,17 @@
 /**
  * Stripe publishable key (pk_...) — safe to ship in the app.
- * Prefer loading from env at build time; fallback is empty until you add payment UI.
  *
- * Web (Vite): set VITE_STRIPE_PUBLISHABLE_KEY in .env
- * Native (Expo): set EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY
+ * Web (Vite): VITE_STRIPE_PUBLISHABLE_KEY
+ * Native: STRIPE_PUBLISHABLE_KEY via react-native-config (.env at build time)
  *
- * Alternatively, POST /api/payments/create-intent returns `publishable_key` from the server
- * when STRIPE_PUBLISHABLE_KEY is set on Railway — use that to avoid duplicating the key in the client.
+ * Do NOT `require('react-native-config')` directly — v1.6+ calls getConfig() at import
+ * and crashes when the native module is missing (common in release APK if not linked).
  */
+
+import { NativeModules, TurboModuleRegistry } from 'react-native';
 
 function readVite() {
   try {
-    // Keep import.meta access inside Function string so Metro/Hermes parsing does not fail.
     const getter = new Function('try { return import.meta?.env?.VITE_STRIPE_PUBLISHABLE_KEY; } catch (_) { return ""; }');
     const key = getter();
     if (key) return String(key);
@@ -26,14 +26,40 @@ export function getStripePublishableKeyFromEnv() {
   return readVite();
 }
 
-/** Native (CLI) builds: `react-native-config` reads STRIPE_PUBLISHABLE_KEY from `.env`. */
+/** Read react-native-config without importing its package entry (avoids startup crash). */
+function readNativeConfigMap() {
+  try {
+    const turbo = TurboModuleRegistry.get('RNCConfigModule');
+    if (turbo && typeof turbo.getConfig === 'function') {
+      return turbo.getConfig()?.config || null;
+    }
+  } catch (_) {
+    /* not available */
+  }
+
+  try {
+    const legacy = NativeModules.RNCConfigModule || NativeModules.ReactNativeConfig;
+    if (legacy?.getConstants) {
+      return legacy.getConstants();
+    }
+    if (legacy?.getConfig) {
+      return legacy.getConfig()?.config || legacy.getConfig();
+    }
+  } catch (_) {
+    /* not available */
+  }
+
+  return null;
+}
+
+/** Native (CLI) builds: STRIPE_PUBLISHABLE_KEY from `.env` when react-native-config is linked. */
 export function getStripePublishableKeyForNative() {
   try {
-    const cfg = require('react-native-config'); // bundled only on native; web stub excludes real module
-    const k = cfg.default?.STRIPE_PUBLISHABLE_KEY;
+    const config = readNativeConfigMap();
+    const k = config?.STRIPE_PUBLISHABLE_KEY;
     if (k) return String(k).trim();
   } catch (_) {
-    /* web / missing module */
+    /* ignore */
   }
   return getStripePublishableKeyFromEnv();
 }

@@ -13,6 +13,8 @@ const {
   verifyWebhookSignature
 } = require('../services/stripeService');
 const { userFacingPaymentMessage } = require('../utils/userFacingPaymentError');
+const { classifyStripeSecretKey } = require('../utils/stripeKeyValidation');
+const { secretKeyCheck } = require('../config/stripe');
 
 const respondValidation = (req, res) => {
   const errors = validationResult(req);
@@ -25,10 +27,21 @@ const respondValidation = (req, res) => {
 
 const toCents = (amount) => Math.round(Number(amount || 0) * 100);
 const ensureStripeConfigured = (res) => {
+  if (!secretKeyCheck.valid) {
+    res.status(503).json({
+      ok: false,
+      error: secretKeyCheck.message || 'Stripe secret key is not configured correctly on the server.',
+      hint:
+        secretKeyCheck.kind === 'restricted'
+          ? 'In Railway (or .env), set STRIPE_SECRET_KEY to sk_live_... or sk_test_..., not rk_live_... (restricted key).'
+          : 'Use Stripe Dashboard → Developers → API keys → Secret key for STRIPE_SECRET_KEY.',
+    });
+    return false;
+  }
   if (!stripe) {
     res.status(503).json({
       ok: false,
-      error: 'Payments are temporarily unavailable (Stripe is not configured on server)'
+      error: 'Payments are temporarily unavailable (Stripe is not configured on server)',
     });
     return false;
   }
@@ -208,9 +221,12 @@ const getConnectConfigCheck = async (req, res) => {
   try {
     const secret = process.env.STRIPE_SECRET_KEY || '';
     const pub = process.env.STRIPE_PUBLISHABLE_KEY || '';
+    const secretClassification = classifyStripeSecretKey(secret);
     let secretMode = 'missing';
-    if (secret.startsWith('sk_test')) secretMode = 'test';
-    else if (secret.startsWith('sk_live')) secretMode = 'live';
+    if (secretClassification.kind === 'secret_test') secretMode = 'test';
+    else if (secretClassification.kind === 'secret_live') secretMode = 'live';
+    else if (secretClassification.kind === 'restricted') secretMode = 'restricted_key_invalid';
+    else if (secretClassification.kind === 'publishable') secretMode = 'publishable_key_wrong_var';
 
     const appUrl = resolveAppBaseUrl();
     const isLocal = /localhost|127\.0\.0\.1/i.test(appUrl) || String(appUrl).startsWith('http://');
@@ -221,8 +237,10 @@ const getConnectConfigCheck = async (req, res) => {
       stripe: {
         secret_key_configured: Boolean(secret),
         secret_key_mode: secretMode,
+        secret_key_valid: secretClassification.valid,
+        secret_key_issue: secretClassification.valid ? null : secretClassification.message,
         publishable_key_configured: Boolean(pub),
-        stripe_client_initialized: Boolean(stripe)
+        stripe_client_initialized: Boolean(stripe),
       },
       connect_urls: {
         app_url_resolved: appUrl,
