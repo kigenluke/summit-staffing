@@ -10,6 +10,7 @@ const { validateGatedProfile } = require('../utils/profileValidation.cjs');
 const { sendPushNotification } = require('../services/notificationService');
 const { sendCoordinatorInviteEmail } = require('../services/emailService');
 const { submitParticipantVerification } = require('../services/complianceService');
+const { getWebClientBaseUrl } = require('../utils/clientAppUrl');
 let initiatorColumnAvailable = null;
 
 const respondValidation = (req, res) => {
@@ -757,7 +758,7 @@ const inviteCoordinatorByEmail = async (req, res) => {
       [participantUserId, email, token, expiresAt]
     );
 
-    const appUrl = (process.env.WEB_APP_URL || process.env.APP_URL || 'http://localhost:5173').replace(/\/$/, '');
+    const appUrl = getWebClientBaseUrl();
     const signupUrl = `${appUrl}/?coordinatorInvite=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}&role=coordinator`;
 
     const participantDisplay = `${participant.first_name || ''} ${participant.last_name || ''}`.trim() || participant.email.split('@')[0];

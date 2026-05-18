@@ -1,6 +1,7 @@
 require('dotenv').config();
 
 const mailgun = require('mailgun-js');
+const { getWebClientBaseUrl } = require('../utils/clientAppUrl');
 
 /** Railway / some hosts use MAILGUN_FROM_EMAIL; local .env often uses MAILGUN_FROM. */
 const getMailgunFrom = () => {
@@ -44,15 +45,7 @@ const createAttachment = (buffer, filename, contentType = 'application/octet-str
   });
 };
 
-const getClientAppBaseUrl = () => {
-  const base =
-    process.env.WEB_APP_URL ||
-    process.env.CLIENT_APP_URL ||
-    process.env.PUBLIC_APP_URL ||
-    process.env.APP_URL ||
-    'http://localhost:5173';
-  return String(base).replace(/\/$/, '');
-};
+const getClientAppBaseUrl = () => getWebClientBaseUrl();
 
 const sendPasswordResetEmail = async (email, resetToken) => {
   const appUrl = getClientAppBaseUrl();

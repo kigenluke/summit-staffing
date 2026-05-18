@@ -9,6 +9,7 @@ const {
   sendVerificationEmail,
   isOutboundEmailConfigured,
 } = require('../services/emailService');
+const { getWebClientBaseUrlWarning } = require('../utils/clientAppUrl');
 
 const SALT_ROUNDS = 12;
 const TOKEN_BYTES = 32;
@@ -267,6 +268,8 @@ const forgotPassword = async (req, res) => {
         ok: false,
         error:
           'We could not send the reset email because outbound mail is not configured on the server (MAILGUN_API_KEY, MAILGUN_DOMAIN).',
+        hint:
+          'Add MAILGUN_API_KEY (Mailgun → Sending → your domain → API keys, value starts with key-…) and MAILGUN_DOMAIN to the server env. For localhost:5173 put them in the project root .env and run `npm run dev`; if the app proxies to Railway, set them on Railway and redeploy. MAILGUN_FROM_EMAIL alone is not enough.',
       });
     }
 
@@ -287,10 +290,27 @@ const forgotPassword = async (req, res) => {
       await pool.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [user.id]);
       // eslint-disable-next-line no-console
       console.error('sendPasswordResetEmail failed:', emailErr?.message || emailErr);
+
+      const msg = String(emailErr?.message || emailErr || '').toLowerCase();
+      let hint =
+        'Confirm MAILGUN_API_KEY, MAILGUN_DOMAIN, and that MAILGUN_FROM / MAILGUN_FROM_EMAIL uses an address on your verified Mailgun domain (e.g. noreply@mg.summitstaffing.com.au if domain is mg.summitstaffing.com.au).';
+      if (/401|403|forbidden|unauthorized|invalid\s+private\s+key/i.test(msg)) {
+        hint = 'Mailgun rejected the request: check MAILGUN_API_KEY (Sending → Domain → API keys in Mailgun) and MAILGUN_DOMAIN match your verified domain.';
+      }
+      if (/domain\s+not\s+found|does not exist|not\s+found/i.test(msg)) {
+        hint = 'MAILGUN_DOMAIN must exactly match the domain shown in Mailgun (often mg.yourdomain.com).';
+      }
+
+      const webHint = getWebClientBaseUrlWarning();
+      if (webHint) {
+        hint = `${hint} ${webHint}`;
+      }
+
       return res.status(503).json({
         ok: false,
         error:
-          'We could not send the reset email. Check Spam / Promotions in Gmail, then try again. If it still fails, your host may need Mailgun (MAILGUN_API_KEY, MAILGUN_DOMAIN) and a verified sending domain.',
+          'We could not send the reset email. Check Spam / Promotions, then try again. If it still fails, verify Mailgun on the server and WEB_APP_URL for the reset link.',
+        hint,
       });
     }
 

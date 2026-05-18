@@ -155,6 +155,9 @@ export async function request(method, path, body = null, options = {}) {
       if (data?.details && typeof data.details === 'string') {
         errorMsg = `${errorMsg} (${data.details})`;
       }
+      if (data?.hint && typeof data.hint === 'string' && data.hint.trim()) {
+        errorMsg = `${errorMsg}\n\n${data.hint.trim()}`;
+      }
       if (res.status === 404 && /route not found/i.test(String(errorMsg))) {
         errorMsg =
           'API route not found. Run the local API with `npm run dev` (port 3000) and ensure VITE_PROXY_TARGET is not pointing at old Railway code.';

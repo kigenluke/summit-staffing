@@ -32,6 +32,14 @@ const normalize = (err) => {
     return {type: 'not_found', title: 'Not found', message: raw || 'Not found'};
   }
 
+  if (status === 503 && raw.trim()) {
+    return {
+      type: 'service_unavailable',
+      title: 'Unavailable',
+      message: raw.trim().slice(0, 900),
+    };
+  }
+
   if (status >= 500) {
     return {type: 'server', title: 'Server error', message: 'Server error, please try again.'};
   }

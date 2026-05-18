@@ -35,6 +35,20 @@ const validateEnv = () => {
     console.error(`[stripe] ${stripeSecret.message}`);
   }
 
+  try {
+    const { isOutboundEmailConfigured } = require('./services/emailService');
+    const { getWebClientBaseUrl, getWebClientBaseUrlWarning } = require('./utils/clientAppUrl');
+    if (isOutboundEmailConfigured()) {
+      const w = getWebClientBaseUrlWarning();
+      if (w) {
+        // eslint-disable-next-line no-console
+        console.warn(`[email] ${w} Links will use: ${getWebClientBaseUrl()}`);
+      }
+    }
+  } catch (_) {
+    /* ignore optional checks */
+  }
+
   // eslint-disable-next-line no-console
   console.log(`CORS allowed origins: ${allowedOrigins.join(', ')}`);
 };
