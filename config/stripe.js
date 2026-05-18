@@ -1,7 +1,8 @@
 const Stripe = require('stripe');
 const { classifyStripeSecretKey } = require('../utils/stripeKeyValidation');
 
-const apiKey = String(process.env.STRIPE_SECRET_KEY || '').trim();
+// Trim — Railway copy/paste sometimes adds spaces; Stripe then returns "Invalid API Key".
+const apiKey = String(process.env.STRIPE_SECRET_KEY || '').trim().replace(/^['"]|['"]$/g, '');
 const secretKeyCheck = classifyStripeSecretKey(apiKey);
 
 if (apiKey && !secretKeyCheck.valid) {

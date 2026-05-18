@@ -33,6 +33,27 @@ const validateEnv = () => {
   if (process.env.STRIPE_SECRET_KEY && !stripeSecret.valid) {
     // eslint-disable-next-line no-console
     console.error(`[stripe] ${stripeSecret.message}`);
+  } else if (process.env.STRIPE_SECRET_KEY && stripeSecret.valid) {
+    try {
+      const { stripe } = require('./config/stripe');
+      if (stripe) {
+        stripe.balance
+          .retrieve()
+          .then(() => {
+            // eslint-disable-next-line no-console
+            console.log('[stripe] Secret key verified with Stripe API');
+          })
+          .catch((e) => {
+            // eslint-disable-next-line no-console
+            console.error(
+              '[stripe] STRIPE_SECRET_KEY is set but Stripe rejected it (revoked, wrong copy, or rolled key).',
+              e.message
+            );
+          });
+      }
+    } catch (_) {
+      /* ignore */
+    }
   }
 
   try {

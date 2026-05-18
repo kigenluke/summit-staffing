@@ -43,7 +43,7 @@ function userFacingPaymentMessage(input, httpStatus) {
   }
 
   if (/invalid\s+api\s*key|no\s+api\s+key|api\s+key\s+provided|expired\s+api\s*key/i.test(msg)) {
-    return 'Payments are not fully set up yet. Please try again later or contact support.';
+    return 'Stripe secret key on the server is missing or invalid. Use sk_live_... or sk_test_... (not rk_...) in STRIPE_SECRET_KEY, then redeploy.';
   }
 
   if (/does not have the required permissions|restricted key|rk_live_|rk_test_/i.test(msg)) {

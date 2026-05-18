@@ -14,6 +14,7 @@ const {
 } = require('../services/stripeService');
 const { userFacingPaymentMessage } = require('../utils/userFacingPaymentError');
 const { classifyStripeSecretKey } = require('../utils/stripeKeyValidation');
+const { stripeActionHint } = require('../utils/paymentErrorHints');
 const { secretKeyCheck } = require('../config/stripe');
 
 const respondValidation = (req, res) => {
@@ -156,6 +157,7 @@ const createConnectAccount = async (req, res) => {
       return res.status(500).json({
         ok: false,
         error: userFacingPaymentMessage(pickErrorMessage(err) || err, 500) || 'Could not connect Stripe. Please try again.',
+        hint: stripeActionHint(err),
       });
     }
 
@@ -206,7 +208,8 @@ const createConnectAccount = async (req, res) => {
       ok: false,
       error: userFacingPaymentMessage(pickErrorMessage(err) || err, 502) || 'Could not open Stripe setup. Please try again.',
       hint:
-        'If this keeps happening, ask your admin to set APP_URL on the server to your public https address (not localhost).',
+        stripeActionHint(err)
+        || 'Set APP_URL on the server to your public https API URL (e.g. Railway URL), and STRIPE_SECRET_KEY to sk_live_... or sk_test_....',
     });
   }
 
