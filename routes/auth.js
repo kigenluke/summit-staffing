@@ -19,12 +19,25 @@ const passwordValidator = body('password')
   .isLength({ min: 8 })
   .withMessage('Password must be at least 8 characters');
 
+const phoneValidator = body('phone')
+  .trim()
+  .notEmpty()
+  .withMessage('Phone number is required')
+  .custom((value) => {
+    const digits = String(value).replace(/\D/g, '');
+    if (digits.length < 8 || digits.length > 15) {
+      throw new Error('Enter a valid phone number (8–15 digits)');
+    }
+    return true;
+  });
+
 router.post(
   '/register',
   authWriteLimiter,
   [
     emailValidator,
     passwordValidator,
+    phoneValidator,
     body('role')
       .isIn(['worker', 'participant', 'admin', 'coordinator'])
       .withMessage("Role must be one of: 'worker', 'participant', 'admin', 'coordinator'"),
@@ -55,7 +68,7 @@ router.post(
       if (!req.body.abn || !req.body.first_name || !req.body.last_name) {
         return res.status(400).json({
           ok: false,
-          error: 'Worker registration requires abn, first_name, last_name'
+          error: 'Worker registration requires abn, first_name, last_name, and phone'
         });
       }
       if (req.body.work_as === 'vendor' && (!Array.isArray(req.body.vendor_categories) || req.body.vendor_categories.length === 0)) {

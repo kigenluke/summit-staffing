@@ -14,7 +14,7 @@ const {
 } = require('../services/stripeService');
 const { userFacingPaymentMessage } = require('../utils/userFacingPaymentError');
 const { classifyStripeSecretKey } = require('../utils/stripeKeyValidation');
-const { stripeActionHint } = require('../utils/paymentErrorHints');
+const { stripeActionHint, isStaleConnectAccountError } = require('../utils/paymentErrorHints');
 const { secretKeyCheck } = require('../config/stripe');
 
 const respondValidation = (req, res) => {
@@ -181,11 +181,7 @@ const createConnectAccount = async (req, res) => {
   try {
     link = await makeOnboardingLink(accountId);
   } catch (err) {
-    const noSuchAccount =
-      err?.code === 'resource_missing' ||
-      /no such account/i.test(String(err?.raw?.message || err?.message || ''));
-
-    if (noSuchAccount) {
+    if (isStaleConnectAccountError(err)) {
       try {
         const recreated = await createConnectedAccount(worker.email);
         accountId = recreated.id;
@@ -283,7 +279,24 @@ const getAccountStatus = async (req, res) => {
       return res.status(200).json({ ok: true, hasAccount: false, onboardingComplete: false });
     }
 
-    const account = await stripe.accounts.retrieve(accountId);
+    let account;
+    try {
+      account = await stripe.accounts.retrieve(accountId);
+    } catch (retrieveErr) {
+      if (isStaleConnectAccountError(retrieveErr)) {
+        await pool.query(
+          'UPDATE workers SET stripe_account_id = NULL, updated_at = now() WHERE user_id = $1',
+          [req.user.userId]
+        );
+        return res.status(200).json({
+          ok: true,
+          hasAccount: false,
+          onboardingComplete: false,
+          staleAccountCleared: true,
+        });
+      }
+      throw retrieveErr;
+    }
 
     const onboardingComplete = Boolean(account.details_submitted) && Boolean(account.charges_enabled) && Boolean(account.payouts_enabled);
 

@@ -43,14 +43,38 @@ function stripeActionHint(err) {
     );
   }
 
-  if (/connect|platform|capabilities|not enabled|signed up for connect/i.test(msg)) {
+  if (/signed up for connect|only create new accounts if you/i.test(msg)) {
+    return (
+      'Enable Stripe Connect on the same Stripe account as your API keys: Dashboard → turn ON Test mode if using sk_test_ → Settings → Connect → Get started (Australia, Express). Then try Setup Stripe Account again.'
+    );
+  }
+
+  if (/connect|platform|capabilities|not enabled/i.test(msg)) {
     return 'In Stripe Dashboard, complete Connect setup: Settings → Connect → get started (Australia).';
+  }
+
+  if (/not connected to your platform|no such account/i.test(msg)) {
+    return (
+      'Old Stripe Connect account in the database (test/live switch or new API keys). ' +
+      'Tap Setup Stripe Account again — the server will create a new Connect account automatically.'
+    );
   }
 
   return null;
 }
 
+/** Connect account id in DB does not belong to the Stripe account for the current API key. */
+function isStaleConnectAccountError(err) {
+  const msg = pickStripeMessage(err).toLowerCase();
+  if (err?.code === 'resource_missing') return true;
+  if (/no such account/i.test(msg)) return true;
+  if (/not connected to your platform/i.test(msg)) return true;
+  if (/does not exist/i.test(msg) && msg.includes('account')) return true;
+  return false;
+}
+
 module.exports = {
   pickStripeMessage,
   stripeActionHint,
+  isStaleConnectAccountError,
 };

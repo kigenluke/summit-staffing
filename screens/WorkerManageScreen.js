@@ -7,12 +7,11 @@ import { View, Text, ScrollView, Pressable, TextInput, Alert, ActivityIndicator,
 import { api } from '../services/api.js';
 import { useAuthStore } from '../store/authStore.js';
 import { useAccountAccess } from '../context/WorkerGateContext.js';
-import { ComplianceSubmitPanel } from '../components/ComplianceSubmitPanel.js';
-import { getComplianceProgress, getLatestDocumentForType, REQUIRED_WORKER_COMPLIANCE_DOCS } from '../utils/complianceProgress.js';
-import { DocumentViewLink } from '../components/DocumentViewLink.js';
+import { ComplianceDocumentsPanel } from '../components/ComplianceDocumentsPanel.js';
+import { WorkerSkillsPanel } from '../components/WorkerSkillsPanel.js';
+import { REQUIRED_WORKER_COMPLIANCE_DOCS } from '../utils/complianceProgress.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { formatDateDMY } from '../utils/dateFormat.js';
-import { SERVICE_TYPES } from '../constants/serviceTypes.js';
 import { VENDOR_CATEGORIES } from '../constants/vendorCategories.js';
 import NativeDatePicker from '../components/NativeDatePicker.js';
 
@@ -46,7 +45,6 @@ const DOC_TYPES = [
   { key: 'insurance', label: 'Insurance' },
   { key: 'other', label: 'Other' },
 ];
-const DOC_STATUS_COLORS = { pending: Colors.status.warning, approved: Colors.status.success, rejected: Colors.status.error, expired: Colors.text.muted };
 const STATUS = {
   not_started: { label: 'Not started', color: Colors.text.muted, icon: '⚪' },
   pending: { label: 'Pending review', color: Colors.status.warning, icon: '🟡' },
@@ -110,7 +108,6 @@ export function WorkerManageScreen({ route, navigation }) {
   const [worker, setWorker] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [newSkill, setNewSkill] = useState('');
   const [addingSkill, setAddingSkill] = useState(false);
   const [availability, setAvailability] = useState([]);
   const [savingAvail, setSavingAvail] = useState(false);
@@ -119,10 +116,6 @@ export function WorkerManageScreen({ route, navigation }) {
   const [settingUp, setSettingUp] = useState(false);
   const [connectStatus, setConnectStatus] = useState(null);
   const [expandedCard, setExpandedCard] = useState(null);
-  const [selectedDocType, setSelectedDocType] = useState(DOC_TYPES[0].key);
-  const [docIssueDate, setDocIssueDate] = useState('');
-  const [docExpiryDate, setDocExpiryDate] = useState('');
-  const [selectedDocFile, setSelectedDocFile] = useState(null);
   const [uploadingDoc, setUploadingDoc] = useState(false);
   const [timePickerTarget, setTimePickerTarget] = useState(null);
   const [nativePickerValue, setNativePickerValue] = useState(() => {
@@ -292,33 +285,42 @@ export function WorkerManageScreen({ route, navigation }) {
     return { cards: withStatus, pct, overall, hardBlock, softBlock };
   }, [worker, availability, connectStatus, navigation]);
 
-  const addSkill = async () => {
-    if (!newSkill.trim()) return;
-    setAddingSkill(true);
-    const { error } = await api.post(`/api/workers/${workerId}/skills`, { skill_name: newSkill.trim() });
+  const removeSkillSilent = async (skillId) => {
+    const { error } = await api.delete(`/api/workers/${workerId}/skills/${skillId}`);
     if (error) Alert.alert('Error', error.message);
-    else { setNewSkill(''); load(); }
-    setAddingSkill(false);
+    else load();
   };
 
-  const addPresetSkill = async (skillName) => {
+  const togglePresetSkill = async (skillName) => {
     if (!workerId) return;
-    const already = (worker?.skills || []).some((s) => (s.skill_name || '').toLowerCase() === skillName.toLowerCase());
-    if (already) return;
+    const existing = (worker?.skills || []).find(
+      (s) => (s.skill_name || '').toLowerCase() === skillName.toLowerCase(),
+    );
+    if (existing) {
+      await removeSkillSilent(existing.id);
+      return;
+    }
     const { error } = await api.post(`/api/workers/${workerId}/skills`, { skill_name: skillName });
     if (error) Alert.alert('Error', error.message || 'Failed to add service');
     else load();
   };
 
-  const removeSkill = async (skillId) => {
-    Alert.alert('Remove Skill', 'Remove this skill?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: async () => {
-        const { error } = await api.delete(`/api/workers/${workerId}/skills/${skillId}`);
-        if (error) Alert.alert('Error', error.message);
-        else load();
-      }},
-    ]);
+  const addCustomSkill = async (name) => {
+    if (!name?.trim() || !workerId) return;
+    setAddingSkill(true);
+    const trimmed = name.trim();
+    const duplicate = (worker?.skills || []).some(
+      (s) => (s.skill_name || '').toLowerCase() === trimmed.toLowerCase(),
+    );
+    if (duplicate) {
+      Alert.alert('Already added', 'This service is already on your profile.');
+      setAddingSkill(false);
+      return;
+    }
+    const { error } = await api.post(`/api/workers/${workerId}/skills`, { skill_name: trimmed });
+    if (error) Alert.alert('Error', error.message);
+    else load();
+    setAddingSkill(false);
   };
 
   const toggleDaySlot = (dayIndex) => {
@@ -410,42 +412,51 @@ export function WorkerManageScreen({ route, navigation }) {
     setSavingAvail(false);
   };
 
-  const uploadDocumentNow = async () => {
+  const handleDocumentUpload = async ({ documentType, file, issueDate, expiryDate }) => {
     if (!workerId) return;
-    if (!selectedDocFile) {
-      Alert.alert('Missing File', 'Please choose a file first.');
-      return;
-    }
     setUploadingDoc(true);
     try {
       const form = new FormData();
       if (Platform.OS === 'web') {
-        form.append('file', selectedDocFile, selectedDocFile.name || 'document');
+        form.append('file', file, file.name || 'document');
       } else {
-        form.append('file', selectedDocFile);
+        form.append('file', {
+          uri: file.uri,
+          name: file.name || 'document.jpg',
+          type: file.type || 'image/jpeg',
+        });
       }
-      form.append('documentType', selectedDocType);
-      if (docIssueDate) form.append('issue_date', docIssueDate);
-      if (docExpiryDate) form.append('expiry_date', docExpiryDate);
+      form.append('documentType', documentType);
+      if (issueDate) form.append('issue_date', issueDate);
+      if (expiryDate) form.append('expiry_date', expiryDate);
 
-      const uploadPath = workerId
-        ? `/api/workers/${workerId}/documents`
-        : '/api/workers/me/documents';
+      const uploadPath = `/api/workers/${workerId}/documents`;
       const { error } = await api.post(uploadPath, form);
       if (error) {
         Alert.alert('Upload failed', error.message || 'Could not upload document');
-      } else {
-        Alert.alert('Uploaded', 'Document saved. Upload all required documents, then tap Submit for verification.');
-        setSelectedDocFile(null);
-        setDocIssueDate('');
-        setDocExpiryDate('');
-        await load();
-        await refresh();
+        throw error;
       }
+      Alert.alert('Uploaded', `${DOC_TYPES.find((d) => d.key === documentType)?.label || 'Document'} saved successfully.`);
+      await load();
+      await refresh();
     } catch (e) {
-      Alert.alert('Upload failed', 'Could not upload document');
+      if (e?.message) throw e;
+    } finally {
+      setUploadingDoc(false);
     }
-    setUploadingDoc(false);
+  };
+
+  const handleSubmitVerification = async () => {
+    const { data, error } = await api.post('/api/workers/me/submit-verification', {});
+    if (error) {
+      Alert.alert('Submit failed', error.message || 'Could not submit');
+      return;
+    }
+    if (data?.ok) {
+      Alert.alert('Submitted', data.message || 'Awaiting verification. An admin will review your documents.');
+      await load();
+      await refresh();
+    }
   };
 
   if (loading) {
@@ -646,215 +657,27 @@ export function WorkerManageScreen({ route, navigation }) {
 
       {/* Skills */}
       <Section title=" Skills & Services">
-        <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: Spacing.sm }}>
-          Core vendor categories (tap to add)
-        </Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs, marginBottom: Spacing.md }}>
-          {CORE_VENDOR_OPTIONS.map((name) => {
-            const selected = (worker.skills || []).some((s) => (s.skill_name || '').toLowerCase() === name.toLowerCase());
-            return (
-              <Pressable
-                key={name}
-                onPress={() => addPresetSkill(name)}
-                style={{
-                  borderRadius: Radius.full,
-                  paddingHorizontal: Spacing.md,
-                  paddingVertical: Spacing.xs,
-                  borderWidth: 1,
-                  borderColor: selected ? Colors.primary : Colors.border,
-                  backgroundColor: selected ? `${Colors.primary}22` : Colors.surface,
-                }}
-              >
-                <Text style={{ color: selected ? Colors.primary : Colors.text.secondary, fontWeight: Typography.fontWeight.medium }}>
-                  {name}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-        <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: Spacing.sm }}>
-          All supported service tags
-        </Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs, marginBottom: Spacing.md }}>
-          {SERVICE_TYPES.map((name) => {
-            const selected = (worker.skills || []).some((s) => (s.skill_name || '').toLowerCase() === name.toLowerCase());
-            return (
-              <Pressable
-                key={name}
-                onPress={() => addPresetSkill(name)}
-                style={{
-                  borderRadius: Radius.full,
-                  paddingHorizontal: Spacing.md,
-                  paddingVertical: Spacing.xs,
-                  borderWidth: 1,
-                  borderColor: selected ? Colors.primary : Colors.border,
-                  backgroundColor: selected ? `${Colors.primary}22` : Colors.surface,
-                }}
-              >
-                <Text style={{ color: selected ? Colors.primary : Colors.text.secondary, fontWeight: Typography.fontWeight.medium }}>
-                  {name}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs, marginBottom: Spacing.md }}>
-          {(worker.skills || []).map(s => (
-            <Pressable key={s.id} onPress={() => removeSkill(s.id)}
-              style={{ backgroundColor: Colors.primaryLight + '20', borderRadius: Radius.full, paddingHorizontal: Spacing.md, paddingVertical: Spacing.xs, flexDirection: 'row', alignItems: 'center' }}>
-              <Text style={{ color: Colors.primary, fontWeight: Typography.fontWeight.medium }}>{s.skill_name}</Text>
-              <Text style={{ color: Colors.status.error, marginLeft: Spacing.xs }}></Text>
-            </Pressable>
-          ))}
-          {(!worker.skills || worker.skills.length === 0) && <Text style={{ color: Colors.text.muted }}>No skills added yet</Text>}
-        </View>
-        <View style={{ flexDirection: 'row', gap: Spacing.sm }}>
-          <TextInput
-            style={{ flex: 1, backgroundColor: Colors.surfaceSecondary, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.border, paddingVertical: Spacing.sm, paddingHorizontal: Spacing.md, color: Colors.text.primary }}
-            placeholder="Add a skill..."
-            placeholderTextColor={Colors.text.muted}
-            value={newSkill}
-            onChangeText={setNewSkill}
-          />
-          <Pressable onPress={addSkill} disabled={addingSkill}
-            style={({ pressed }) => ({ backgroundColor: Colors.primary, paddingHorizontal: Spacing.lg, borderRadius: Radius.md, justifyContent: 'center', opacity: pressed ? 0.8 : 1 })}>
-            <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>+</Text>
-          </Pressable>
-        </View>
+        <WorkerSkillsPanel
+          skills={worker.skills || []}
+          onToggleSkill={togglePresetSkill}
+          onRemoveSkill={removeSkillSilent}
+          onAddCustomSkill={addCustomSkill}
+          addingSkill={addingSkill}
+        />
       </Section>
 
-      {/* Documents – upload info */}
-      <Section title=" Documents (upload here)">
-        {DOC_TYPES.map(dt => {
-          const doc = getLatestDocumentForType(worker.documents || [], dt.key);
-          return (
-            <View key={dt.key} style={{ paddingVertical: Spacing.sm, borderBottomWidth: 1, borderBottomColor: Colors.borderLight }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: Colors.text.primary, fontWeight: Typography.fontWeight.medium }}>{dt.label}</Text>
-                  {doc?.expiry_date && <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted }}>Expires: {formatDateDMY(doc.expiry_date)}</Text>}
-                </View>
-                {doc ? (
-                  <View style={{ backgroundColor: DOC_STATUS_COLORS[doc.status] || Colors.text.muted, paddingHorizontal: Spacing.sm, paddingVertical: 2, borderRadius: Radius.full }}>
-                    <Text style={{ color: Colors.text.white, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.bold, textTransform: 'uppercase' }}>{doc.status}</Text>
-                  </View>
-                ) : (
-                  <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted }}>Not uploaded</Text>
-                )}
-              </View>
-              {doc?.file_url ? (
-                <View style={{ marginTop: 4 }}>
-                  <DocumentViewLink url={doc.file_url} label="View uploaded file" />
-                  {doc.rejection_reason ? (
-                    <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.status.error, marginTop: 2 }}>
-                      Rejected: {doc.rejection_reason}
-                    </Text>
-                  ) : null}
-                </View>
-              ) : null}
-            </View>
-          );
-        })}
-        <View style={{ marginTop: Spacing.md, borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md, padding: Spacing.md, backgroundColor: Colors.surfaceSecondary }}>
-          <Text style={{ color: Colors.text.primary, fontWeight: Typography.fontWeight.semibold, marginBottom: Spacing.sm }}>
-            Upload vendor documentation
-          </Text>
-
-          <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.secondary, marginBottom: 6 }}>Document type</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs, marginBottom: Spacing.sm }}>
-            {DOC_TYPES.map((dt) => (
-              <Pressable
-                key={dt.key}
-                onPress={() => setSelectedDocType(dt.key)}
-                style={{
-                  borderRadius: Radius.full,
-                  paddingHorizontal: Spacing.sm,
-                  paddingVertical: 5,
-                  borderWidth: 1,
-                  borderColor: selectedDocType === dt.key ? Colors.primary : Colors.border,
-                  backgroundColor: selectedDocType === dt.key ? `${Colors.primary}22` : Colors.surface,
-                }}
-              >
-                <Text style={{ color: selectedDocType === dt.key ? Colors.primary : Colors.text.secondary, fontSize: Typography.fontSize.xs }}>
-                  {dt.label}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-
-          <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.secondary, marginBottom: 4 }}>Issue date (optional, YYYY-MM-DD)</Text>
-          <TextInput
-            style={{ backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md, paddingVertical: 8, paddingHorizontal: Spacing.sm, marginBottom: Spacing.sm, color: Colors.text.primary }}
-            placeholder="2026-04-08"
-            placeholderTextColor={Colors.text.muted}
-            value={docIssueDate}
-            onChangeText={setDocIssueDate}
-          />
-
-          <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.secondary, marginBottom: 4 }}>Expiry date (optional, YYYY-MM-DD)</Text>
-          <TextInput
-            style={{ backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md, paddingVertical: 8, paddingHorizontal: Spacing.sm, marginBottom: Spacing.sm, color: Colors.text.primary }}
-            placeholder="2027-04-08"
-            placeholderTextColor={Colors.text.muted}
-            value={docExpiryDate}
-            onChangeText={setDocExpiryDate}
-          />
-
-          {Platform.OS === 'web' ? (
-            <View style={{ marginBottom: Spacing.sm }}>
-              {createElement('input', {
-                type: 'file',
-                accept: 'application/pdf,image/jpeg,image/png',
-                onChange: (e) => {
-                  const file = e?.target?.files?.[0];
-                  setSelectedDocFile(file || null);
-                },
-                style: { width: '100%' },
-              })}
-            </View>
-          ) : (
-            <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginBottom: Spacing.sm }}>
-              File picker is currently enabled on web. Mobile picker can be added next.
-            </Text>
-          )}
-
-          <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginBottom: Spacing.sm }}>
-            Selected file: {selectedDocFile?.name || 'None'}
-          </Text>
-
-          <Pressable
-            onPress={uploadDocumentNow}
-            disabled={uploadingDoc}
-            style={({ pressed }) => ({
-              backgroundColor: uploadingDoc ? Colors.text.muted : Colors.primary,
-              borderRadius: Radius.md,
-              paddingVertical: Spacing.sm,
-              alignItems: 'center',
-              opacity: pressed ? 0.85 : 1,
-            })}
-          >
-            <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>
-              {uploadingDoc ? 'Uploading...' : 'Upload Document'}
-            </Text>
-          </Pressable>
-        </View>
-
-        <ComplianceSubmitPanel
-          progress={getComplianceProgress(worker?.documents || [], REQUIRED_WORKER_COMPLIANCE_DOCS)}
+      <Section title=" Documents">
+        <ComplianceDocumentsPanel
+          title="Vendor documentation"
+          subtitle="Upload compliance certificates and insurance. Required documents must be submitted for admin verification."
+          docTypes={DOC_TYPES}
+          documents={worker?.documents || []}
+          requiredTypes={REQUIRED_WORKER_COMPLIANCE_DOCS}
+          onUpload={handleDocumentUpload}
+          uploading={uploadingDoc}
           verificationSubmittedAt={worker?.verification_submitted_at}
           verificationStatus={worker?.verification_status}
-          onSubmit={async () => {
-            const { data, error } = await api.post('/api/workers/me/submit-verification', {});
-            if (error) {
-              Alert.alert('Submit failed', error.message || 'Could not submit');
-              return;
-            }
-            if (data?.ok) {
-              Alert.alert('Submitted', data.message || 'Awaiting verification. An admin will review your documents.');
-              await load();
-              await refresh();
-            }
-          }}
+          onSubmitVerification={handleSubmitVerification}
         />
       </Section>
         </>

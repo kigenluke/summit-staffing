@@ -7,8 +7,10 @@ const { generateToken } = require('../utils/jwt');
 const {
   sendPasswordResetEmail,
   sendVerificationEmail,
+  sendWelcomeEmail,
   isOutboundEmailConfigured,
 } = require('../services/emailService');
+const { normalizePhoneForStorage } = require('../utils/phoneValidation');
 const { getWebClientBaseUrlWarning } = require('../utils/clientAppUrl');
 
 const SALT_ROUNDS = 12;
@@ -32,6 +34,7 @@ const register = async (req, res) => {
     if (respondValidation(req, res)) return;
 
     const { email, password, role } = req.body;
+    const phone = normalizePhoneForStorage(req.body.phone);
 
     const normalizedEmail = String(email).trim().toLowerCase();
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
@@ -66,7 +69,7 @@ const register = async (req, res) => {
         }
         const workerInsert = await client.query(
           'INSERT INTO workers (user_id, abn, first_name, last_name, phone, address) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
-          [user.id, abn, first_name, last_name, phone || null, address || null]
+          [user.id, abn, first_name, last_name, phone, address || null]
         );
         const workerId = workerInsert.rows[0]?.id;
         if (work_as === 'vendor' && workerId && Array.isArray(vendor_categories) && vendor_categories.length > 0) {
@@ -102,13 +105,27 @@ const register = async (req, res) => {
             ndis_number || null,
             first_name || null,
             last_name || null,
-            phone || null,
+            phone,
             address || null,
             who_needs_support || null,
             when_start_looking || null,
             over_18 === undefined ? null : Boolean(over_18),
             funding_type || null,
           ]
+        );
+      }
+
+      if (role === 'coordinator') {
+        const { first_name, last_name } = req.body;
+        await client.query(
+          `INSERT INTO coordinator_profiles (user_id, first_name, last_name, phone, updated_at)
+           VALUES ($1, $2, $3, $4, now())
+           ON CONFLICT (user_id) DO UPDATE SET
+             first_name = COALESCE(EXCLUDED.first_name, coordinator_profiles.first_name),
+             last_name = COALESCE(EXCLUDED.last_name, coordinator_profiles.last_name),
+             phone = EXCLUDED.phone,
+             updated_at = now()`,
+          [user.id, first_name || null, last_name || null, phone]
         );
       }
 
@@ -180,6 +197,13 @@ const register = async (req, res) => {
       );
 
       await client.query('COMMIT');
+
+      try {
+        await sendWelcomeEmail(user.email, { firstName: req.body.first_name, role: user.role });
+      } catch (emailErr) {
+        // eslint-disable-next-line no-console
+        console.error('Welcome email failed (non-fatal):', emailErr?.message || emailErr);
+      }
 
       try {
         await sendVerificationEmail(user.email, verificationToken);

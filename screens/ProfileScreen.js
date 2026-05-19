@@ -4,17 +4,15 @@
  */
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, Text, ScrollView, Pressable, Alert, RefreshControl, ActivityIndicator, Platform, Image, Modal } from 'react-native';
-import { useFocusEffect, CommonActions } from '@react-navigation/native';
 import {
   useAuthStore,
-  getActiveCoordinatorImpersonationStash,
-  restoreCoordinatorFromImpersonationStash,
 } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { useWorkerGate } from '../context/WorkerGateContext.js';
 import { showVerificationRequiredAlert } from '../utils/verificationPrompt.js';
 import { ProfilePhotoPicker } from '../components/ProfilePhotoPicker.js';
+import { CoordinatorReturnBanner } from '../components/CoordinatorReturnBanner.js';
 import { ALLOWED_ROUTES_WHILE_RESTRICTED } from '../hooks/useGuardedNavigation.js';
 
 // ── Menu Item Component ─────────────────────────────────────────
@@ -77,7 +75,6 @@ export function ProfileScreen({ navigation }) {
   const [incidentMenuOpen, setIncidentMenuOpen] = useState(false);
   const [confirmModal, setConfirmModal] = useState({ visible: false, title: '', message: '', confirmText: 'Confirm', destructive: false });
   const confirmActionRef = useRef(null);
-  const [hasCoordinatorReturn, setHasCoordinatorReturn] = useState(false);
 
   const openConfirm = useCallback(({ title, message, confirmText = 'Confirm', destructive = false, onConfirm }) => {
     confirmActionRef.current = typeof onConfirm === 'function' ? onConfirm : null;
@@ -147,40 +144,6 @@ export function ProfileScreen({ navigation }) {
     });
     return unsub;
   }, [navigation, loadUnreadCount]);
-
-  useFocusEffect(
-    useCallback(() => {
-      if (!isParticipant || !user?.id) {
-        setHasCoordinatorReturn(false);
-        return undefined;
-      }
-      let cancelled = false;
-      (async () => {
-        try {
-          const stash = await getActiveCoordinatorImpersonationStash(user.id);
-          if (!cancelled) setHasCoordinatorReturn(Boolean(stash));
-        } catch (_) {
-          if (!cancelled) setHasCoordinatorReturn(false);
-        }
-      })();
-      return () => {
-        cancelled = true;
-      };
-    }, [isParticipant, user?.id]),
-  );
-
-  const returnToCoordinatorAccount = useCallback(async () => {
-    const ok = await restoreCoordinatorFromImpersonationStash();
-    if (ok) {
-      setHasCoordinatorReturn(false);
-      navigation.dispatch(
-        CommonActions.reset({
-          index: 0,
-          routes: [{ name: 'MainTabs', params: { screen: 'Home' } }],
-        }),
-      );
-    }
-  }, [navigation, restricted]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -283,37 +246,7 @@ export function ProfileScreen({ navigation }) {
         contentContainerStyle={{ padding: Spacing.lg, paddingBottom: Spacing.xxl }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
       >
-      {isParticipant && hasCoordinatorReturn && (
-        <View
-          style={{
-            marginBottom: Spacing.md,
-            padding: Spacing.md,
-            backgroundColor: Colors.surfaceSecondary,
-            borderRadius: Radius.md,
-            borderWidth: 1,
-            borderColor: Colors.primary,
-          }}
-        >
-          <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.xs }}>
-            Coordinator view
-          </Text>
-          <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, marginBottom: Spacing.sm }}>
-            You are using this participant's account. When finished, return to your coordinator login.
-          </Text>
-          <Pressable
-            onPress={returnToCoordinatorAccount}
-            style={({ pressed }) => ({
-              backgroundColor: Colors.primary,
-              borderRadius: Radius.md,
-              paddingVertical: Spacing.sm,
-              alignItems: 'center',
-              opacity: pressed ? 0.9 : 1,
-            })}
-          >
-            <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Return to coordinator account</Text>
-          </Pressable>
-        </View>
-      )}
+      {isParticipant ? <CoordinatorReturnBanner navigation={navigation} participantUserId={user?.id} /> : null}
 
       {/* Profile Header Card */}
       <View style={{

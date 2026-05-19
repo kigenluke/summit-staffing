@@ -64,8 +64,35 @@ const sendVerificationEmail = async (email, verificationToken) => {
 
   const subject = 'Verify your email';
   const html = `<p>Welcome to Summit Staffing.</p><p>Please verify your email using this link:</p><p><a href="${verifyUrl}">${verifyUrl}</a></p>`;
+  const text = `Verify your Summit Staffing email:\n\n${verifyUrl}`;
 
-  return sendEmail(email, subject, html);
+  return sendEmail(email, subject, html, [], text);
+};
+
+const ROLE_WELCOME_LABELS = {
+  worker: 'support worker',
+  participant: 'participant',
+  coordinator: 'coordinator',
+  admin: 'administrator',
+};
+
+const sendWelcomeEmail = async (email, { firstName, role } = {}) => {
+  const appUrl = getClientAppBaseUrl();
+  const safeName = firstName ? String(firstName).trim().replace(/</g, '&lt;') : '';
+  const greeting = safeName ? `Hi ${safeName},` : 'Hi there,';
+  const roleLabel = ROLE_WELCOME_LABELS[role] || 'member';
+  const subject = 'Welcome to Summit Staffing';
+  const html = `
+    <p>${greeting}</p>
+    <p>Thank you for joining <strong>Summit Staffing</strong> as a ${roleLabel}.</p>
+    <p>Your account has been created. You can sign in anytime here:</p>
+    <p><a href="${appUrl}">${appUrl}</a></p>
+    <p>Complete your profile and upload any required documents so we can verify your account.</p>
+    <p>If you did not create this account, please contact us at info@summitstaffing.com.au.</p>
+    <p>— Summit Staffing</p>
+  `;
+  const text = `${greeting}\n\nThank you for joining Summit Staffing as a ${roleLabel}.\n\nSign in: ${appUrl}\n\nComplete your profile and upload required documents for verification.\n\n— Summit Staffing`;
+  return sendEmail(email, subject, html, [], text);
 };
 
 const sendCoordinatorInviteEmail = async (toEmail, participantDisplayName, signupUrl) => {
@@ -103,6 +130,7 @@ module.exports = {
   createAttachment,
   sendPasswordResetEmail,
   sendVerificationEmail,
+  sendWelcomeEmail,
   sendCoordinatorInviteEmail,
   sendInvoiceEmail,
   isOutboundEmailConfigured,

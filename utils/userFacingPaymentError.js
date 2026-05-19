@@ -66,6 +66,10 @@ function userFacingPaymentMessage(input, httpStatus) {
     return 'Payment could not be started. Please try again or contact support.';
   }
 
+  if (/signed up for connect|only create new accounts if you/i.test(lower)) {
+    return 'Stripe Connect is not enabled on your Stripe account yet. In Dashboard (Test mode if using sk_test_), go to Settings → Connect → Get started.';
+  }
+
   if (/worker stripe account not set|destination charges|no connected account/i.test(lower)) {
     return 'The worker has not finished payment setup yet. Try again after they connect Stripe.';
   }

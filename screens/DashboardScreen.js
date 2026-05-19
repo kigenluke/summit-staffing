@@ -10,6 +10,7 @@ import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { formatDateDMY, formatTime12h } from '../utils/dateFormat.js';
 import { VerificationBanner } from '../components/VerificationBanner.js';
+import { CoordinatorReturnBanner } from '../components/CoordinatorReturnBanner.js';
 
 const Card = ({ children, style }) => (
   <View style={[{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.md }, style]}>
@@ -34,6 +35,7 @@ const getTimeGreeting = () => {
 export function DashboardScreen() {
   const navigation = useGuardedNavigation();
   const { user } = useAuthStore();
+  const isParticipant = user?.role === 'participant';
   const [stats, setStats] = useState({ upcoming: 0, completed: 0, pending: 0 });
   const [upcomingBookings, setUpcomingBookings] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -195,6 +197,7 @@ export function DashboardScreen() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
     >
       <VerificationBanner />
+      {isParticipant ? <CoordinatorReturnBanner navigation={navigation} participantUserId={user?.id} /> : null}
 
       {/* Greeting */}
       <Card style={{ marginBottom: Spacing.lg, backgroundColor: Colors.primary }}>

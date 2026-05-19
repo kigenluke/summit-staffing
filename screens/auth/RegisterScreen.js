@@ -19,6 +19,7 @@ import { api } from '../../services/api.js';
 import { LoadingScreen } from '../../components/LoadingScreen.js';
 import { Colors, Spacing, Typography, Radius } from '../../constants/theme.js';
 import { VENDOR_CATEGORIES } from '../../constants/vendorCategories.js';
+import { isValidPhone } from '../../utils/phoneValidation.js';
 
 const inputStyle = {
   backgroundColor: Colors.surface,
@@ -90,13 +91,22 @@ export function RegisterScreen({ navigation, route }) {
 
   const onRegister = withLoading(async () => {
     clearError();
+    const phoneTrimmed = phone.trim();
+    if (!phoneTrimmed) {
+      handleError(new Error('Phone number is required'));
+      return;
+    }
+    if (!isValidPhone(phoneTrimmed)) {
+      handleError(new Error('Enter a valid phone number (at least 8 digits)'));
+      return;
+    }
     const body = {
       email: email.trim().toLowerCase(),
       password,
       role,
       first_name: firstName.trim() || undefined,
       last_name: lastName.trim() || undefined,
-      phone: phone.trim() || undefined,
+      phone: phoneTrimmed,
     };
     if (role === 'worker') {
       body.abn = abn.replace(/\D/g, '').slice(0, 11);
@@ -411,8 +421,8 @@ export function RegisterScreen({ navigation, route }) {
           </>
         )}
 
-        <Text style={labelStyle}>Phone (optional)</Text>
-        <TextInput style={[inputStyle, { marginBottom: Spacing.lg }]} placeholder="0400000000" placeholderTextColor={Colors.text.muted} value={phone} onChangeText={setPhone} keyboardType="phone-pad" editable={!isLoading} />
+        <Text style={labelStyle}>Phone number *</Text>
+        <TextInput style={[inputStyle, { marginBottom: Spacing.lg }]} placeholder="0400 000 000" placeholderTextColor={Colors.text.muted} value={phone} onChangeText={setPhone} keyboardType="phone-pad" editable={!isLoading} />
 
         {error ? (
           <Text style={{ color: Colors.status.error, fontSize: Typography.fontSize.sm, marginBottom: Spacing.md }}>

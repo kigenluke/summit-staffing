@@ -187,8 +187,8 @@ const getStats = async (req, res) => {
     const coordinatorUserId = req.user.userId;
     const statsRes = await pool.query(
       `SELECT
-         (SELECT COUNT(*)::int FROM users WHERE is_suspended = false) AS active_users,
-         (SELECT COUNT(*)::int FROM participants) AS total_participants,
+         (SELECT COUNT(*)::int FROM coordinator_participant_access
+           WHERE coordinator_user_id = $1 AND status = 'approved') AS managed_participants,
          (SELECT COUNT(*)::int FROM coordinator_participant_access
            WHERE coordinator_user_id = $1 AND status = 'pending') AS pending_requests`,
       [coordinatorUserId]
@@ -197,8 +197,7 @@ const getStats = async (req, res) => {
     return res.status(200).json({
       ok: true,
       stats: {
-        active_users: row.active_users ?? 0,
-        total_participants: row.total_participants ?? 0,
+        managed_participants: row.managed_participants ?? 0,
         pending_requests: row.pending_requests ?? 0,
       },
     });
@@ -245,6 +244,7 @@ const searchParticipantByEmail = async (req, res) => {
 const listMyManagedParticipants = async (req, res) => {
   try {
     const coordinatorUserId = req.user.userId;
+    const hasInitiator = await hasInitiatorColumn();
     const result = await pool.query(
       `SELECT
          p.id,
@@ -253,12 +253,18 @@ const listMyManagedParticipants = async (req, res) => {
          p.last_name,
          p.phone,
          p.address,
-         u.email
+         u.email,
+         cpa.id AS access_request_id,
+         cpa.status AS access_status,
+         ${hasInitiator ? `COALESCE(cpa.initiator, 'coordinator') AS initiator` : `'coordinator'::text AS initiator`}
        FROM coordinator_participant_access cpa
        JOIN participants p ON p.user_id = cpa.participant_user_id
        JOIN users u ON u.id = p.user_id
-       WHERE cpa.coordinator_user_id = $1 AND cpa.status = 'approved'
-       ORDER BY p.first_name NULLS LAST, p.last_name NULLS LAST`,
+       WHERE cpa.coordinator_user_id = $1
+       ORDER BY
+         CASE cpa.status WHEN 'approved' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,
+         p.first_name NULLS LAST,
+         p.last_name NULLS LAST`,
       [coordinatorUserId]
     );
     const participants = result.rows.map((row) => ({
@@ -269,6 +275,9 @@ const listMyManagedParticipants = async (req, res) => {
       phone: row.phone,
       address: row.address,
       email: row.email,
+      access_request_id: row.access_request_id,
+      access_status: row.access_status,
+      initiator: row.initiator,
       display_name: `${row.first_name || ''} ${row.last_name || ''}`.trim() || row.email.split('@')[0],
     }));
     return res.status(200).json({ ok: true, participants });
@@ -293,13 +302,12 @@ const listParticipants = async (req, res) => {
          p.profile_image_url,
          p.created_at,
          u.email,
-         COALESCE(cpa.status::text, 'none') AS request_status
-       FROM participants p
+         cpa.status::text AS request_status
+       FROM coordinator_participant_access cpa
+       JOIN participants p ON p.user_id = cpa.participant_user_id
        JOIN users u ON u.id = p.user_id
-       LEFT JOIN coordinator_participant_access cpa
-         ON cpa.participant_user_id = p.user_id
-        AND cpa.coordinator_user_id = $1
-       ORDER BY p.created_at DESC`,
+       WHERE cpa.coordinator_user_id = $1
+       ORDER BY cpa.requested_at DESC NULLS LAST`,
       [coordinatorUserId]
     );
 

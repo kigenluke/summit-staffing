@@ -15,14 +15,14 @@ export function CoordinatorParticipantManageScreen({ route, navigation }) {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       return Promise.resolve(
         window.confirm(
-          'You will use this participant\'s account the same as if they had signed in. You can return to your coordinator account from Profile.',
+          'You will use this participant\'s account the same as if they had signed in. Use Home or Profile → "Back to coordinator account" when finished.',
         ),
       );
     }
     return new Promise((resolve) => {
       Alert.alert(
         'Open participant account',
-        'You will use this participant\'s account the same as if they had signed in. Return to your coordinator account from Profile.',
+        'You will use this participant\'s account the same as if they had signed in. Use Home or Profile → "Back to coordinator account" when finished.',
         [
           { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
           { text: 'Continue', onPress: () => resolve(true) },
@@ -83,7 +83,7 @@ export function CoordinatorParticipantManageScreen({ route, navigation }) {
           Management
         </Text>
         <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, marginBottom: Spacing.md }}>
-          Use Profile → "Return to coordinator account" when finished.
+          Use Home → "Back to coordinator account" when finished.
         </Text>
         <Pressable
           onPress={openParticipantAccount}
