@@ -774,12 +774,48 @@ const getPaymentHistory = async (req, res) => {
 };
 
 /**
+ * Look up a friendly display name for the user from their role-specific profile.
+ * Falls back to an empty string when no profile row exists yet.
+ */
+const lookupUserDisplayName = async (userId, role) => {
+  try {
+    let row = null;
+    if (role === 'participant') {
+      const r = await pool.query(
+        'SELECT first_name, last_name FROM participants WHERE user_id = $1 LIMIT 1',
+        [userId]
+      );
+      row = r.rows[0];
+    } else if (role === 'worker') {
+      const r = await pool.query(
+        'SELECT first_name, last_name FROM workers WHERE user_id = $1 LIMIT 1',
+        [userId]
+      );
+      row = r.rows[0];
+    } else if (role === 'coordinator') {
+      const r = await pool.query(
+        'SELECT first_name, last_name FROM coordinator_profiles WHERE user_id = $1 LIMIT 1',
+        [userId]
+      );
+      row = r.rows[0];
+    }
+    if (!row) return '';
+    return `${row.first_name || ''} ${row.last_name || ''}`.trim();
+  } catch (_) {
+    return '';
+  }
+};
+
+/**
  * Ensure a Stripe Customer exists for the current user and return its id.
  * Saves stripe_customer_id back to users table on first creation.
+ *
+ * Note: the `users` table does not have `full_name` — name is stored on the
+ * role-specific profile (`participants`, `workers`, `coordinator_profiles`).
  */
 const ensureStripeCustomerForUser = async (userId) => {
   const userRes = await pool.query(
-    'SELECT id, email, full_name, stripe_customer_id FROM users WHERE id = $1 LIMIT 1',
+    'SELECT id, email, role, stripe_customer_id FROM users WHERE id = $1 LIMIT 1',
     [userId]
   );
   if (userRes.rowCount === 0) {
@@ -791,13 +827,14 @@ const ensureStripeCustomerForUser = async (userId) => {
       const existing = await stripe.customers.retrieve(user.stripe_customer_id);
       if (existing && !existing.deleted) return existing.id;
     } catch (_) {
-      // Fall through and create a new one if the saved id is stale.
+      // Saved id is stale — fall through and create a new customer below.
     }
   }
+  const displayName = await lookupUserDisplayName(user.id, user.role);
   const customer = await stripe.customers.create({
     email: user.email || undefined,
-    name: user.full_name || undefined,
-    metadata: { userId: String(user.id) },
+    name: displayName || undefined,
+    metadata: { userId: String(user.id), role: String(user.role || '') },
   });
   await pool.query(
     'UPDATE users SET stripe_customer_id = $2, updated_at = now() WHERE id = $1',
