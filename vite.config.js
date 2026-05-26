@@ -53,13 +53,19 @@ function googlePlacesWebProxyPlugin(env) {
   };
 }
 
-// Transform .js files that contain JSX
+// Transform .js files that contain JSX (classic runtime — keeps RN Text imports valid)
 function jsxInJs() {
   return {
     name: 'jsx-in-js',
     transform(code, id) {
       if (!id.includes('node_modules') && id.endsWith('.js') && /<[A-Za-z][\w.]*[\s/>]/.test(code)) {
-        const r = esbuild.transformSync(code, { loader: 'jsx', jsx: 'automatic', format: 'esm' });
+        const r = esbuild.transformSync(code, {
+          loader: 'jsx',
+          jsx: 'transform',
+          jsxFactory: 'React.createElement',
+          jsxFragment: 'React.Fragment',
+          format: 'esm',
+        });
         return { code: r.code, map: r.map };
       }
     },
@@ -111,6 +117,7 @@ export default defineConfig(({ mode }) => {
         'react-native': path.resolve(__dirname, 'stubs/react-native-web-shim.js'),
         'react-native-web': 'react-native-web',
         'react-native-config': path.resolve(__dirname, 'stubs/react-native-config.web.js'),
+        'react-native-date-picker': path.resolve(__dirname, 'stubs/react-native-date-picker.web.js'),
         '@react-native-community/datetimepicker': path.resolve(__dirname, 'stubs/datetimepicker.web.js'),
         'fbjs/lib/warning': path.resolve(__dirname, 'stubs/fbjs-warning.js'),
         'fbjs/lib/invariant': path.resolve(__dirname, 'stubs/fbjs-invariant.js'),
@@ -122,7 +129,7 @@ export default defineConfig(({ mode }) => {
       global: 'window',
     },
     optimizeDeps: {
-      exclude: ['bcrypt', 'pg', 'puppeteer', '@aws-sdk/client-s3', 'express', 'socket.io', 'react-native', 'react-native-config'],
+      exclude: ['bcrypt', 'pg', 'puppeteer', '@aws-sdk/client-s3', 'express', 'socket.io', 'react-native', 'react-native-config', 'react-native-date-picker'],
       include: ['react-native-web', 'react-native-google-places-autocomplete'],
       esbuildOptions: {
         resolveExtensions: ['.web.js', '.js', '.jsx', '.ts', '.tsx'],

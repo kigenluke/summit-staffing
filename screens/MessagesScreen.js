@@ -6,9 +6,13 @@ import { View, Text, FlatList, Pressable, TextInput, RefreshControl, ActivityInd
 import { api } from '../services/api.js';
 import { useAuthStore } from '../store/authStore.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
+import { useGuardedNavigation } from '../hooks/useGuardedNavigation.js';
+import { VerificationBanner } from '../components/VerificationBanner.js';
 
 /* ───────── Conversations List ───────── */
-export function MessagesScreen({ navigation }) {
+
+export function MessagesScreen() {
+  const navigation = useGuardedNavigation();
   const [conversations, setConversations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -46,6 +50,7 @@ export function MessagesScreen({ navigation }) {
           data={conversations}
           keyExtractor={(item) => item.conversation_id || item.id || String(Math.random())}
           contentContainerStyle={{ padding: Spacing.md, paddingBottom: Spacing.xxl }}
+          ListHeaderComponent={<VerificationBanner />}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
           renderItem={({ item: conv }) => {
             const otherName = conv.other_user?.first_name || conv.other_user_name || conv.other_user_email || 'User';

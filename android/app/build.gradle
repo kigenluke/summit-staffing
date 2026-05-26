@@ -2,15 +2,22 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
+// Load signing credentials from key.properties
+def keystorePropertiesFile = rootProject.file("key.properties")
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
 project.ext.envConfigFiles = [
     debug: ".env",
     release: ".env"
 ]
 
-// Load .env values for native builds only when module is linked.
-def rnConfigProject = findProject(':react-native-config')
-if (rnConfigProject != null) {
-    apply from: rnConfigProject.projectDir.getPath() + "/dotenv.gradle"
+// Load .env values for native builds (use project node_modules, not stale autolink cache paths).
+def dotenvGradle = file("../../node_modules/react-native-config/android/dotenv.gradle")
+if (dotenvGradle.exists()) {
+    apply from: dotenvGradle
 }
 
 /**
@@ -61,6 +68,8 @@ react {
     //
     //   The list of flags to pass to the Hermes compiler. By default is "-O", "-output-source-map"
     // hermesFlags = ["-O", "-output-source-map"]
+
+    autolinkLibrariesWithApp()
 }
 
 /**
@@ -91,8 +100,8 @@ android {
         applicationId "com.summitstaffing.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0.0"
+        versionCode 11
+        versionName "1.0.11"
         multiDexEnabled true
     }
     signingConfigs {
@@ -104,11 +113,10 @@ android {
         }
 
         release {
-            def keystorePath = System.getenv('KEYSTORE_PATH') ?: 'summit-staffing-release.keystore'
-            storeFile file(keystorePath)
-            storePassword System.getenv('KEYSTORE_PASSWORD')
-            keyAlias System.getenv('KEY_ALIAS') ?: 'summit-staffing'
-            keyPassword System.getenv('KEY_PASSWORD')
+            keyAlias keystoreProperties['keyAlias']
+            keyPassword keystoreProperties['keyPassword']
+            storeFile file(keystoreProperties['storeFile'])
+            storePassword keystoreProperties['storePassword']
         }
     }
     buildTypes {
@@ -116,10 +124,16 @@ android {
             signingConfig signingConfigs.debug
         }
         release {
-            // Use debug keystore if release keystore is not configured
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+        }
+    }
+
+    // 16 KB memory page size support (required for Android 15+ / Google Play)
+    packaging {
+        jniLibs {
+            useLegacyPackaging = false
         }
     }
 }
@@ -134,5 +148,3 @@ dependencies {
         implementation jscFlavor
     }
 }
-
-apply from: file("../../node_modules/@react-native-community/cli-platform-android/native_modules.gradle"); applyNativeModulesAppBuildGradle(project)

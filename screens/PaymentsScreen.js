@@ -53,12 +53,16 @@ export function PaymentsScreen() {
       const { data, error } = await api.post('/api/payments/connect/onboard');
       if (error) {
         const res = error.response;
-        const detail = res?.error || error.message;
-        const hint = res?.hint;
+        const detail =
+          typeof res?.error === 'string'
+            ? res.error
+            : (res?.error && typeof res.error?.message === 'string' ? res.error.message : null)
+            || error.message;
+        const hint = typeof res?.hint === 'string' ? res.hint : '';
         const lines = [detail, hint].filter(Boolean);
         Alert.alert(
-          'Failed to Connect account',
-          lines.length ? lines.join('\n\n') : 'Please try again later.'
+          'Could not connect Stripe',
+          lines.length ? lines.join('\n\n') : 'Please try again later or contact support.',
         );
         return;
       }
@@ -185,10 +189,18 @@ export function PaymentsScreen() {
       {!loading && !isWorker && (
         <View style={{ padding: Spacing.md }}>
           <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.sm }}>
-            <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.sm }}>Payments</Text>
-            <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm }}>
-              Stripe bank connection is for support workers only. Your payment history appears below.
+            <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.sm }}>
+              {user?.role === 'coordinator' ? 'Paying for a participant' : 'Pay for bookings'}
             </Text>
+            {user?.role === 'coordinator' ? (
+              <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, lineHeight: 20 }}>
+                Coordinators do not pay from this account directly. Open a participant you manage (Coordinator dashboard → participant → Open participant account), then go to Bookings, open a confirmed shift, and tap Pay with card. Payment goes to the support worker on that booking.
+              </Text>
+            ) : (
+              <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, lineHeight: 20 }}>
+                Card payments are made per booking, not from this screen. Go to Bookings → open a confirmed or completed shift → Pay with card / Pay with Stripe. Payouts go to the worker’s connected Stripe account. Your history appears below.
+              </Text>
+            )}
           </View>
         </View>
       )}

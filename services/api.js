@@ -70,6 +70,20 @@ export function getHeaders(customHeaders = {}) {
   return headers;
 }
 
+/** Turn JSON `{ error }` into a readable string (avoids `[object Object]` in alerts). */
+function coerceBodyErrorMessage(value) {
+  if (value == null || value === '') return null;
+  if (typeof value === 'string') {
+    const t = value.trim();
+    return t.length ? t : null;
+  }
+  if (typeof value === 'object' && typeof value.message === 'string') {
+    const t = String(value.message).trim();
+    return t.length ? t : null;
+  }
+  return null;
+}
+
 /**
  * Low-level request helper. Returns { data, error, status }.
  * Does not throw; parse response and surface errors for callers.
@@ -130,14 +144,24 @@ export async function request(method, path, body = null, options = {}) {
       if (res.status === 401) {
         try { logout(); } catch (_) {}
       }
-      const errorMsg =
-        data?.error
+      let errorMsg =
+        coerceBodyErrorMessage(data?.error)
         || (Array.isArray(data?.errors) && data.errors.length
           ? data.errors.map((e) => e?.msg || e?.message).filter(Boolean).join(' ')
           : null)
         || data?.message
         || (res.status === 429 ? 'Too many requests. Please try again shortly.' : null)
-        || `Request failed: ${res.status}`;
+        || `Something went wrong (${res.status}). Please try again.`;
+      if (data?.details && typeof data.details === 'string') {
+        errorMsg = `${errorMsg} (${data.details})`;
+      }
+      if (data?.hint && typeof data.hint === 'string' && data.hint.trim()) {
+        errorMsg = `${errorMsg}\n\n${data.hint.trim()}`;
+      }
+      if (res.status === 404 && /route not found/i.test(String(errorMsg))) {
+        errorMsg =
+          'API route not found. Run the local API with `npm run dev` (port 3000) and ensure VITE_PROXY_TARGET is not pointing at old Railway code.';
+      }
       const error = new Error(errorMsg);
       error.status = res.status;
       error.response = data;
@@ -146,9 +170,19 @@ export async function request(method, path, body = null, options = {}) {
 
     return { data, error: null, status: res.status };
   } catch (err) {
+    const isNetwork =
+      err?.name === 'TypeError'
+      || /failed to fetch|network|econnrefused|proxy/i.test(String(err?.message || ''));
     const error = err.name === 'AbortError'
       ? Object.assign(new Error('Request timed out'), { status: 408 })
-      : Object.assign(err, { status: err.status || 0 });
+      : isNetwork
+        ? Object.assign(
+            new Error(
+              'Cannot reach the API server. Run npm run dev (port 3000) if testing on localhost:5173.',
+            ),
+            { status: 0 },
+          )
+        : Object.assign(err, { status: err.status || 0 });
     return { data: null, error, status: error.status };
   } finally {
     clearTimeout(timeoutId);

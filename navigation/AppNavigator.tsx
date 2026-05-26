@@ -35,6 +35,7 @@ import { CoordinatorSearchParticipantScreen } from '../screens/CoordinatorSearch
 import { ParticipantSearchCoordinatorScreen } from '../screens/ParticipantSearchCoordinatorScreen.js';
 import { EmergencyHubScreen } from '../screens/EmergencyHubScreen.js';
 import { AccessRequestsScreen } from '../screens/AccessRequestsScreen.js';
+import { ParticipantComplianceScreen } from '../screens/ParticipantComplianceScreen.js';
 import { Colors } from '../constants/theme.js';
 import { WorkerGateProvider } from '../context/WorkerGateContext.js';
 
@@ -102,6 +103,7 @@ export function AppNavigator() {
       <Stack.Screen name="AccessRequests" component={AccessRequestsScreen} options={{ title: 'Requests' }} />
       <Stack.Screen name="CoordinatorSearchParticipant" component={CoordinatorSearchParticipantScreen} options={{ title: 'Request participant' }} />
       <Stack.Screen name="ParticipantSearchCoordinator" component={ParticipantSearchCoordinatorScreen} options={{ title: 'Invite coordinator' }} />
+      <Stack.Screen name="ParticipantCompliance" component={ParticipantComplianceScreen} options={{ title: 'Upload documents' }} />
     </Stack.Navigator>
     </WorkerGateProvider>
   );

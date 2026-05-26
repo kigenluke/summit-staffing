@@ -1,6 +1,13 @@
 require('dotenv').config();
 
 const mailgun = require('mailgun-js');
+const { getWebClientBaseUrl, getPasswordResetUrl } = require('../utils/clientAppUrl');
+
+/** Railway / some hosts use MAILGUN_FROM_EMAIL; local .env often uses MAILGUN_FROM. */
+const getMailgunFrom = () => {
+  const raw = String(process.env.MAILGUN_FROM || process.env.MAILGUN_FROM_EMAIL || '').trim();
+  return raw || 'Summit Staffing <info@summitstaffing.com.au>';
+};
 
 const getClient = () => {
   const apiKey = process.env.MAILGUN_API_KEY;
@@ -13,9 +20,9 @@ const getClient = () => {
   return mailgun({ apiKey, domain });
 };
 
-const sendEmail = async (to, subject, html, attachments = []) => {
+const sendEmail = async (to, subject, html, attachments = [], text = null) => {
   const mg = getClient();
-  const from = process.env.MAILGUN_FROM || 'Summit Staffing <info@summitstaffing.com.au>';
+  const from = getMailgunFrom();
 
   const data = {
     from,
@@ -24,6 +31,7 @@ const sendEmail = async (to, subject, html, attachments = []) => {
     html,
     attachment: attachments
   };
+  if (text) data.text = text;
 
   return mg.messages().send(data);
 };
@@ -37,24 +45,42 @@ const createAttachment = (buffer, filename, contentType = 'application/octet-str
   });
 };
 
-const getClientAppBaseUrl = () => {
-  const base =
-    process.env.WEB_APP_URL ||
-    process.env.CLIENT_APP_URL ||
-    process.env.PUBLIC_APP_URL ||
-    process.env.APP_URL ||
-    'http://localhost:5173';
-  return String(base).replace(/\/$/, '');
-};
+const getClientAppBaseUrl = () => getWebClientBaseUrl();
 
 const sendPasswordResetEmail = async (email, resetToken) => {
-  const appUrl = getClientAppBaseUrl();
-  const resetUrl = `${appUrl}/reset-password?token=${encodeURIComponent(resetToken)}`;
+  const resetUrl = getPasswordResetUrl(resetToken);
+  const safeToken = String(resetToken || '').trim();
 
-  const subject = 'Reset your password';
-  const html = `<p>You requested a password reset.</p><p>Use this link to reset your password:</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>This link expires in 1 hour.</p>`;
+  const subject = 'Reset Your Password - Summit Staffing';
+  const html = `
+    <div style="font-family:system-ui,-apple-system,sans-serif;max-width:520px;margin:0 auto;color:#1a1a1a;">
+      <h2 style="color:#0d9488;margin-bottom:8px;">Password reset request</h2>
+      <p>We received a request to reset your Summit Staffing app password.</p>
+      <p style="margin:24px 0;">
+        <a href="${resetUrl}" style="display:inline-block;background:#0d9488;color:#ffffff;padding:12px 24px;text-decoration:none;border-radius:8px;font-weight:600;">
+          Open app &amp; reset password
+        </a>
+      </p>
+      <p style="font-size:14px;color:#555;">On your phone, tap the button above. It should open the Summit Staffing app. This link expires in 1 hour.</p>
+      <p style="font-size:14px;color:#555;margin-top:16px;">If the button does not open the app:</p>
+      <ol style="font-size:14px;color:#555;padding-left:20px;">
+        <li>Open the <strong>Summit Staffing</strong> app</li>
+        <li>Go to <strong>Sign in</strong> → <strong>Forgot password?</strong> (you already did this)</li>
+        <li>Tap <strong>Enter reset code in app</strong> after requesting the email, or open <strong>New password</strong> from the login screen</li>
+        <li>Paste this reset code:</li>
+      </ol>
+      <p style="font-size:12px;word-break:break-all;background:#f1f5f9;padding:12px;border-radius:8px;font-family:monospace;">${safeToken}</p>
+      <p style="font-size:14px;color:#777;margin-top:24px;">If you did not request this, you can ignore this email.</p>
+    </div>
+  `;
+  const text =
+    `Reset your Summit Staffing app password (expires in 1 hour).\n\n`
+    + `Tap this link on your phone to open the app:\n${resetUrl}\n\n`
+    + `If the link does not open the app, open Summit Staffing → Sign in → enter reset code on the New password screen:\n\n`
+    + `${safeToken}\n\n`
+    + `If you did not request this, ignore this email.`;
 
-  return sendEmail(email, subject, html);
+  return sendEmail(email, subject, html, [], text);
 };
 
 const sendVerificationEmail = async (email, verificationToken) => {
@@ -63,8 +89,35 @@ const sendVerificationEmail = async (email, verificationToken) => {
 
   const subject = 'Verify your email';
   const html = `<p>Welcome to Summit Staffing.</p><p>Please verify your email using this link:</p><p><a href="${verifyUrl}">${verifyUrl}</a></p>`;
+  const text = `Verify your Summit Staffing email:\n\n${verifyUrl}`;
 
-  return sendEmail(email, subject, html);
+  return sendEmail(email, subject, html, [], text);
+};
+
+const ROLE_WELCOME_LABELS = {
+  worker: 'support worker',
+  participant: 'participant',
+  coordinator: 'coordinator',
+  admin: 'administrator',
+};
+
+const sendWelcomeEmail = async (email, { firstName, role } = {}) => {
+  const appUrl = getClientAppBaseUrl();
+  const safeName = firstName ? String(firstName).trim().replace(/</g, '&lt;') : '';
+  const greeting = safeName ? `Hi ${safeName},` : 'Hi there,';
+  const roleLabel = ROLE_WELCOME_LABELS[role] || 'member';
+  const subject = 'Welcome to Summit Staffing';
+  const html = `
+    <p>${greeting}</p>
+    <p>Thank you for joining <strong>Summit Staffing</strong> as a ${roleLabel}.</p>
+    <p>Your account has been created. You can sign in anytime here:</p>
+    <p><a href="${appUrl}">${appUrl}</a></p>
+    <p>Complete your profile and upload any required documents so we can verify your account.</p>
+    <p>If you did not create this account, please contact us at info@summitstaffing.com.au.</p>
+    <p>— Summit Staffing</p>
+  `;
+  const text = `${greeting}\n\nThank you for joining Summit Staffing as a ${roleLabel}.\n\nSign in: ${appUrl}\n\nComplete your profile and upload required documents for verification.\n\n— Summit Staffing`;
+  return sendEmail(email, subject, html, [], text);
 };
 
 const sendCoordinatorInviteEmail = async (toEmail, participantDisplayName, signupUrl) => {
@@ -93,11 +146,17 @@ const sendInvoiceEmail = async (to, invoiceNumber, pdfBuffer) => {
   return sendEmail(to, subject, html, attachments);
 };
 
+/** True when Mailgun env vars are present (does not verify the domain is approved in Mailgun). */
+const isOutboundEmailConfigured = () =>
+  Boolean(String(process.env.MAILGUN_API_KEY || '').trim() && String(process.env.MAILGUN_DOMAIN || '').trim());
+
 module.exports = {
   sendEmail,
   createAttachment,
   sendPasswordResetEmail,
   sendVerificationEmail,
+  sendWelcomeEmail,
   sendCoordinatorInviteEmail,
-  sendInvoiceEmail
+  sendInvoiceEmail,
+  isOutboundEmailConfigured,
 };

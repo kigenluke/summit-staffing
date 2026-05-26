@@ -5,8 +5,14 @@ const normalize = (err) => {
   if (!err) return {type: 'generic', title: 'Error', message: 'Something went wrong'};
 
   const status = err?.status || err?.response?.status;
-  const msg = err?.error || err?.message || err?.response?.data?.error || err?.response?.data?.message;
-  const raw = String(msg || err || '');
+  const responseData = err?.response?.data || err?.response;
+  const msg =
+    err?.error
+    || err?.message
+    || responseData?.error
+    || responseData?.message;
+  const hint = responseData?.hint;
+  const raw = [msg, hint].filter(Boolean).join('\n\n') || String(err || '');
 
   if (raw.toLowerCase().includes('network') || raw.toLowerCase().includes('internet') || raw.toLowerCase().includes('offline')) {
     return {type: 'network', title: 'No internet connection', message: 'Check your internet connection and try again.'};
@@ -32,8 +38,29 @@ const normalize = (err) => {
     return {type: 'not_found', title: 'Not found', message: raw || 'Not found'};
   }
 
+  if (status === 503 && raw.trim()) {
+    return {
+      type: 'service_unavailable',
+      title: 'Unavailable',
+      message: raw.trim().slice(0, 900),
+    };
+  }
+
+  if (status === 0 || !status) {
+    return {
+      type: 'network',
+      title: 'Cannot reach API',
+      message:
+        'Could not connect to the API server. For local dev: run npm run dev (port 3000) in another terminal, keep VITE_PROXY_TARGET=http://localhost:3000, then restart npm run web.',
+    };
+  }
+
   if (status >= 500) {
-    return {type: 'server', title: 'Server error', message: 'Server error, please try again.'};
+    return {
+      type: 'server',
+      title: 'Server error',
+      message: raw.trim() || 'Server error, please try again.',
+    };
   }
 
   return {type: 'generic', title: 'Error', message: raw || 'Something went wrong'};

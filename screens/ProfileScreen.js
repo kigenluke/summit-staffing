@@ -4,16 +4,16 @@
  */
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, Text, ScrollView, Pressable, Alert, RefreshControl, ActivityIndicator, Platform, Image, Modal } from 'react-native';
-import { useFocusEffect, CommonActions } from '@react-navigation/native';
 import {
   useAuthStore,
-  getActiveCoordinatorImpersonationStash,
-  restoreCoordinatorFromImpersonationStash,
 } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { useWorkerGate } from '../context/WorkerGateContext.js';
 import { showVerificationRequiredAlert } from '../utils/verificationPrompt.js';
+import { ProfilePhotoPicker } from '../components/ProfilePhotoPicker.js';
+import { CoordinatorReturnBanner } from '../components/CoordinatorReturnBanner.js';
+import { ALLOWED_ROUTES_WHILE_RESTRICTED } from '../hooks/useGuardedNavigation.js';
 
 // ── Menu Item Component ─────────────────────────────────────────
 const MenuItem = ({ label, badge, onPress, disabled }) => (
@@ -64,18 +64,17 @@ export function ProfileScreen({ navigation }) {
   const isParticipant = user?.role === 'participant';
   const isCoordinator = user?.role === 'coordinator';
   const isAdmin = user?.role === 'admin';
-  const { restricted, syncFromWorkerProfile } = useWorkerGate();
+  const { restricted, syncFromWorkerProfile, syncFromParticipantProfile, accessPhase } = useWorkerGate();
 
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [profileImage, setProfileImage] = useState(null);
+  const [profileImageUrl, setProfileImageUrl] = useState(null);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [incidentMenuOpen, setIncidentMenuOpen] = useState(false);
   const [confirmModal, setConfirmModal] = useState({ visible: false, title: '', message: '', confirmText: 'Confirm', destructive: false });
   const confirmActionRef = useRef(null);
-  const [hasCoordinatorReturn, setHasCoordinatorReturn] = useState(false);
 
   const openConfirm = useCallback(({ title, message, confirmText = 'Confirm', destructive = false, onConfirm }) => {
     confirmActionRef.current = typeof onConfirm === 'function' ? onConfirm : null;
@@ -88,38 +87,25 @@ export function ProfileScreen({ navigation }) {
   }, []);
 
   const safeNavigate = useCallback((routeName) => {
+    if (restricted && !ALLOWED_ROUTES_WHILE_RESTRICTED.has(routeName)) {
+      showVerificationRequiredAlert();
+      return;
+    }
     try {
       navigation.navigate(routeName);
     } catch (_) {
       if (Platform.OS === 'web' && typeof window !== 'undefined') window.alert('This screen is not available right now.');
       else Alert.alert('Navigation error', 'This screen is not available right now.');
     }
-  }, [navigation]);
+  }, [navigation, restricted]);
 
-  const pickImage = () => {
-    try {
-      const pickerLib = require('react-native-image-picker');
-      const launch = pickerLib?.launchImageLibrary;
-      if (typeof launch !== 'function') {
-        Alert.alert('Unavailable', 'Image picker is not available on this device.');
-        return;
-      }
-      launch(
-        { mediaType: 'photo', maxWidth: 400, maxHeight: 400, quality: 0.8 },
-        (response) => {
-          if (response?.didCancel) return;
-          if (response?.errorCode) {
-            Alert.alert('Error', response.errorMessage || 'Failed to pick image');
-            return;
-          }
-          const uri = response?.assets?.[0]?.uri;
-          if (uri) setProfileImage(uri);
-        },
-      );
-    } catch (_) {
-      Alert.alert('Unavailable', 'Image picker is not available right now.');
-    }
-  };
+  const profilePhotoUploadPath = isWorker
+    ? '/api/workers/me/profile-photo'
+    : isParticipant
+      ? '/api/participants/me/profile-photo'
+      : isCoordinator
+        ? '/api/coordinator/me/profile-photo'
+        : null;
 
   const loadProfile = useCallback(async () => {
     try {
@@ -132,13 +118,15 @@ export function ProfileScreen({ navigation }) {
           const p = isWorker ? data.worker : data.participant;
           if (p) {
             setProfile(p);
-            if (isWorker) syncFromWorkerProfile(p);
+            setProfileImageUrl(p.profile_image_url || null);
+            if (isWorker) syncFromWorkerProfile(p, data.documents || []);
+            if (isParticipant) syncFromParticipantProfile(p, data.documents || []);
           }
         }
       }
     } catch (e) {}
     setLoading(false);
-  }, [isWorker, isCoordinator, syncFromWorkerProfile]);
+  }, [isWorker, isParticipant, isCoordinator, syncFromWorkerProfile, syncFromParticipantProfile]);
 
   const loadUnreadCount = useCallback(async () => {
     try {
@@ -156,40 +144,6 @@ export function ProfileScreen({ navigation }) {
     });
     return unsub;
   }, [navigation, loadUnreadCount]);
-
-  useFocusEffect(
-    useCallback(() => {
-      if (!isParticipant || !user?.id) {
-        setHasCoordinatorReturn(false);
-        return undefined;
-      }
-      let cancelled = false;
-      (async () => {
-        try {
-          const stash = await getActiveCoordinatorImpersonationStash(user.id);
-          if (!cancelled) setHasCoordinatorReturn(Boolean(stash));
-        } catch (_) {
-          if (!cancelled) setHasCoordinatorReturn(false);
-        }
-      })();
-      return () => {
-        cancelled = true;
-      };
-    }, [isParticipant, user?.id]),
-  );
-
-  const returnToCoordinatorAccount = useCallback(async () => {
-    const ok = await restoreCoordinatorFromImpersonationStash();
-    if (ok) {
-      setHasCoordinatorReturn(false);
-      navigation.dispatch(
-        CommonActions.reset({
-          index: 0,
-          routes: [{ name: 'MainTabs', params: { screen: 'Home' } }],
-        }),
-      );
-    }
-  }, [navigation]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -292,56 +246,34 @@ export function ProfileScreen({ navigation }) {
         contentContainerStyle={{ padding: Spacing.lg, paddingBottom: Spacing.xxl }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
       >
-      {isParticipant && hasCoordinatorReturn && (
-        <View
-          style={{
-            marginBottom: Spacing.md,
-            padding: Spacing.md,
-            backgroundColor: Colors.surfaceSecondary,
-            borderRadius: Radius.md,
-            borderWidth: 1,
-            borderColor: Colors.primary,
-          }}
-        >
-          <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.xs }}>
-            Coordinator view
-          </Text>
-          <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, marginBottom: Spacing.sm }}>
-            You are using this participant's account. When finished, return to your coordinator login.
-          </Text>
-          <Pressable
-            onPress={returnToCoordinatorAccount}
-            style={({ pressed }) => ({
-              backgroundColor: Colors.primary,
-              borderRadius: Radius.md,
-              paddingVertical: Spacing.sm,
-              alignItems: 'center',
-              opacity: pressed ? 0.9 : 1,
-            })}
-          >
-            <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Return to coordinator account</Text>
-          </Pressable>
-        </View>
-      )}
+      {isParticipant ? <CoordinatorReturnBanner navigation={navigation} participantUserId={user?.id} /> : null}
 
       {/* Profile Header Card */}
       <View style={{
         backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg,
         marginBottom: Spacing.md, alignItems: 'center', ...Shadows.md,
       }}>
-        <Pressable onPress={pickImage} style={{
-          width: 96, height: 96, borderRadius: 48, backgroundColor: Colors.primary,
-          alignItems: 'center', justifyContent: 'center', marginBottom: Spacing.md, overflow: 'hidden',
-        }}>
-          {profileImage ? (
-            <Image source={{ uri: profileImage }} style={{ width: 96, height: 96, borderRadius: 48 }} />
-          ) : (
+        {profilePhotoUploadPath ? (
+          <ProfilePhotoPicker
+            imageUrl={profileImageUrl}
+            onImageUrlChange={(url) => {
+              setProfileImageUrl(url);
+              setProfile((prev) => (prev ? { ...prev, profile_image_url: url } : prev));
+            }}
+            uploadPath={profilePhotoUploadPath}
+            fallbackLetter={(profile?.first_name || user?.email || '?')[0]}
+            size={96}
+          />
+        ) : (
+          <View style={{
+            width: 96, height: 96, borderRadius: 48, backgroundColor: Colors.primary,
+            alignItems: 'center', justifyContent: 'center', marginBottom: Spacing.md,
+          }}>
             <Text style={{ fontSize: 40, color: Colors.text.white }}>
-              {(firstName || user?.email || '?')[0].toUpperCase()}
+              {(profile?.first_name || user?.email || '?')[0].toUpperCase()}
             </Text>
-          )}
-        </Pressable>
-        <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.primary, marginBottom: Spacing.sm }}>Tap to change photo</Text>
+          </View>
+        )}
         <Text style={{ fontSize: Typography.fontSize.xxl, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>
           {fullName}
         </Text>
@@ -356,29 +288,35 @@ export function ProfileScreen({ navigation }) {
             {isWorker ? 'WORKER' : isCoordinator ? 'COORDINATOR' : 'PARTICIPANT'}
           </Text>
         </View>
-        {isWorker && profile?.verification_status && (
+        {(isWorker || isParticipant) && profile?.verification_status && (
           <Text style={{
             marginTop: Spacing.sm, fontSize: Typography.fontSize.sm,
             color: profile.verification_status === 'verified' ? Colors.status.success : Colors.status.warning,
           }}>
-            {profile.verification_status === 'verified' ? 'Verified Worker' : 'Verification ' + profile.verification_status}
+            {profile.verification_status === 'verified'
+              ? 'Verified account'
+              : accessPhase === 'needs_documents'
+                ? 'Upload documents to continue'
+                : accessPhase === 'ready_to_submit'
+                  ? 'Submit documents for verification'
+                  : 'Awaiting verification'}
           </Text>
         )}
       </View>
 
       <MenuSection>
-        <MenuItem label="Notifications" badge={unreadCount} disabled={false} onPress={() => safeNavigate('Notifications')} />
+        <MenuItem label="Notifications" badge={unreadCount} disabled={restricted} onPress={() => safeNavigate('Notifications')} />
         <MenuItem label="Inbox" disabled={restricted} onPress={() => safeNavigate('Messages')} />
       </MenuSection>
 
       {(isCoordinator || isParticipant) && (
         <MenuSection>
-          <MenuItem label="Requests" disabled={false} onPress={() => safeNavigate('AccessRequests')} />
+          <MenuItem label="Requests" disabled={restricted} onPress={() => safeNavigate('AccessRequests')} />
         </MenuSection>
       )}
 
       <MenuSection>
-        <MenuItem label="Emergency" disabled={false} onPress={() => safeNavigate('Emergency')} />
+        <MenuItem label="Emergency" disabled={restricted} onPress={() => safeNavigate('Emergency')} />
         {/* <MenuItem label="Chatbot" disabled={isWorker && restricted} onPress={() => safeNavigate('Chatbot')} /> */}
       </MenuSection>
 
@@ -389,33 +327,36 @@ export function ProfileScreen({ navigation }) {
         <MenuSection>
           <MenuItem
             label="Incident & Complain reports"
-            disabled={false}
+            disabled={restricted}
             onPress={() => setIncidentMenuOpen((p) => !p)}
           />
 
           {incidentMenuOpen && (
             <View style={{ paddingLeft: Spacing.md }}>
-              <MenuItem label="Report an Incident" onPress={() => safeNavigate('AddIncident')} />
-              <MenuItem label="Add Complaint" onPress={() => safeNavigate('AddComplaint')} />
+              <MenuItem label="Report an Incident" disabled={restricted} onPress={() => safeNavigate('AddIncident')} />
+              <MenuItem label="Add Complaint" disabled={restricted} onPress={() => safeNavigate('AddComplaint')} />
             </View>
           )}
         </MenuSection>
       )}
 
       <MenuSection>
-        <MenuItem label="Edit Profile" onPress={() => safeNavigate('EditProfile')} />
+        <MenuItem label="Edit Profile" disabled={false} onPress={() => safeNavigate('EditProfile')} />
         {isWorker ? (
-          <MenuItem label="Documents" onPress={() => safeNavigate('Documents')} />
-        ) : (
-          <MenuItem label="Payment Details" onPress={() => safeNavigate('Payments')} />
-        )}
+          <MenuItem label="Upload documents" disabled={false} onPress={() => safeNavigate('WorkerManage')} />
+        ) : isParticipant ? (
+          <MenuItem label="Upload documents" disabled={false} onPress={() => safeNavigate('ParticipantCompliance')} />
+        ) : isCoordinator ? (
+          <MenuItem label="How payments work" disabled={false} onPress={() => safeNavigate('Payments')} />
+        ) : null}
       </MenuSection>
 
       {isParticipant && (
         <MenuSection>
+          <MenuItem label="Payment Details" disabled={false} onPress={() => safeNavigate('Payments')} />
           <MenuItem
             label="Invite a coordinator"
-            disabled={false}
+            disabled={restricted}
             onPress={() => safeNavigate('ParticipantSearchCoordinator')}
           />
         </MenuSection>

@@ -108,6 +108,7 @@ const createCheckoutSession = async ({
     mode: 'payment',
     success_url: successUrl,
     cancel_url: cancelUrl,
+    payment_method_types: ['card'],
     line_items: [
       {
         quantity: 1,
@@ -124,14 +125,6 @@ const createCheckoutSession = async ({
       bookingId: String(bookingId),
       workerId: String(workerId),
       participantId: String(participantId),
-    },
-    payment_intent_data: {
-      metadata: {
-        bookingId: String(bookingId),
-        workerId: String(workerId),
-        participantId: String(participantId),
-      },
-      automatic_payment_methods: { enabled: true },
     },
   });
 };

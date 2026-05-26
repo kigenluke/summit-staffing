@@ -28,6 +28,48 @@ const validateEnv = () => {
     console.warn(`Warning: missing recommended env vars: ${missingRecommended.join(', ')}`);
   }
 
+  const { classifyStripeSecretKey } = require('./utils/stripeKeyValidation');
+  const stripeSecret = classifyStripeSecretKey(process.env.STRIPE_SECRET_KEY);
+  if (process.env.STRIPE_SECRET_KEY && !stripeSecret.valid) {
+    // eslint-disable-next-line no-console
+    console.error(`[stripe] ${stripeSecret.message}`);
+  } else if (process.env.STRIPE_SECRET_KEY && stripeSecret.valid) {
+    try {
+      const { stripe } = require('./config/stripe');
+      if (stripe) {
+        stripe.balance
+          .retrieve()
+          .then(() => {
+            // eslint-disable-next-line no-console
+            console.log('[stripe] Secret key verified with Stripe API');
+          })
+          .catch((e) => {
+            // eslint-disable-next-line no-console
+            console.error(
+              '[stripe] STRIPE_SECRET_KEY is set but Stripe rejected it (revoked, wrong copy, or rolled key).',
+              e.message
+            );
+          });
+      }
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  try {
+    const { isOutboundEmailConfigured } = require('./services/emailService');
+    const { getWebClientBaseUrl, getWebClientBaseUrlWarning } = require('./utils/clientAppUrl');
+    if (isOutboundEmailConfigured()) {
+      const w = getWebClientBaseUrlWarning();
+      if (w) {
+        // eslint-disable-next-line no-console
+        console.warn(`[email] ${w} Links will use: ${getWebClientBaseUrl()}`);
+      }
+    }
+  } catch (_) {
+    /* ignore optional checks */
+  }
+
   // eslint-disable-next-line no-console
   console.log(`CORS allowed origins: ${allowedOrigins.join(', ')}`);
 };

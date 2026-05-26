@@ -6,8 +6,12 @@ const pool = require('../config/database');
 const { generateToken } = require('../utils/jwt');
 const {
   sendPasswordResetEmail,
-  sendVerificationEmail
+  sendVerificationEmail,
+  sendWelcomeEmail,
+  isOutboundEmailConfigured,
 } = require('../services/emailService');
+const { normalizePhoneForStorage } = require('../utils/phoneValidation');
+const { getWebClientBaseUrlWarning } = require('../utils/clientAppUrl');
 
 const SALT_ROUNDS = 12;
 const TOKEN_BYTES = 32;
@@ -30,6 +34,7 @@ const register = async (req, res) => {
     if (respondValidation(req, res)) return;
 
     const { email, password, role } = req.body;
+    const phone = normalizePhoneForStorage(req.body.phone);
 
     const normalizedEmail = String(email).trim().toLowerCase();
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
@@ -53,9 +58,18 @@ const register = async (req, res) => {
 
       if (role === 'worker') {
         const { abn, first_name, last_name, phone, address, work_as, vendor_categories } = req.body;
+        const { verifyAbn } = require('../services/abnService');
+        const abnCheck = await verifyAbn(abn);
+        if (!abnCheck.valid) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({
+            ok: false,
+            error: abnCheck.error || 'Invalid Australian ABN',
+          });
+        }
         const workerInsert = await client.query(
           'INSERT INTO workers (user_id, abn, first_name, last_name, phone, address) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
-          [user.id, abn, first_name, last_name, phone || null, address || null]
+          [user.id, abn, first_name, last_name, phone, address || null]
         );
         const workerId = workerInsert.rows[0]?.id;
         if (work_as === 'vendor' && workerId && Array.isArray(vendor_categories) && vendor_categories.length > 0) {
@@ -91,13 +105,27 @@ const register = async (req, res) => {
             ndis_number || null,
             first_name || null,
             last_name || null,
-            phone || null,
+            phone,
             address || null,
             who_needs_support || null,
             when_start_looking || null,
             over_18 === undefined ? null : Boolean(over_18),
             funding_type || null,
           ]
+        );
+      }
+
+      if (role === 'coordinator') {
+        const { first_name, last_name } = req.body;
+        await client.query(
+          `INSERT INTO coordinator_profiles (user_id, first_name, last_name, phone, updated_at)
+           VALUES ($1, $2, $3, $4, now())
+           ON CONFLICT (user_id) DO UPDATE SET
+             first_name = COALESCE(EXCLUDED.first_name, coordinator_profiles.first_name),
+             last_name = COALESCE(EXCLUDED.last_name, coordinator_profiles.last_name),
+             phone = EXCLUDED.phone,
+             updated_at = now()`,
+          [user.id, first_name || null, last_name || null, phone]
         );
       }
 
@@ -169,6 +197,13 @@ const register = async (req, res) => {
       );
 
       await client.query('COMMIT');
+
+      try {
+        await sendWelcomeEmail(user.email, { firstName: req.body.first_name, role: user.role });
+      } catch (emailErr) {
+        // eslint-disable-next-line no-console
+        console.error('Welcome email failed (non-fatal):', emailErr?.message || emailErr);
+      }
 
       try {
         await sendVerificationEmail(user.email, verificationToken);
@@ -250,6 +285,18 @@ const forgotPassword = async (req, res) => {
 
     const user = userRes.rows[0];
 
+    if (!isOutboundEmailConfigured()) {
+      // eslint-disable-next-line no-console
+      console.error('forgotPassword: MAILGUN_API_KEY / MAILGUN_DOMAIN not set');
+      return res.status(503).json({
+        ok: false,
+        error:
+          'We could not send the reset email because outbound mail is not configured on the server (MAILGUN_API_KEY, MAILGUN_DOMAIN).',
+        hint:
+          'Add MAILGUN_API_KEY (Mailgun → Sending → your domain → API keys, value starts with key-…) and MAILGUN_DOMAIN to the server env. For localhost:5173 put them in the project root .env and run `npm run dev`; if the app proxies to Railway, set them on Railway and redeploy. MAILGUN_FROM_EMAIL alone is not enough.',
+      });
+    }
+
     const resetToken = crypto.randomBytes(TOKEN_BYTES).toString('hex');
     const resetTokenHash = sha256(resetToken);
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
@@ -263,15 +310,51 @@ const forgotPassword = async (req, res) => {
     try {
       await sendPasswordResetEmail(user.email, resetToken);
     } catch (emailErr) {
-      // Do not fail forgot-password flow if email provider is misconfigured or temporarily unavailable.
-      // Keep response generic and successful to avoid user-facing hard failures and account enumeration.
+      // User exists but outbound mail failed — do not pretend success (they would never get the link).
+      await pool.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [user.id]);
       // eslint-disable-next-line no-console
       console.error('sendPasswordResetEmail failed:', emailErr?.message || emailErr);
+
+      const msg = String(emailErr?.message || emailErr || '').toLowerCase();
+      let hint =
+        'Confirm MAILGUN_API_KEY, MAILGUN_DOMAIN, and that MAILGUN_FROM / MAILGUN_FROM_EMAIL uses an address on your verified Mailgun domain (e.g. noreply@mg.summitstaffing.com.au if domain is mg.summitstaffing.com.au).';
+      if (/authorized recipients/i.test(msg)) {
+        hint =
+          'Mailgun sandbox: add this exact email under Sending → your sandbox domain → Authorized recipients, then try again.';
+      } else if (/401|403|forbidden|unauthorized|invalid\s+private\s+key/i.test(msg)) {
+        hint =
+          'Mailgun rejected the request: check MAILGUN_API_KEY (Sending → Domain → API keys) and MAILGUN_DOMAIN on the server that handled this request. '
+          + 'If you use npm run web on localhost:5173, set VITE_PROXY_TARGET=http://localhost:3000 and run npm run dev so your local .env is used—not Railway.';
+      }
+      if (/domain\s+not\s+found|does not exist|not\s+found/i.test(msg)) {
+        hint = 'MAILGUN_DOMAIN must exactly match the domain shown in Mailgun (often mg.yourdomain.com).';
+      }
+
+      const webHint = getWebClientBaseUrlWarning();
+      if (webHint) {
+        hint = `${hint} ${webHint}`;
+      }
+
+      return res.status(503).json({
+        ok: false,
+        error:
+          'We could not send the reset email. Check Spam / Promotions, then try again. If it still fails, verify Mailgun on the server and WEB_APP_URL for the reset link.',
+        hint,
+      });
     }
 
     return res.status(200).json({ ok: true, message: 'If the email exists, a reset link has been sent.' });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: 'Forgot password failed' });
+    // eslint-disable-next-line no-console
+    console.error('forgotPassword failed:', err?.message || err);
+    const isDb = /relation .* does not exist|password_reset_tokens/i.test(String(err?.message || ''));
+    return res.status(500).json({
+      ok: false,
+      error: isDb
+        ? 'Password reset is not set up on the database yet (missing password_reset_tokens table). Run the latest schema migration.'
+        : 'Forgot password failed. If using localhost, ensure npm run dev is running on port 3000.',
+      hint: process.env.NODE_ENV === 'production' ? undefined : String(err?.message || err).slice(0, 200),
+    });
   }
 };
 

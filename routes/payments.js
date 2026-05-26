@@ -30,6 +30,16 @@ router.post(
   paymentController.createCheckoutSession
 );
 
+// Browsers use GET — this route only accepts POST from the app.
+router.get('/checkout-session', (req, res) => {
+  res.status(405).json({
+    ok: false,
+    success: false,
+    error:
+      'Use POST (not GET) with JSON body { "bookingId": "<uuid>" } and header Authorization: Bearer <participant_token>. Opening this URL in the address bar will not work.',
+  });
+});
+
 router.post(
   '/create-intent',
   [auth, checkParticipant, body('bookingId').isUUID().withMessage('bookingId is required')],

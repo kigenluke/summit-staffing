@@ -7,6 +7,7 @@ const checkAdmin = require('../middleware/checkAdmin');
 const checkParticipant = require('../middleware/checkParticipant');
 const participantController = require('../controllers/participantController');
 const incidentsController = require('../controllers/incidentsController');
+const { complianceUpload } = require('../middleware/complianceMulter');
 
 const router = express.Router();
 
@@ -75,6 +76,22 @@ router.get(
 );
 
 router.get('/me', [auth, checkParticipant], participantController.getMe);
+router.post('/me/submit-verification', [auth, checkParticipant], participantController.submitVerification);
+
+const participantDocumentValidators = [
+  complianceUpload.single('file'),
+  body('documentType')
+    .isIn(['ndis_screening', 'wwcc', 'yellow_card', 'police_check', 'first_aid', 'manual_handling', 'insurance', 'other'])
+    .withMessage('Invalid documentType'),
+  body('issue_date').optional({ checkFalsy: true }).isISO8601().toDate(),
+  body('expiry_date').optional({ checkFalsy: true }).isISO8601().toDate(),
+];
+
+router.post(
+  '/me/documents',
+  [auth, checkParticipant, ...participantDocumentValidators],
+  participantController.uploadDocumentMe
+);
 
 router.put(
   '/me',
@@ -177,6 +194,12 @@ router.post(
   '/me/profile-photo',
   [auth, checkParticipant, upload.single('file')],
   participantController.uploadProfilePhoto
+);
+
+router.post(
+  '/:id/documents',
+  [auth, checkParticipant, param('id').isUUID(), ...participantDocumentValidators],
+  participantController.uploadDocument
 );
 
 module.exports = router;

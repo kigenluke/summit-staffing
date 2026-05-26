@@ -3,11 +3,12 @@
  * Shows full booking info, clock in/out (worker), leave review (participant), invoice/payment
  */
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { View, Text, ScrollView, Pressable, Alert, TextInput, ActivityIndicator, Platform, Linking } from 'react-native';
+import { View, Text, ScrollView, Pressable, Alert, TextInput, ActivityIndicator, Platform } from 'react-native';
 import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { formatDateDMY } from '../utils/dateFormat.js';
+import { StripePayBookingButton } from '../components/StripePayBookingButton';
 
 const STATUS_COLORS = {
   pending: Colors.status.warning,
@@ -48,6 +49,8 @@ export function BookingDetailScreen({ route, navigation }) {
   const { bookingId } = route.params;
   const { user } = useAuthStore();
   const isWorker = user?.role === 'worker';
+  const isCoordinator = user?.role === 'coordinator';
+  const canPayForBooking = user?.role === 'participant';
   const [booking, setBooking] = useState(null);
   const [loading, setLoading] = useState(true);
   const [reviewRating, setReviewRating] = useState(5);
@@ -329,25 +332,6 @@ export function BookingDetailScreen({ route, navigation }) {
     else Alert.alert('Success', `Invoice ${data?.invoice?.invoice_number || ''} generated!`);
   };
 
-  const handlePayWithStripe = async () => {
-    const { data, error } = await api.post('/api/payments/checkout-session', { bookingId });
-    if (error) {
-      Alert.alert('Payment error', error.message || 'Could not start Stripe checkout');
-      return;
-    }
-    const checkoutUrl = data?.checkout_url;
-    if (!checkoutUrl) {
-      Alert.alert('Payment error', 'Stripe checkout URL was not returned.');
-      return;
-    }
-    const canOpen = await Linking.canOpenURL(checkoutUrl);
-    if (!canOpen) {
-      Alert.alert('Payment error', 'Could not open Stripe checkout URL.');
-      return;
-    }
-    await Linking.openURL(checkoutUrl);
-  };
-
   if (loading) {
     return <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background }}>
       <ActivityIndicator size="large" color={Colors.primary} />
@@ -542,10 +526,28 @@ export function BookingDetailScreen({ route, navigation }) {
         </Pressable>
       )}
 
-      {!isWorker && (b.status === 'confirmed' || b.status === 'completed') && (
-        <Pressable onPress={handlePayWithStripe} style={({ pressed }) => ({ backgroundColor: '#635BFF', paddingVertical: Spacing.md, borderRadius: Radius.md, alignItems: 'center', marginBottom: Spacing.md, opacity: pressed ? 0.8 : 1 })}>
-          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Pay with Stripe</Text>
-        </Pressable>
+      {canPayForBooking && (b.status === 'confirmed' || b.status === 'completed') && (
+        <StripePayBookingButton bookingId={bookingId} onPaid={loadBooking} />
+      )}
+
+      {isCoordinator && (b.status === 'confirmed' || b.status === 'completed') && (
+        <View
+          style={{
+            backgroundColor: Colors.surfaceSecondary,
+            borderRadius: Radius.md,
+            padding: Spacing.md,
+            marginBottom: Spacing.md,
+            borderWidth: 1,
+            borderColor: Colors.border,
+          }}
+        >
+          <Text style={{ color: Colors.text.primary, fontWeight: Typography.fontWeight.semibold, marginBottom: 4 }}>
+            Payment
+          </Text>
+          <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, lineHeight: 20 }}>
+            To pay for this shift, open the participant account from the Coordinator dashboard (Open participant account), then use Bookings and Pay with card on this booking.
+          </Text>
+        </View>
       )}
 
       {/* Generate Invoice (worker, completed) */}

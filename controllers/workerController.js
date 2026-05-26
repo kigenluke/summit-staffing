@@ -2,7 +2,11 @@ const { validationResult } = require('express-validator');
 
 const pool = require('../config/database');
 const { uploadFile } = require('../services/s3Service');
-const { validateABN } = require('../services/abnService');
+const { respondUploadFailure } = require('../utils/uploadResponse');
+const { replaceStaleComplianceUpload } = require('../utils/complianceDocumentDb');
+const { verifyAbn } = require('../services/abnService');
+const { validateGatedProfile } = require('../utils/profileValidation.cjs');
+const { submitWorkerVerification } = require('../services/complianceService');
 
 const respondValidation = (req, res) => {
   const errors = validationResult(req);
@@ -12,6 +16,8 @@ const respondValidation = (req, res) => {
   }
   return false;
 };
+
+const VALID_DOCUMENT_TYPES = ['ndis_screening', 'wwcc', 'yellow_card', 'police_check', 'first_aid', 'manual_handling', 'insurance', 'other'];
 
 const parseCsv = (value) => {
   if (!value) return [];
@@ -216,11 +222,17 @@ const setupWorkerProfile = async (req, res) => {
     const namePart = (email && email.split('@')[0]) ? email.split('@')[0].replace(/[^a-zA-Z]/g, ' ') : 'Worker';
     const firstName = (first_name && String(first_name).trim()) || namePart || 'Worker';
     const lastName = (last_name && String(last_name).trim()) || 'User';
-    const abnVal = (abn && String(abn).replace(/\D/g, '').slice(0, 11)) || '00000000000';
-    const abnPadded = abnVal.padEnd(11, '0').slice(0, 11);
+    const abnVal = String(abn || '').replace(/\D/g, '').slice(0, 11);
+    const abnCheck = await verifyAbn(abnVal);
+    if (!abnCheck.valid) {
+      return res.status(400).json({
+        ok: false,
+        error: abnCheck.error || 'A valid Australian ABN is required',
+      });
+    }
     await pool.query(
       'INSERT INTO workers (user_id, abn, first_name, last_name) VALUES ($1, $2, $3, $4)',
-      [userId, abnPadded, firstName, lastName]
+      [userId, abnCheck.abn || abnVal, firstName, lastName]
     );
     const workerRes = await pool.query(
       'SELECT w.*, u.email, u.role, u.email_verified FROM workers w JOIN users u ON u.id = w.user_id WHERE w.user_id = $1 LIMIT 1',
@@ -293,6 +305,18 @@ const getMe = async (req, res) => {
   }
 };
 
+const uploadProfilePhotoMe = async (req, res) => {
+  if (!req.user?.userId) {
+    return res.status(401).json({ ok: false, error: 'Unauthorized' });
+  }
+  const workerRes = await pool.query('SELECT id FROM workers WHERE user_id = $1 LIMIT 1', [req.user.userId]);
+  if (workerRes.rowCount === 0) {
+    return res.status(404).json({ ok: false, error: 'Worker not found' });
+  }
+  req.params.id = workerRes.rows[0].id;
+  return uploadProfilePhoto(req, res);
+};
+
 const uploadProfilePhoto = async (req, res) => {
   try {
     if (respondValidation(req, res)) return;
@@ -333,7 +357,7 @@ const updateWorker = async (req, res) => {
 
     const { id } = req.params;
 
-    const workerRes = await pool.query('SELECT id, user_id FROM workers WHERE id = $1 LIMIT 1', [id]);
+    const workerRes = await pool.query('SELECT * FROM workers WHERE id = $1 LIMIT 1', [id]);
     if (workerRes.rowCount === 0) {
       return res.status(404).json({ ok: false, error: 'Worker not found' });
     }
@@ -385,6 +409,26 @@ const updateWorker = async (req, res) => {
       return res.status(400).json({ ok: false, error: 'No fields to update' });
     }
 
+    const merged = { ...worker };
+    for (const key of allowed) {
+      if (Object.prototype.hasOwnProperty.call(req.body, key)) {
+        merged[key] = req.body[key];
+        if (
+          key === 'emergency_contact_name'
+          || key === 'emergency_contact_phone'
+          || key === 'emergency_contact_relationship'
+        ) {
+          merged[key] = req.body[key] == null ? null : String(req.body[key]).trim();
+          if (merged[key] === '') merged[key] = null;
+        }
+      }
+    }
+
+    const profileCheck = validateGatedProfile(merged, { requireNdis: false });
+    if (!profileCheck.ok) {
+      return res.status(400).json({ ok: false, error: profileCheck.message, errors: profileCheck.errors });
+    }
+
     params.push(id);
 
     const updateSql = `UPDATE workers SET ${fields.join(', ')}, updated_at = now() WHERE id = $${params.length} RETURNING *`;
@@ -419,12 +463,25 @@ const updateMe = async (req, res) => {
   }
 };
 
+const uploadDocumentMe = async (req, res) => {
+  if (!req.user?.userId) {
+    return res.status(401).json({ ok: false, error: 'Unauthorized' });
+  }
+  const workerRes = await pool.query('SELECT id FROM workers WHERE user_id = $1 LIMIT 1', [req.user.userId]);
+  if (workerRes.rowCount === 0) {
+    return res.status(404).json({ ok: false, error: 'Worker not found' });
+  }
+  req.params.id = workerRes.rows[0].id;
+  return uploadDocument(req, res);
+};
+
 const uploadDocument = async (req, res) => {
   try {
     if (respondValidation(req, res)) return;
 
     const { id } = req.params;
-    const { documentType, issue_date, expiry_date } = req.body;
+    const documentType = req.body?.documentType;
+    const { issue_date, expiry_date } = req.body;
 
     const workerRes = await pool.query('SELECT id, user_id FROM workers WHERE id = $1 LIMIT 1', [id]);
     if (workerRes.rowCount === 0) {
@@ -441,6 +498,16 @@ const uploadDocument = async (req, res) => {
       return res.status(400).json({ ok: false, error: 'File is required' });
     }
 
+    if (!VALID_DOCUMENT_TYPES.includes(documentType)) {
+      return res.status(400).json({ ok: false, error: 'Invalid document type' });
+    }
+
+    await replaceStaleComplianceUpload(pool, {
+      table: 'worker',
+      subjectId: worker.id,
+      documentType,
+    });
+
     const folder = `documents/${worker.id}/${documentType}`;
     const fileUrl = await uploadFile(req.file, folder);
 
@@ -453,11 +520,9 @@ const uploadDocument = async (req, res) => {
 
     return res.status(201).json({ ok: true, document: insertRes.rows[0] });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: 'Failed to upload document' });
+    return respondUploadFailure(res, err, 'worker.uploadDocument');
   }
 };
-
-const VALID_DOCUMENT_TYPES = ['ndis_screening', 'wwcc', 'yellow_card', 'police_check', 'first_aid', 'manual_handling', 'insurance', 'other'];
 
 const uploadDocumentsBulk = async (req, res) => {
   try {
@@ -754,9 +819,29 @@ const verifyABN = async (req, res) => {
   try {
     if (respondValidation(req, res)) return;
     const { abn } = req.body;
-    return res.status(200).json({ ok: true, valid: validateABN(abn) });
+    const result = await verifyAbn(abn);
+    return res.status(200).json({ ok: true, ...result });
   } catch (err) {
     return res.status(500).json({ ok: false, error: 'Failed to verify ABN' });
+  }
+};
+
+const submitVerification = async (req, res) => {
+  try {
+    if (!req.user?.userId) {
+      return res.status(401).json({ ok: false, error: 'Unauthorized' });
+    }
+    const workerRes = await pool.query('SELECT id FROM workers WHERE user_id = $1 LIMIT 1', [req.user.userId]);
+    if (workerRes.rowCount === 0) {
+      return res.status(404).json({ ok: false, error: 'Worker not found' });
+    }
+    const outcome = await submitWorkerVerification(workerRes.rows[0].id);
+    if (!outcome.ok) {
+      return res.status(outcome.status || 400).json({ ok: false, error: outcome.error, progress: outcome.progress });
+    }
+    return res.status(200).json({ ok: true, message: outcome.message, progress: outcome.progress });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: 'Failed to submit for verification' });
   }
 };
 
@@ -768,11 +853,14 @@ module.exports = {
   updateWorker,
   updateMe,
   uploadProfilePhoto,
+  uploadProfilePhotoMe,
   uploadDocument,
+  uploadDocumentMe,
   uploadDocumentsBulk,
   addSkill,
   removeSkill,
   updateAvailability,
   searchWorkers,
-  verifyABN
+  verifyABN,
+  submitVerification,
 };

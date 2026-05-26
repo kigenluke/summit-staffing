@@ -61,10 +61,36 @@ const getTimeGreeting = () => {
   return 'Good evening';
 };
 
+/** Show a dash when count is zero so empty state is obvious on stat tiles. */
+const formatStatCount = (n) => {
+  const num = Number(n);
+  if (!Number.isFinite(num) || num <= 0) return '—';
+  return String(num);
+};
+
+const primaryActionButtonStyle = (pressed) => ({
+  marginTop: Spacing.md,
+  backgroundColor: Colors.primaryDark,
+  borderRadius: Radius.md,
+  paddingVertical: Spacing.sm,
+  alignItems: 'center',
+  opacity: pressed ? 0.85 : 1,
+});
+
+const getAccessStatusLabel = (participant) => {
+  const status = participant.access_status;
+  if (status === 'approved') return { text: 'Connected', color: Colors.status.success };
+  if (status === 'rejected') return { text: 'Declined', color: Colors.text.muted };
+  if (status === 'pending' && participant.initiator === 'participant') {
+    return { text: 'Needs approval', color: Colors.status.warning };
+  }
+  return { text: 'Pending', color: Colors.status.warning };
+};
+
 export function CoordinatorDashboardScreen({ navigation }) {
   const { user } = useAuthStore();
   const [firstName, setFirstName] = useState('');
-  const [stats, setStats] = useState({ active_users: 0, total_participants: 0, pending_requests: 0 });
+  const [stats, setStats] = useState({ managed_participants: 0, pending_requests: 0 });
   const [managed, setManaged] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -76,7 +102,7 @@ export function CoordinatorDashboardScreen({ navigation }) {
       ]);
       setFirstName((user?.email || '').split('@')[0] || '');
       if (statsRes?.data?.ok) {
-        setStats(statsRes.data.stats || { active_users: 0, total_participants: 0, pending_requests: 0 });
+        setStats(statsRes.data.stats || { managed_participants: 0, pending_requests: 0 });
       }
       if (managedRes?.data?.ok) {
         setManaged(managedRes.data.participants || []);
@@ -145,8 +171,14 @@ export function CoordinatorDashboardScreen({ navigation }) {
         Overview
       </Text>
       <View style={{ flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.sm }}>
-        <StatCard label="Active users" value={stats.active_users} color={Colors.status.success} filled />
-        <StatCard label="Participants" value={stats.total_participants} color="#FBBF24" filled />
+        <StatCard label="Managed accounts" value={formatStatCount(stats.managed_participants)} color={Colors.status.success} filled />
+        <StatCard
+          label="Pending requests"
+          value={formatStatCount(stats.pending_requests)}
+          color={Colors.status.warning}
+          onPress={goAccessRequests}
+          filled
+        />
       </View>
       <View style={{ flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.lg }}>
         <StatCard
@@ -158,11 +190,12 @@ export function CoordinatorDashboardScreen({ navigation }) {
           valueFontSize={Typography.fontSize.lg}
         />
         <StatCard
-          label="Pending requests"
-          value={stats.pending_requests}
+          label=""
+          value="Requests"
           color={Colors.primary}
           onPress={goAccessRequests}
           filled
+          valueFontSize={Typography.fontSize.lg}
         />
       </View>
 
@@ -173,23 +206,13 @@ export function CoordinatorDashboardScreen({ navigation }) {
         <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: Spacing.xs }}>
           Approve or decline participant access requests in one place. This list stays available after you read notifications.
         </Text>
-        <Pressable
-          onPress={goAccessRequests}
-          style={({ pressed }) => ({
-            marginTop: Spacing.md,
-            backgroundColor: Colors.primaryDark,
-            borderRadius: Radius.md,
-            paddingVertical: Spacing.sm,
-            alignItems: 'center',
-            opacity: pressed ? 0.85 : 1,
-          })}
-        >
+        <Pressable onPress={goAccessRequests} style={({ pressed }) => primaryActionButtonStyle(pressed)}>
           <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Open requests</Text>
         </Pressable>
       </Card>
 
       <Card style={{ marginBottom: Spacing.md }}>
-        <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>
+        <Text style={{ fontSize: Typography.fontSize.base, fontWeight: Typography.fontWeight.semibold, color: Colors.text.primary }}>
           Request participant
         </Text>
         <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: Spacing.xs }}>
@@ -197,57 +220,82 @@ export function CoordinatorDashboardScreen({ navigation }) {
         </Text>
         <Pressable
           onPress={() => navigation.navigate('CoordinatorSearchParticipant')}
-          style={({ pressed }) => ({
-            marginTop: Spacing.md,
-            backgroundColor: Colors.primary,
-            borderRadius: Radius.md,
-            paddingVertical: Spacing.md,
-            alignItems: 'center',
-            opacity: pressed ? 0.85 : 1,
-          })}
+          style={({ pressed }) => primaryActionButtonStyle(pressed)}
         >
-          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold, fontSize: Typography.fontSize.base }}>
-            Add participant
-          </Text>
+          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Add participant</Text>
         </Pressable>
       </Card>
 
       {managed.length > 0 ? (
         <Card>
           <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.md }}>
-            Your participants
+            Your accounts
           </Text>
-          {managed.map((p) => (
-            <View
-              key={p.id}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                paddingVertical: Spacing.sm,
-                borderBottomWidth: 1,
-                borderBottomColor: Colors.border,
-              }}
-            >
-              <Text style={{ fontSize: Typography.fontSize.base, color: Colors.text.primary, fontWeight: Typography.fontWeight.medium, flex: 1 }}>
-                {p.display_name}
-              </Text>
-              <Pressable
-                onPress={() => openManage(p)}
-                style={({ pressed }) => ({
-                  backgroundColor: Colors.status.success,
-                  borderRadius: Radius.md,
-                  paddingVertical: 8,
-                  paddingHorizontal: 14,
-                  opacity: pressed ? 0.85 : 1,
-                })}
+          {managed.map((p) => {
+            const statusInfo = getAccessStatusLabel(p);
+            const canManage = p.access_status === 'approved';
+            return (
+              <View
+                key={p.access_request_id || p.id}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  paddingVertical: Spacing.sm,
+                  borderBottomWidth: 1,
+                  borderBottomColor: Colors.border,
+                  gap: Spacing.sm,
+                }}
               >
-                <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold, fontSize: Typography.fontSize.sm }}>Manage</Text>
-              </Pressable>
-            </View>
-          ))}
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.sm, paddingRight: Spacing.xs }}>
+                  <Text
+                    style={{ flex: 1, fontSize: Typography.fontSize.base, color: Colors.text.primary, fontWeight: Typography.fontWeight.medium }}
+                    numberOfLines={1}
+                  >
+                    {p.display_name}
+                  </Text>
+                  <Text style={{ fontSize: Typography.fontSize.sm, color: statusInfo.color, fontWeight: Typography.fontWeight.semibold }}>
+                    {statusInfo.text}
+                  </Text>
+                </View>
+                {canManage ? (
+                  <Pressable
+                    onPress={() => openManage(p)}
+                    style={({ pressed }) => ({
+                      backgroundColor: Colors.status.success,
+                      borderRadius: Radius.md,
+                      paddingVertical: 8,
+                      paddingHorizontal: 14,
+                      opacity: pressed ? 0.85 : 1,
+                    })}
+                  >
+                    <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold, fontSize: Typography.fontSize.sm }}>Manage</Text>
+                  </Pressable>
+                ) : p.access_status === 'pending' && p.initiator === 'participant' ? (
+                  <Pressable
+                    onPress={goAccessRequests}
+                    style={({ pressed }) => ({
+                      backgroundColor: Colors.primary,
+                      borderRadius: Radius.md,
+                      paddingVertical: 8,
+                      paddingHorizontal: 14,
+                      opacity: pressed ? 0.85 : 1,
+                    })}
+                  >
+                    <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold, fontSize: Typography.fontSize.sm }}>Review</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            );
+          })}
         </Card>
-      ) : null}
+      ) : (
+        <Card>
+          <Text style={{ fontSize: Typography.fontSize.base, color: Colors.text.secondary, textAlign: 'center' }}>
+            No managed accounts yet. Request a participant or approve an incoming request.
+          </Text>
+        </Card>
+      )}
     </ScrollView>
   );
 }

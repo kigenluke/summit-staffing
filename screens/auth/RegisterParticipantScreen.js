@@ -18,6 +18,7 @@ import { useErrorHandler } from '../../hooks/useErrorHandler.js';
 import { api } from '../../services/api.js';
 import { LoadingScreen } from '../../components/LoadingScreen.js';
 import { Colors, Spacing, Typography, Radius } from '../../constants/theme.js';
+import { isValidPhone } from '../../utils/phoneValidation.js';
 
 const inputStyle = {
   backgroundColor: Colors.surface,
@@ -54,13 +55,22 @@ export function RegisterParticipantScreen({ navigation }) {
 
   const onRegister = withLoading(async () => {
     clearError();
+    const phoneTrimmed = phone.trim();
+    if (!phoneTrimmed) {
+      handleError(new Error('Phone number is required'));
+      return;
+    }
+    if (!isValidPhone(phoneTrimmed)) {
+      handleError(new Error('Enter a valid phone number (at least 8 digits)'));
+      return;
+    }
     const body = {
       email: email.trim().toLowerCase(),
       password,
       role: 'participant',
       first_name: firstName.trim() || undefined,
       last_name: lastName.trim() || undefined,
-      phone: phone.trim() || undefined,
+      phone: phoneTrimmed,
       who_needs_support: onboarding.whoNeedsSupport || undefined,
       when_start_looking: onboarding.whenStartLooking || undefined,
       over_18: onboarding.over18,
@@ -121,8 +131,8 @@ export function RegisterParticipantScreen({ navigation }) {
         <Text style={labelStyle}>NDIS number (optional, 10 digits)</Text>
         <TextInput style={[inputStyle, { marginBottom: Spacing.md }]} placeholder="4300123456" placeholderTextColor={Colors.text.muted} value={ndisNumber} onChangeText={setNdisNumber} keyboardType="number-pad" maxLength={10} editable={!isLoading} />
 
-        <Text style={labelStyle}>Phone (optional)</Text>
-        <TextInput style={[inputStyle, { marginBottom: Spacing.lg }]} placeholder="0400000000" placeholderTextColor={Colors.text.muted} value={phone} onChangeText={setPhone} keyboardType="phone-pad" editable={!isLoading} />
+        <Text style={labelStyle}>Phone number *</Text>
+        <TextInput style={[inputStyle, { marginBottom: Spacing.lg }]} placeholder="0400 000 000" placeholderTextColor={Colors.text.muted} value={phone} onChangeText={setPhone} keyboardType="phone-pad" editable={!isLoading} />
 
         {error ? (
           <Text style={{ color: Colors.status.error, fontSize: Typography.fontSize.sm, marginBottom: Spacing.md }}>

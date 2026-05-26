@@ -8,6 +8,8 @@ import * as PlacesPkg from 'react-native-google-places-autocomplete';
 import { useAuthStore } from '../store/authStore.js';
 import { api, ApiConfig } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
+import { validateGatedProfile } from '../utils/profileValidation.js';
+import { ProfilePhotoPicker } from '../components/ProfilePhotoPicker.js';
 
 /** Same browser key as Google Cloud / Railway GOOGLE_MAPS_BROWSER_KEY — not sent to athletic-heart API. */
 function getGooglePlacesBrowserKey() {
@@ -24,9 +26,12 @@ function getGooglePlacesBrowserKey() {
   return '';
 }
 
-const Field = ({ label, value, onChangeText, placeholder, keyboardType, editable = true }) => (
+const Field = ({ label, value, onChangeText, placeholder, keyboardType, editable = true, required = false, maxLength }) => (
   <View style={{ marginBottom: Spacing.md }}>
-    <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>{label}</Text>
+    <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>
+      {label}
+      {required ? <Text style={{ color: Colors.status.error }}> *</Text> : null}
+    </Text>
     <TextInput
       style={{
         backgroundColor: editable ? Colors.surfaceSecondary : Colors.border,
@@ -40,9 +45,18 @@ const Field = ({ label, value, onChangeText, placeholder, keyboardType, editable
       placeholderTextColor={Colors.text.muted}
       keyboardType={keyboardType}
       editable={editable}
+      maxLength={maxLength}
     />
   </View>
 );
+
+const showValidationAlert = (message) => {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    window.alert(message);
+  } else {
+    Alert.alert('Required fields', message);
+  }
+};
 
 export function EditProfileScreen({ navigation }) {
   const { user } = useAuthStore();
@@ -70,6 +84,7 @@ export function EditProfileScreen({ navigation }) {
   const [emergencyName, setEmergencyName] = useState('');
   const [emergencyPhone, setEmergencyPhone] = useState('');
   const [emergencyRelationship, setEmergencyRelationship] = useState('');
+  const [profileImageUrl, setProfileImageUrl] = useState(null);
 
   const placesRef = useRef(null);
   const lastSelectedAddressRef = useRef('');
@@ -87,6 +102,12 @@ export function EditProfileScreen({ navigation }) {
     : String(ApiConfig?.baseURL || 'https://athletic-heart-backend-production.up.railway.app').replace(/\/$/, '');
   const canUsePlacesAutocomplete = !!PlacesAutocompleteComponent && !!placesProxyBaseUrl;
   const placesQueryKey = googleKey || 'places-proxy-key';
+
+  const profilePhotoUploadPath = isCoordinator
+    ? '/api/coordinator/me/profile-photo'
+    : isWorker
+      ? '/api/workers/me/profile-photo'
+      : '/api/participants/me/profile-photo';
 
   const loadProfile = useCallback(async () => {
     setLoading(true);
@@ -110,6 +131,7 @@ export function EditProfileScreen({ navigation }) {
             setAddress(p.address || '');
             setLatitude(p.latitude != null ? Number(p.latitude) : null);
             setLongitude(p.longitude != null ? Number(p.longitude) : null);
+            setProfileImageUrl(p.profile_image_url || null);
           }
         }
         return;
@@ -134,6 +156,7 @@ export function EditProfileScreen({ navigation }) {
           setAddress(p.address || '');
           setLatitude(p.latitude != null ? Number(p.latitude) : null);
           setLongitude(p.longitude != null ? Number(p.longitude) : null);
+          setProfileImageUrl(p.profile_image_url || null);
           if (isWorker) {
             setBio(p.bio || '');
             setHourlyRate(p.hourly_rate ? String(p.hourly_rate) : '');
@@ -177,15 +200,30 @@ export function EditProfileScreen({ navigation }) {
 
   const saveProfile = async () => {
     if (saving) return;
+
     const ecName = emergencyName.trim();
     const ecPhone = emergencyPhone.trim();
-    if (needsEmergencyContact && (!ecName || !ecPhone)) {
-      Alert.alert(
-        'Emergency contact required',
-        'Please add a friend or family member we can call if we cannot reach you in an emergency (name and phone).',
+    const cleanedNdis = String(ndisNumber || '').replace(/\D/g, '').slice(0, 10);
+
+    if (isWorker || isParticipantRole) {
+      const check = validateGatedProfile(
+        {
+          first_name: firstName,
+          last_name: lastName,
+          phone,
+          address,
+          ndis_number: cleanedNdis,
+          emergency_contact_name: ecName,
+          emergency_contact_phone: ecPhone,
+        },
+        { requireNdis: isParticipantRole }
       );
-      return;
+      if (!check.ok) {
+        showValidationAlert(check.message);
+        return;
+      }
     }
+
     setSaving(true);
     try {
       if (isCoordinator) {
@@ -240,7 +278,12 @@ export function EditProfileScreen({ navigation }) {
         return;
       }
       const endpoint = isWorker ? '/api/workers/me' : '/api/participants/me';
-      const body = { first_name: firstName, last_name: lastName, phone, address };
+      const body = {
+        first_name: firstName.trim(),
+        last_name: lastName.trim(),
+        phone: phone.trim(),
+        address: address.trim(),
+      };
 
       // Preserve geo coords when user edits other fields only.
       // (Some address-input re-renders can temporarily clear latitude/longitude state.)
@@ -264,8 +307,7 @@ export function EditProfileScreen({ navigation }) {
         body.max_travel_km = maxTravelKm ? (parseFloat(maxTravelKm) || 0) : null;
       }
       else {
-        const cleanedNdis = String(ndisNumber || '').trim();
-        body.ndis_number = cleanedNdis || null;
+        body.ndis_number = cleanedNdis;
         body.about = (about || '').trim() || null;
       }
 
@@ -285,11 +327,20 @@ export function EditProfileScreen({ navigation }) {
       } else {
         const p = isWorker ? data?.worker : data?.participant;
         if (p) {
+          setFirstName(p.first_name || '');
+          setLastName(p.last_name || '');
+          setPhone(p.phone || '');
+          setAddress(p.address || '');
+          if (isParticipantRole) {
+            setNdisNumber(p.ndis_number || '');
+            setAbout(p.about || '');
+          }
           if (needsEmergencyContact) {
             setEmergencyName(p.emergency_contact_name || '');
             setEmergencyPhone(p.emergency_contact_phone || '');
             setEmergencyRelationship(p.emergency_contact_relationship || '');
           }
+          setProfileImageUrl(p.profile_image_url || profileImageUrl);
           setProfile((prev) => (prev ? { ...prev, ...p } : prev));
         }
         Alert.alert('Success', 'Profile updated!');
@@ -316,28 +367,31 @@ export function EditProfileScreen({ navigation }) {
       keyboardShouldPersistTaps="handled"
       nestedScrollEnabled
     >
-      <View style={{ alignItems: 'center', marginBottom: Spacing.lg }}>
-        <View style={{
-          width: 80, height: 80, borderRadius: 40, backgroundColor: Colors.primary,
-          alignItems: 'center', justifyContent: 'center',
-        }}>
-          <Text style={{ fontSize: 32, color: Colors.text.white }}>
-            {(firstName || user?.email || '?')[0].toUpperCase()}
-          </Text>
-        </View>
-      </View>
+      <ProfilePhotoPicker
+        imageUrl={profileImageUrl}
+        onImageUrlChange={(url) => {
+          setProfileImageUrl(url);
+          setProfile((prev) => (prev ? { ...prev, profile_image_url: url } : prev));
+        }}
+        uploadPath={profilePhotoUploadPath}
+        fallbackLetter={(firstName || user?.email || '?')[0]}
+        size={96}
+      />
 
       <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.md, ...Shadows.sm, overflow: 'visible' }}>
         <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.md }}>
           Personal Information
         </Text>
 
-        <Field label="First Name" value={firstName} onChangeText={setFirstName} placeholder="First name" />
-        <Field label="Last Name" value={lastName} onChangeText={setLastName} placeholder="Last name" />
-        <Field label="Phone" value={phone} onChangeText={setPhone} placeholder="Phone number" keyboardType="phone-pad" />
+        <Field label="First Name" value={firstName} onChangeText={setFirstName} placeholder="First name" required={needsEmergencyContact} />
+        <Field label="Last Name" value={lastName} onChangeText={setLastName} placeholder="Last name" required={needsEmergencyContact} />
+        <Field label="Phone" value={phone} onChangeText={setPhone} placeholder="Phone number" keyboardType="phone-pad" required={needsEmergencyContact} />
 
         <View style={{ marginBottom: Spacing.md, zIndex: 2000, position: 'relative' }}>
-          <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>Address</Text>
+          <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>
+            Address
+            {needsEmergencyContact ? <Text style={{ color: Colors.status.error }}> *</Text> : null}
+          </Text>
           {!canUsePlacesAutocomplete ? (
             <>
               <TextInput
@@ -480,7 +534,15 @@ export function EditProfileScreen({ navigation }) {
         )}
         {isParticipantRole && (
           <>
-            <Field label="NDIS Number" value={ndisNumber} onChangeText={setNdisNumber} placeholder="10-digit NDIS number" />
+            <Field
+              label="NDIS Number"
+              value={ndisNumber}
+              onChangeText={(v) => setNdisNumber(String(v || '').replace(/\D/g, '').slice(0, 10))}
+              placeholder="e.g. 4300123456"
+              keyboardType="number-pad"
+              required
+              maxLength={10}
+            />
             <View style={{ marginBottom: Spacing.md }}>
               <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>
                 About (visible to workers)
@@ -519,17 +581,19 @@ export function EditProfileScreen({ navigation }) {
             A friend or family member we can phone if you are unwell or injured and we cannot reach you.
           </Text>
           <Field
-            label="Contact name *"
+            label="Contact name"
             value={emergencyName}
             onChangeText={setEmergencyName}
             placeholder="Full name"
+            required
           />
           <Field
-            label="Contact phone *"
+            label="Contact phone"
             value={emergencyPhone}
             onChangeText={setEmergencyPhone}
             placeholder="Mobile or landline"
             keyboardType="phone-pad"
+            required
           />
           <Field
             label="Relationship (optional)"

@@ -7,6 +7,8 @@ import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { formatDateDMY, formatTime12h } from '../utils/dateFormat.js';
+import { useGuardedNavigation } from '../hooks/useGuardedNavigation.js';
+import { VerificationBanner } from '../components/VerificationBanner.js';
 
 const STATUS_COLORS = {
   pending: Colors.status.warning,
@@ -18,7 +20,8 @@ const STATUS_COLORS = {
 
 const TABS = ['all', 'pending', 'confirmed', 'in_progress'];
 
-export function BookingsScreen({ navigation }) {
+export function BookingsScreen() {
+  const navigation = useGuardedNavigation();
   const { user } = useAuthStore();
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -128,6 +131,9 @@ export function BookingsScreen({ navigation }) {
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
+      <View style={{ paddingHorizontal: Spacing.md, paddingTop: Spacing.sm }}>
+        <VerificationBanner />
+      </View>
       {/* Tabs */}
       <View style={{ backgroundColor: Colors.surface, ...Shadows.sm, padding: Spacing.sm }}>
         <View style={{ flexDirection: 'row', gap: Spacing.xs }}>

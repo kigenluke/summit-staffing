@@ -1,4 +1,5 @@
 const express = require('express');
+const multer = require('multer');
 const { param, query, body } = require('express-validator');
 
 const auth = require('../middleware/auth');
@@ -8,7 +9,24 @@ const coordinatorController = require('../controllers/coordinatorController');
 
 const router = express.Router();
 
+const profilePhotoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
+    if (!allowed.includes(file.mimetype)) {
+      return cb(new Error('Invalid file type. Only JPG, PNG are allowed.'));
+    }
+    return cb(null, true);
+  },
+});
+
 router.get('/me/profile', [auth, checkCoordinator], coordinatorController.getMyProfile);
+router.post(
+  '/me/profile-photo',
+  [auth, checkCoordinator, profilePhotoUpload.single('file')],
+  coordinatorController.uploadMyProfilePhoto
+);
 router.put(
   '/me/profile',
   [

@@ -2,6 +2,7 @@ const { validationResult } = require('express-validator');
 const pool = require('../config/database');
 const { generateToken } = require('../utils/jwt');
 const { sendPushNotification } = require('../services/notificationService');
+const { uploadFile } = require('../services/s3Service');
 let initiatorColumnAvailable = null;
 
 const respondValidation = (req, res) => {
@@ -26,7 +27,7 @@ const getMyProfile = async (req, res) => {
     let row = {};
     try {
       const pRes = await pool.query(
-        'SELECT user_id, first_name, last_name, phone, address, latitude, longitude FROM coordinator_profiles WHERE user_id = $1 LIMIT 1',
+        'SELECT user_id, first_name, last_name, phone, address, latitude, longitude, profile_image_url FROM coordinator_profiles WHERE user_id = $1 LIMIT 1',
         [userId]
       );
       if (pRes.rowCount) row = pRes.rows[0];
@@ -49,6 +50,7 @@ const getMyProfile = async (req, res) => {
       address: row.address ?? null,
       latitude: row.latitude != null ? Number(row.latitude) : null,
       longitude: row.longitude != null ? Number(row.longitude) : null,
+      profile_image_url: row.profile_image_url ?? null,
       email: uRes.rows[0].email,
     };
     return res.status(200).json({ ok: true, coordinator });
@@ -105,6 +107,7 @@ const updateMyProfile = async (req, res) => {
       address: row.address ?? null,
       latitude: row.latitude != null ? Number(row.latitude) : null,
       longitude: row.longitude != null ? Number(row.longitude) : null,
+      profile_image_url: row.profile_image_url ?? null,
     };
     return res.status(200).json({ ok: true, coordinator });
   } catch (err) {
@@ -117,6 +120,48 @@ const updateMyProfile = async (req, res) => {
       });
     }
     return res.status(500).json({ ok: false, error: 'Failed to update profile' });
+  }
+};
+
+const uploadMyProfilePhoto = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) return res.status(401).json({ ok: false, error: 'Unauthorized' });
+    if (!req.file) return res.status(400).json({ ok: false, error: 'File is required' });
+
+    const fileUrl = await uploadFile(req.file, `coordinator-profiles/${userId}`);
+
+    await pool.query(
+      `INSERT INTO coordinator_profiles (user_id, profile_image_url, updated_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (user_id) DO UPDATE SET profile_image_url = EXCLUDED.profile_image_url, updated_at = now()`,
+      [userId, fileUrl]
+    );
+
+    const pRes = await pool.query(
+      'SELECT user_id, first_name, last_name, phone, address, latitude, longitude, profile_image_url FROM coordinator_profiles WHERE user_id = $1 LIMIT 1',
+      [userId]
+    );
+    const row = pRes.rows[0] || {};
+    const uRes = await pool.query('SELECT email FROM users WHERE id = $1 LIMIT 1', [userId]);
+
+    return res.status(200).json({
+      ok: true,
+      coordinator: {
+        id: userId,
+        user_id: userId,
+        first_name: row.first_name ?? null,
+        last_name: row.last_name ?? null,
+        phone: row.phone ?? null,
+        address: row.address ?? null,
+        latitude: row.latitude != null ? Number(row.latitude) : null,
+        longitude: row.longitude != null ? Number(row.longitude) : null,
+        profile_image_url: row.profile_image_url ?? fileUrl,
+        email: uRes.rows[0]?.email,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: 'Failed to upload profile photo' });
   }
 };
 
@@ -142,8 +187,8 @@ const getStats = async (req, res) => {
     const coordinatorUserId = req.user.userId;
     const statsRes = await pool.query(
       `SELECT
-         (SELECT COUNT(*)::int FROM users WHERE is_suspended = false) AS active_users,
-         (SELECT COUNT(*)::int FROM participants) AS total_participants,
+         (SELECT COUNT(*)::int FROM coordinator_participant_access
+           WHERE coordinator_user_id = $1 AND status = 'approved') AS managed_participants,
          (SELECT COUNT(*)::int FROM coordinator_participant_access
            WHERE coordinator_user_id = $1 AND status = 'pending') AS pending_requests`,
       [coordinatorUserId]
@@ -152,8 +197,7 @@ const getStats = async (req, res) => {
     return res.status(200).json({
       ok: true,
       stats: {
-        active_users: row.active_users ?? 0,
-        total_participants: row.total_participants ?? 0,
+        managed_participants: row.managed_participants ?? 0,
         pending_requests: row.pending_requests ?? 0,
       },
     });
@@ -200,6 +244,7 @@ const searchParticipantByEmail = async (req, res) => {
 const listMyManagedParticipants = async (req, res) => {
   try {
     const coordinatorUserId = req.user.userId;
+    const hasInitiator = await hasInitiatorColumn();
     const result = await pool.query(
       `SELECT
          p.id,
@@ -208,12 +253,18 @@ const listMyManagedParticipants = async (req, res) => {
          p.last_name,
          p.phone,
          p.address,
-         u.email
+         u.email,
+         cpa.id AS access_request_id,
+         cpa.status AS access_status,
+         ${hasInitiator ? `COALESCE(cpa.initiator, 'coordinator') AS initiator` : `'coordinator'::text AS initiator`}
        FROM coordinator_participant_access cpa
        JOIN participants p ON p.user_id = cpa.participant_user_id
        JOIN users u ON u.id = p.user_id
-       WHERE cpa.coordinator_user_id = $1 AND cpa.status = 'approved'
-       ORDER BY p.first_name NULLS LAST, p.last_name NULLS LAST`,
+       WHERE cpa.coordinator_user_id = $1
+       ORDER BY
+         CASE cpa.status WHEN 'approved' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,
+         p.first_name NULLS LAST,
+         p.last_name NULLS LAST`,
       [coordinatorUserId]
     );
     const participants = result.rows.map((row) => ({
@@ -224,6 +275,9 @@ const listMyManagedParticipants = async (req, res) => {
       phone: row.phone,
       address: row.address,
       email: row.email,
+      access_request_id: row.access_request_id,
+      access_status: row.access_status,
+      initiator: row.initiator,
       display_name: `${row.first_name || ''} ${row.last_name || ''}`.trim() || row.email.split('@')[0],
     }));
     return res.status(200).json({ ok: true, participants });
@@ -248,13 +302,12 @@ const listParticipants = async (req, res) => {
          p.profile_image_url,
          p.created_at,
          u.email,
-         COALESCE(cpa.status::text, 'none') AS request_status
-       FROM participants p
+         cpa.status::text AS request_status
+       FROM coordinator_participant_access cpa
+       JOIN participants p ON p.user_id = cpa.participant_user_id
        JOIN users u ON u.id = p.user_id
-       LEFT JOIN coordinator_participant_access cpa
-         ON cpa.participant_user_id = p.user_id
-        AND cpa.coordinator_user_id = $1
-       ORDER BY p.created_at DESC`,
+       WHERE cpa.coordinator_user_id = $1
+       ORDER BY cpa.requested_at DESC NULLS LAST`,
       [coordinatorUserId]
     );
 
@@ -769,6 +822,7 @@ const approveParticipantInitiatedRequest = async (req, res) => {
 module.exports = {
   getMyProfile,
   updateMyProfile,
+  uploadMyProfilePhoto,
   getStats,
   searchParticipantByEmail,
   listMyManagedParticipants,

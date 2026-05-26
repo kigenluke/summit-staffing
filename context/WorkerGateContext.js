@@ -1,51 +1,141 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
+import {
+  getComplianceProgress,
+  REQUIRED_WORKER_COMPLIANCE_DOCS,
+  REQUIRED_PARTICIPANT_COMPLIANCE_DOCS,
+} from '../utils/complianceProgress.js';
 
-const WorkerGateContext = createContext({
+/**
+ * accessPhase:
+ * - loading
+ * - needs_documents (required docs not all uploaded)
+ * - ready_to_submit (all uploaded, not yet submitted)
+ * - pending_verification (submitted, awaiting admin)
+ * - verified
+ */
+const AccountAccessContext = createContext({
   restricted: false,
+  accessChecking: false,
   loaded: false,
+  accessPhase: 'loading',
   refresh: async () => {},
   syncFromWorkerProfile: () => {},
+  syncFromParticipantProfile: () => {},
 });
+
+function derivePhase({ progress, verified, submitted }) {
+  if (!progress?.allUploaded) return 'needs_documents';
+  if (!submitted) return 'ready_to_submit';
+  if (!verified) return 'pending_verification';
+  return 'verified';
+}
 
 export function WorkerGateProvider({ children }) {
   const { user } = useAuthStore();
   const isWorker = user?.role === 'worker';
-  const [state, setState] = useState({ loaded: false, verified: false });
+  const isParticipant = user?.role === 'participant';
+  const isGatedRole = isWorker || isParticipant;
+
+  const [state, setState] = useState({
+    loaded: false,
+    progress: null,
+    verified: false,
+    submitted: false,
+    accessPhase: 'loading',
+  });
+
+  const applyFromProfile = useCallback((profile, documents, requiredTypes) => {
+    const progress = getComplianceProgress(documents, requiredTypes);
+    const verified = profile?.verification_status === 'verified';
+    const submitted = Boolean(profile?.verification_submitted_at);
+    const accessPhase = derivePhase({ progress, verified, submitted });
+    setState({
+      loaded: true,
+      progress,
+      verified,
+      submitted,
+      accessPhase,
+    });
+  }, []);
 
   const refresh = useCallback(async () => {
-    if (!isWorker) {
-      setState({ loaded: true, verified: true });
+    if (!isGatedRole) {
+      setState({
+        loaded: true,
+        progress: { allUploaded: true, uploadedCount: 0, total: 0, missing: [] },
+        verified: true,
+        submitted: true,
+        accessPhase: 'verified',
+      });
       return;
     }
-    try {
-      const { data } = await api.get('/api/workers/me');
-      const verified = data?.ok && data?.worker?.verification_status === 'verified';
-      setState({ loaded: true, verified: !!verified });
-    } catch {
-      setState({ loaded: true, verified: false });
-    }
-  }, [isWorker]);
 
-  const syncFromWorkerProfile = useCallback((profile) => {
+    try {
+      if (isWorker) {
+        const { data } = await api.get('/api/workers/me');
+        if (data?.ok && data?.worker) {
+          applyFromProfile(data.worker, data.documents || [], REQUIRED_WORKER_COMPLIANCE_DOCS);
+        } else {
+          setState({ loaded: true, progress: null, verified: false, submitted: false, accessPhase: 'needs_documents' });
+        }
+        return;
+      }
+
+      if (isParticipant) {
+        const { data } = await api.get('/api/participants/me');
+        if (data?.ok && data?.participant) {
+          applyFromProfile(data.participant, data.documents || [], REQUIRED_PARTICIPANT_COMPLIANCE_DOCS);
+        } else {
+          setState({ loaded: true, progress: null, verified: false, submitted: false, accessPhase: 'needs_documents' });
+        }
+      }
+    } catch {
+      setState({ loaded: true, progress: null, verified: false, submitted: false, accessPhase: 'needs_documents' });
+    }
+  }, [isGatedRole, isWorker, isParticipant, applyFromProfile]);
+
+  const syncFromWorkerProfile = useCallback((profile, documents = []) => {
     if (!isWorker || !profile) return;
-    setState({ loaded: true, verified: profile.verification_status === 'verified' });
-  }, [isWorker]);
+    applyFromProfile(profile, documents, REQUIRED_WORKER_COMPLIANCE_DOCS);
+  }, [isWorker, applyFromProfile]);
+
+  const syncFromParticipantProfile = useCallback((profile, documents = []) => {
+    if (!isParticipant || !profile) return;
+    applyFromProfile(profile, documents, REQUIRED_PARTICIPANT_COMPLIANCE_DOCS);
+  }, [isParticipant, applyFromProfile]);
 
   useEffect(() => {
     refresh();
   }, [refresh, user?.id]);
 
-  const restricted = isWorker && (!state.loaded || !state.verified);
+  // Block immediately for workers/participants until we confirm they are verified (no click window after login).
+  const restricted = isGatedRole && (!state.loaded || state.accessPhase !== 'verified');
+  const accessChecking = isGatedRole && !state.loaded;
 
   return (
-    <WorkerGateContext.Provider value={{ restricted, loaded: state.loaded, refresh, syncFromWorkerProfile }}>
+    <AccountAccessContext.Provider
+      value={{
+        restricted,
+        accessChecking,
+        loaded: state.loaded,
+        accessPhase: state.accessPhase,
+        progress: state.progress,
+        refresh,
+        syncFromWorkerProfile,
+        syncFromParticipantProfile,
+      }}
+    >
       {children}
-    </WorkerGateContext.Provider>
+    </AccountAccessContext.Provider>
   );
 }
 
 export function useWorkerGate() {
-  return useContext(WorkerGateContext);
+  return useContext(AccountAccessContext);
+}
+
+export function useAccountAccess() {
+  return useContext(AccountAccessContext);
 }

@@ -4,10 +4,14 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, ScrollView, Pressable, RefreshControl, ActivityIndicator, Linking, Platform, Alert } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { useGuardedNavigation } from '../hooks/useGuardedNavigation.js';
 import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { formatDateDMY, formatTime12h } from '../utils/dateFormat.js';
+import { VerificationBanner } from '../components/VerificationBanner.js';
+import { CoordinatorReturnBanner } from '../components/CoordinatorReturnBanner.js';
+import { NavChevron } from '../components/NavChevron.js';
 
 const Card = ({ children, style }) => (
   <View style={[{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.md }, style]}>
@@ -29,8 +33,10 @@ const getTimeGreeting = () => {
   return 'Good evening';
 };
 
-export function DashboardScreen({ navigation }) {
+export function DashboardScreen() {
+  const navigation = useGuardedNavigation();
   const { user } = useAuthStore();
+  const isParticipant = user?.role === 'participant';
   const [stats, setStats] = useState({ upcoming: 0, completed: 0, pending: 0 });
   const [upcomingBookings, setUpcomingBookings] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -191,6 +197,9 @@ export function DashboardScreen({ navigation }) {
       contentContainerStyle={{ padding: Spacing.lg, paddingBottom: 100 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
     >
+      <VerificationBanner />
+      {isParticipant ? <CoordinatorReturnBanner navigation={navigation} participantUserId={user?.id} /> : null}
+
       {/* Greeting */}
       <Card style={{ marginBottom: Spacing.lg, backgroundColor: Colors.primary }}>
         <Text style={{ fontSize: Typography.fontSize.lg, color: Colors.text.white, fontWeight: Typography.fontWeight.medium }}>
@@ -435,7 +444,10 @@ export function DashboardScreen({ navigation }) {
           <Text style={{ color: Colors.text.secondary, textAlign: 'center' }}>No bookings yet</Text>
           {!isWorker && (
             <Pressable onPress={() => navigation.navigate('Search')} style={{ marginTop: Spacing.md, alignItems: 'center' }}>
-              <Text style={{ color: Colors.primary, fontWeight: Typography.fontWeight.semibold }}>Find a worker →</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <Text style={{ color: Colors.primary, fontWeight: Typography.fontWeight.semibold }}>Find a worker</Text>
+                <NavChevron direction="right" color={Colors.primary} size={16} />
+              </View>
             </Pressable>
           )}
         </Card>

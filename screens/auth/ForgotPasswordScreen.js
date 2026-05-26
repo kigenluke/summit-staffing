@@ -72,13 +72,35 @@ export function ForgotPasswordScreen({ navigation }) {
           Reset password
         </Text>
         <Text style={{ fontSize: Typography.fontSize.base, color: Colors.text.secondary, marginBottom: Spacing.xl }}>
-          Enter your email and we'll send you a link to reset your password.
+          Enter your email. We will email you a link that opens this app, or a code you can paste here.
         </Text>
 
         {sent ? (
-          <Text style={{ fontSize: Typography.fontSize.base, color: Colors.status.success, marginBottom: Spacing.lg }}>
-            Check your email for the reset link.
-          </Text>
+          <>
+            <Text style={{ fontSize: Typography.fontSize.base, color: Colors.status.success, marginBottom: Spacing.sm }}>
+              If that email is registered, we sent reset instructions.
+            </Text>
+            <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: Spacing.md }}>
+              On your phone, tap the button in the email to open Summit Staffing. Check Spam — subject: Reset your password.
+            </Text>
+            <Pressable
+              onPress={() => navigation.navigate('ResetPassword')}
+              style={({ pressed }) => ({
+                backgroundColor: Colors.surface,
+                borderWidth: 1,
+                borderColor: Colors.primary,
+                paddingVertical: Spacing.md,
+                borderRadius: Radius.md,
+                alignItems: 'center',
+                marginBottom: Spacing.lg,
+                opacity: pressed ? 0.85 : 1,
+              })}
+            >
+              <Text style={{ color: Colors.primary, fontWeight: Typography.fontWeight.semibold, fontSize: Typography.fontSize.base }}>
+                Enter reset code in app
+              </Text>
+            </Pressable>
+          </>
         ) : (
           <>
             <Text style={{ fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.medium, color: Colors.text.primary, marginBottom: Spacing.sm }}>
