@@ -773,6 +773,139 @@ const getPaymentHistory = async (req, res) => {
   }
 };
 
+/**
+ * Ensure a Stripe Customer exists for the current user and return its id.
+ * Saves stripe_customer_id back to users table on first creation.
+ */
+const ensureStripeCustomerForUser = async (userId) => {
+  const userRes = await pool.query(
+    'SELECT id, email, full_name, stripe_customer_id FROM users WHERE id = $1 LIMIT 1',
+    [userId]
+  );
+  if (userRes.rowCount === 0) {
+    throw Object.assign(new Error('User not found'), { code: 'user_missing' });
+  }
+  const user = userRes.rows[0];
+  if (user.stripe_customer_id) {
+    try {
+      const existing = await stripe.customers.retrieve(user.stripe_customer_id);
+      if (existing && !existing.deleted) return existing.id;
+    } catch (_) {
+      // Fall through and create a new one if the saved id is stale.
+    }
+  }
+  const customer = await stripe.customers.create({
+    email: user.email || undefined,
+    name: user.full_name || undefined,
+    metadata: { userId: String(user.id) },
+  });
+  await pool.query(
+    'UPDATE users SET stripe_customer_id = $2, updated_at = now() WHERE id = $1',
+    [user.id, customer.id]
+  );
+  return customer.id;
+};
+
+/**
+ * Participant: open a Stripe-hosted page to save a card for future bookings.
+ * Returns { url } so the app/web can open Checkout (mode=setup).
+ */
+const createCustomerSetupSession = async (req, res) => {
+  try {
+    if (!ensureStripeConfigured(res)) return;
+    const customerId = await ensureStripeCustomerForUser(req.user.userId);
+
+    const appUrl = resolveAppBaseUrl();
+    const isLocal = /localhost|127\.0\.0\.1/i.test(appUrl) || String(appUrl).startsWith('http://');
+    if (process.env.NODE_ENV === 'production' && isLocal) {
+      return res.status(503).json({
+        ok: false,
+        error: 'APP_URL is not configured for production. Set it to your public https URL.',
+      });
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      mode: 'setup',
+      customer: customerId,
+      payment_method_types: ['card'],
+      success_url: `${appUrl}/stripe/return?type=setup`,
+      cancel_url: `${appUrl}/stripe/return?type=setup&cancelled=1`,
+    });
+
+    return res.status(200).json({ ok: true, url: session.url, customerId });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('createCustomerSetupSession:', err);
+    return res.status(500).json({
+      ok: false,
+      error: userFacingPaymentMessage(pickErrorMessage(err) || err, 500) || 'Could not start card setup.',
+    });
+  }
+};
+
+/** Participant: list saved card payment methods for the current user. */
+const listCustomerPaymentMethods = async (req, res) => {
+  try {
+    if (!ensureStripeConfigured(res)) return;
+    const userRes = await pool.query(
+      'SELECT stripe_customer_id FROM users WHERE id = $1 LIMIT 1',
+      [req.user.userId]
+    );
+    const customerId = userRes.rows[0]?.stripe_customer_id;
+    if (!customerId) {
+      return res.status(200).json({ ok: true, paymentMethods: [] });
+    }
+    const list = await stripe.paymentMethods.list({ customer: customerId, type: 'card' });
+    const customer = await stripe.customers.retrieve(customerId).catch(() => null);
+    const defaultId = customer?.invoice_settings?.default_payment_method || null;
+    const cards = (list.data || []).map((pm) => ({
+      id: pm.id,
+      brand: pm.card?.brand,
+      last4: pm.card?.last4,
+      expMonth: pm.card?.exp_month,
+      expYear: pm.card?.exp_year,
+      isDefault: pm.id === defaultId,
+    }));
+    return res.status(200).json({ ok: true, paymentMethods: cards });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('listCustomerPaymentMethods:', err);
+    return res.status(500).json({
+      ok: false,
+      error: 'Could not load saved cards.',
+    });
+  }
+};
+
+/** Participant: detach (delete) a saved card. */
+const detachCustomerPaymentMethod = async (req, res) => {
+  try {
+    if (!ensureStripeConfigured(res)) return;
+    const { id } = req.params;
+    if (!id || typeof id !== 'string') {
+      return res.status(400).json({ ok: false, error: 'Missing payment method id' });
+    }
+    const userRes = await pool.query(
+      'SELECT stripe_customer_id FROM users WHERE id = $1 LIMIT 1',
+      [req.user.userId]
+    );
+    const customerId = userRes.rows[0]?.stripe_customer_id;
+    if (!customerId) {
+      return res.status(404).json({ ok: false, error: 'No saved cards.' });
+    }
+    const pm = await stripe.paymentMethods.retrieve(id).catch(() => null);
+    if (!pm || pm.customer !== customerId) {
+      return res.status(403).json({ ok: false, error: 'This card does not belong to your account.' });
+    }
+    await stripe.paymentMethods.detach(id);
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('detachCustomerPaymentMethod:', err);
+    return res.status(500).json({ ok: false, error: 'Could not remove card.' });
+  }
+};
+
 module.exports = {
   createConnectAccount,
   getConnectConfigCheck,
@@ -793,5 +926,8 @@ module.exports = {
     }
   },
   handleWebhook,
-  getPaymentHistory
+  getPaymentHistory,
+  createCustomerSetupSession,
+  listCustomerPaymentMethods,
+  detachCustomerPaymentMethod,
 };

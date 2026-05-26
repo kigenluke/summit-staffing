@@ -58,4 +58,9 @@ router.get(
   paymentController.getPaymentHistory
 );
 
+// Participant: save a card on Stripe (off-session use). Returns a hosted Checkout (mode=setup) URL.
+router.post('/customer/setup-session', [auth, checkParticipant], paymentController.createCustomerSetupSession);
+router.get('/customer/payment-methods', [auth, checkParticipant], paymentController.listCustomerPaymentMethods);
+router.delete('/customer/payment-methods/:id', [auth, checkParticipant], paymentController.detachCustomerPaymentMethod);
+
 module.exports = router;

@@ -21,6 +21,9 @@ const getStatusColor = (status) => {
 export function DocumentsScreen({ navigation }) {
   const { user } = useAuthStore();
   const isWorker = user?.role === 'worker';
+  const isParticipant = user?.role === 'participant';
+  const addDocsTarget = isWorker ? 'WorkerManage' : 'Invoices';
+  const secondaryLabel = isParticipant ? 'Saved cards' : 'Add Bank Details';
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -62,25 +65,27 @@ export function DocumentsScreen({ navigation }) {
             </View>
 
             <View style={{ flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.md }}>
-              <Pressable
-                onPress={() => navigation.navigate(isWorker ? 'WorkerManage' : 'Invoices')}
-                style={({ pressed }) => ({
-                  flex: 1,
-                  backgroundColor: Colors.surface,
-                  borderWidth: 1,
-                  borderColor: Colors.border,
-                  borderRadius: Radius.md,
-                  paddingVertical: Spacing.sm,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  opacity: pressed ? 0.9 : 1,
-                  ...Shadows.sm,
-                })}
-              >
-                <Text style={{ color: Colors.text.primary, fontWeight: Typography.fontWeight.semibold }}>
-                  Add Documents
-                </Text>
-              </Pressable>
+              {!isParticipant && (
+                <Pressable
+                  onPress={() => navigation.navigate(addDocsTarget)}
+                  style={({ pressed }) => ({
+                    flex: 1,
+                    backgroundColor: Colors.surface,
+                    borderWidth: 1,
+                    borderColor: Colors.border,
+                    borderRadius: Radius.md,
+                    paddingVertical: Spacing.sm,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    opacity: pressed ? 0.9 : 1,
+                    ...Shadows.sm,
+                  })}
+                >
+                  <Text style={{ color: Colors.text.primary, fontWeight: Typography.fontWeight.semibold }}>
+                    Add Documents
+                  </Text>
+                </Pressable>
+              )}
 
               <Pressable
                 onPress={() => navigation.navigate('Payments')}
@@ -96,7 +101,7 @@ export function DocumentsScreen({ navigation }) {
                 })}
               >
                 <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>
-                  Add Bank Details
+                  {secondaryLabel}
                 </Text>
               </Pressable>
             </View>

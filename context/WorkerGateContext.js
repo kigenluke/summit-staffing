@@ -36,7 +36,8 @@ export function WorkerGateProvider({ children }) {
   const { user } = useAuthStore();
   const isWorker = user?.role === 'worker';
   const isParticipant = user?.role === 'participant';
-  const isGatedRole = isWorker || isParticipant;
+  // Participants are not gated by compliance documents — only workers need uploads.
+  const isGatedRole = isWorker;
 
   const [state, setState] = useState({
     loaded: false,
@@ -83,14 +84,7 @@ export function WorkerGateProvider({ children }) {
         return;
       }
 
-      if (isParticipant) {
-        const { data } = await api.get('/api/participants/me');
-        if (data?.ok && data?.participant) {
-          applyFromProfile(data.participant, data.documents || [], REQUIRED_PARTICIPANT_COMPLIANCE_DOCS);
-        } else {
-          setState({ loaded: true, progress: null, verified: false, submitted: false, accessPhase: 'needs_documents' });
-        }
-      }
+      // Participant compliance gating removed — nothing to load here.
     } catch {
       setState({ loaded: true, progress: null, verified: false, submitted: false, accessPhase: 'needs_documents' });
     }
@@ -101,10 +95,8 @@ export function WorkerGateProvider({ children }) {
     applyFromProfile(profile, documents, REQUIRED_WORKER_COMPLIANCE_DOCS);
   }, [isWorker, applyFromProfile]);
 
-  const syncFromParticipantProfile = useCallback((profile, documents = []) => {
-    if (!isParticipant || !profile) return;
-    applyFromProfile(profile, documents, REQUIRED_PARTICIPANT_COMPLIANCE_DOCS);
-  }, [isParticipant, applyFromProfile]);
+  // Participant compliance is not gated anymore; keep a no-op so existing callers don't crash.
+  const syncFromParticipantProfile = useCallback(() => {}, []);
 
   useEffect(() => {
     refresh();

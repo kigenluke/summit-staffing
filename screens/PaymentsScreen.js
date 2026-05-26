@@ -13,11 +13,14 @@ const STATUS_COLORS = { pending: Colors.status.warning, succeeded: Colors.status
 export function PaymentsScreen() {
   const { user } = useAuthStore();
   const isWorker = user?.role === 'worker';
+  const isParticipant = user?.role === 'participant';
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [connectStatus, setConnectStatus] = useState(null);
   const [openingStripe, setOpeningStripe] = useState(false);
+  const [savedCards, setSavedCards] = useState([]);
+  const [addingCard, setAddingCard] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -32,8 +35,14 @@ export function PaymentsScreen() {
     } else {
       setConnectStatus(null);
     }
+    if (isParticipant) {
+      try {
+        const { data } = await api.get('/api/payments/customer/payment-methods');
+        if (data?.ok) setSavedCards(data.paymentMethods || []);
+      } catch (e) {}
+    }
     setLoading(false);
-  }, [isWorker]);
+  }, [isWorker, isParticipant]);
 
   useEffect(() => { load(); }, [load]);
   const onRefresh = useCallback(async () => { setRefreshing(true); await load(); setRefreshing(false); }, [load]);
@@ -97,6 +106,56 @@ export function PaymentsScreen() {
     if (data?.loginUrl) {
       await Linking.openURL(data.loginUrl);
     }
+  };
+
+  const addCard = async () => {
+    try {
+      setAddingCard(true);
+      const { data, error } = await api.post('/api/payments/customer/setup-session');
+      if (error) {
+        const detail = typeof error?.response?.error === 'string' ? error.response.error : error.message;
+        Alert.alert('Could not start card setup', detail || 'Please try again.');
+        return;
+      }
+      const url = data?.url;
+      if (!url) {
+        Alert.alert('Could not start card setup', 'Stripe did not return a URL. Please try again.');
+        return;
+      }
+      const supported = await Linking.canOpenURL(url);
+      if (!supported) {
+        Alert.alert('Error', 'Unable to open the card setup page.');
+        return;
+      }
+      await Linking.openURL(url);
+      setTimeout(load, 2000);
+    } catch (_) {
+      Alert.alert('Error', 'Failed to start card setup.');
+    } finally {
+      setAddingCard(false);
+    }
+  };
+
+  const removeCard = (pmId) => {
+    Alert.alert(
+      'Remove card?',
+      'You can add another card at any time.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            const { error } = await api.delete(`/api/payments/customer/payment-methods/${pmId}`);
+            if (error) {
+              Alert.alert('Error', error.message || 'Could not remove card.');
+              return;
+            }
+            await load();
+          },
+        },
+      ],
+    );
   };
 
   const disconnectStripe = async () => {
@@ -186,21 +245,78 @@ export function PaymentsScreen() {
           </View>
         </View>
       )}
-      {!loading && !isWorker && (
+      {!loading && isParticipant && (
+        <View style={{ padding: Spacing.md }}>
+          <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.sm }}>
+            <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.xs }}>
+              Saved cards
+            </Text>
+            <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, lineHeight: 20, marginBottom: Spacing.md }}>
+              Save a card once with Stripe to make booking payments faster. Each booking still requires you to confirm payment from Bookings.
+            </Text>
+
+            {savedCards.length === 0 ? (
+              <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.sm, marginBottom: Spacing.md }}>
+                No cards saved yet.
+              </Text>
+            ) : (
+              savedCards.map((card) => (
+                <View
+                  key={card.id}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    paddingVertical: Spacing.sm,
+                    borderBottomWidth: 1,
+                    borderBottomColor: Colors.borderLight,
+                  }}
+                >
+                  <View>
+                    <Text style={{ color: Colors.text.primary, fontWeight: Typography.fontWeight.semibold, textTransform: 'uppercase' }}>
+                      {card.brand || 'CARD'} •••• {card.last4 || '----'}
+                    </Text>
+                    <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs, marginTop: 2 }}>
+                      Expires {String(card.expMonth).padStart(2, '0')}/{String(card.expYear).slice(-2)}
+                      {card.isDefault ? '  •  Default' : ''}
+                    </Text>
+                  </View>
+                  <Pressable onPress={() => removeCard(card.id)} style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}>
+                    <Text style={{ color: Colors.status.error, fontWeight: Typography.fontWeight.semibold }}>Remove</Text>
+                  </Pressable>
+                </View>
+              ))
+            )}
+
+            <Pressable
+              onPress={addCard}
+              disabled={addingCard}
+              style={({ pressed }) => ({
+                marginTop: Spacing.md,
+                backgroundColor: '#635BFF',
+                paddingVertical: Spacing.sm + 1,
+                borderRadius: Radius.md,
+                alignItems: 'center',
+                opacity: pressed || addingCard ? 0.85 : 1,
+              })}
+            >
+              <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>
+                {addingCard ? 'Opening Stripe…' : savedCards.length === 0 ? 'Save a card via Stripe' : 'Add another card'}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
+
+      {!loading && !isWorker && !isParticipant && (
         <View style={{ padding: Spacing.md }}>
           <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.sm }}>
             <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.sm }}>
-              {user?.role === 'coordinator' ? 'Paying for a participant' : 'Pay for bookings'}
+              Paying for a participant
             </Text>
-            {user?.role === 'coordinator' ? (
-              <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, lineHeight: 20 }}>
-                Coordinators do not pay from this account directly. Open a participant you manage (Coordinator dashboard → participant → Open participant account), then go to Bookings, open a confirmed shift, and tap Pay with card. Payment goes to the support worker on that booking.
-              </Text>
-            ) : (
-              <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, lineHeight: 20 }}>
-                Card payments are made per booking, not from this screen. Go to Bookings → open a confirmed or completed shift → Pay with card / Pay with Stripe. Payouts go to the worker’s connected Stripe account. Your history appears below.
-              </Text>
-            )}
+            <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, lineHeight: 20 }}>
+              Coordinators do not pay from this account directly. Open a participant you manage (Coordinator dashboard → participant → Open participant account), then go to Bookings, open a confirmed shift, and tap Pay with card. Payment goes to the support worker on that booking.
+            </Text>
           </View>
         </View>
       )}
@@ -238,6 +354,11 @@ export function PaymentsScreen() {
           ListEmptyComponent={
             <View style={{ padding: Spacing.xl, alignItems: 'center' }}>
               <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.semibold, color: Colors.text.primary }}>No payments yet</Text>
+              {isParticipant && (
+                <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: Spacing.xs, textAlign: 'center' }}>
+                  Pay for a booking from Bookings → open a confirmed shift → Pay with card. Your payments will be listed here.
+                </Text>
+              )}
             </View>
           }
         />

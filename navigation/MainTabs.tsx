@@ -184,7 +184,7 @@ export function MainTabs() {
   const { restricted, accessChecking } = useAccountAccess();
   const isWorker = user?.role === 'worker';
   const isCoordinator = user?.role === 'coordinator';
-  const isGatedRole = isWorker || user?.role === 'participant';
+  const isGatedRole = isWorker;
 
   if (isGatedRole && accessChecking) {
     return (
