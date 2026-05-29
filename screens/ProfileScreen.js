@@ -295,11 +295,13 @@ export function ProfileScreen({ navigation }) {
           }}>
             {profile.verification_status === 'verified'
               ? 'Verified account'
-              : accessPhase === 'needs_documents'
-                ? 'Upload documents to continue'
-                : accessPhase === 'ready_to_submit'
-                  ? 'Submit documents for verification'
-                  : 'Awaiting verification'}
+              : isWorker
+                ? (accessPhase === 'needs_documents'
+                  ? 'Upload documents to continue'
+                  : accessPhase === 'ready_to_submit'
+                    ? 'Submit documents for verification'
+                    : 'Awaiting verification')
+                : 'Awaiting verification'}
           </Text>
         )}
       </View>
@@ -344,8 +346,6 @@ export function ProfileScreen({ navigation }) {
         <MenuItem label="Edit Profile" disabled={false} onPress={() => safeNavigate('EditProfile')} />
         {isWorker ? (
           <MenuItem label="Upload documents" disabled={false} onPress={() => safeNavigate('WorkerManage')} />
-        ) : isParticipant ? (
-          <MenuItem label="Upload documents" disabled={false} onPress={() => safeNavigate('ParticipantCompliance')} />
         ) : isCoordinator ? (
           <MenuItem label="How payments work" disabled={false} onPress={() => safeNavigate('Payments')} />
         ) : null}
