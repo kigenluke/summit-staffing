@@ -63,4 +63,10 @@ router.post('/customer/setup-session', [auth, checkParticipant], paymentControll
 router.get('/customer/payment-methods', [auth, checkParticipant], paymentController.listCustomerPaymentMethods);
 router.delete('/customer/payment-methods/:id', [auth, checkParticipant], paymentController.detachCustomerPaymentMethod);
 
+router.post(
+  '/booking/authorize',
+  [auth, checkParticipant, body('bookingId').isUUID().withMessage('bookingId is required')],
+  paymentController.authorizeBooking
+);
+
 module.exports = router;

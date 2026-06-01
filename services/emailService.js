@@ -134,9 +134,11 @@ const sendCoordinatorInviteEmail = async (toEmail, participantDisplayName, signu
   return sendEmail(toEmail, subject, html);
 };
 
-const sendInvoiceEmail = async (to, invoiceNumber, pdfBuffer) => {
-  const subject = `Invoice ${invoiceNumber} - Summit Staffing`;
-  const html = `<p>Please find attached your invoice <strong>${invoiceNumber}</strong>.</p><p>Payment due within 7 days.</p>`;
+const sendInvoiceEmail = async (to, invoiceNumber, pdfBuffer, options = {}) => {
+  const subject = options.subject || `Invoice ${invoiceNumber} - Summit Staffing`;
+  const html =
+    options.html
+    || `<p>Please find attached your invoice <strong>${invoiceNumber}</strong>.</p><p>Payment due per terms on the invoice.</p>`;
 
   const attachments = [];
   if (pdfBuffer) {

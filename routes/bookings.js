@@ -5,6 +5,7 @@ const auth = require('../middleware/auth');
 const checkWorker = require('../middleware/checkWorker');
 const checkParticipant = require('../middleware/checkParticipant');
 const bookingController = require('../controllers/bookingController');
+const timesheetController = require('../controllers/timesheetController');
 
 const router = express.Router();
 
@@ -71,5 +72,22 @@ router.put(
 );
 
 router.put('/:id/complete', [auth, param('id').isUUID()], bookingController.completeBooking);
+
+router.get('/:id/timesheet', [auth, param('id').isUUID()], timesheetController.getTimesheetStatus);
+router.post(
+  '/:id/timesheet/approve',
+  [auth, checkParticipant, param('id').isUUID()],
+  timesheetController.approveTimesheetHandler
+);
+router.post(
+  '/:id/timesheet/dispute',
+  [
+    auth,
+    checkParticipant,
+    param('id').isUUID(),
+    body('reason').isString().isLength({ min: 3, max: 2000 }),
+  ],
+  timesheetController.disputeTimesheetHandler
+);
 
 module.exports = router;

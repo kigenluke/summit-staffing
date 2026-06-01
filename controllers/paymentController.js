@@ -16,6 +16,10 @@ const { userFacingPaymentMessage } = require('../utils/userFacingPaymentError');
 const { classifyStripeSecretKey } = require('../utils/stripeKeyValidation');
 const { stripeActionHint, isStaleConnectAccountError } = require('../utils/paymentErrorHints');
 const { secretKeyCheck } = require('../config/stripe');
+const {
+  createBookingAuthorization,
+  reconcileFundedStripeInvoicePaid,
+} = require('../services/paymentPipelineService');
 
 const respondValidation = (req, res) => {
   const errors = validationResult(req);
@@ -384,9 +388,12 @@ const createPaymentIntentHandler = async (req, res) => {
     const { bookingId } = req.body;
 
     const bookingRes = await pool.query(
-      `SELECT b.id, b.participant_id, b.worker_id, b.status, b.total_amount, b.commission_amount, w.stripe_account_id
+      `SELECT b.id, b.participant_id, b.worker_id, b.status, b.total_amount, b.commission_amount,
+              b.payment_pipeline, b.authorization_status, w.stripe_account_id,
+              t.approval_status AS timesheet_approval_status
        FROM bookings b
        JOIN workers w ON w.id = b.worker_id
+       LEFT JOIN booking_timesheets t ON t.booking_id = b.id
        WHERE b.id = $1
        LIMIT 1`,
       [bookingId]
@@ -400,6 +407,29 @@ const createPaymentIntentHandler = async (req, res) => {
 
     if (booking.participant_id !== participantId) {
       return res.status(403).json({ ok: false, error: 'You can only pay for your own bookings.' });
+    }
+
+    if (booking.payment_pipeline === 'funded') {
+      return res.status(400).json({
+        ok: false,
+        error: 'This is a plan-managed (NDIS) booking. Payment is collected via invoice to your plan manager after timesheet approval.',
+      });
+    }
+
+    if (booking.payment_pipeline === 'private_pay') {
+      if (booking.authorization_status === 'authorized' || booking.authorization_status === 'captured') {
+        return res.status(400).json({
+          ok: false,
+          error: 'Your card hold is active. Payment is captured automatically when the timesheet is approved (or after 24 hours).',
+        });
+      }
+      const tsStatus = booking.timesheet_approval_status;
+      if (tsStatus && !['approved', 'auto_approved'].includes(tsStatus)) {
+        return res.status(400).json({
+          ok: false,
+          error: 'Approve the timesheet first, or wait 24 hours for automatic approval before manual payment.',
+        });
+      }
     }
 
     if (!['confirmed', 'completed'].includes(booking.status)) {
@@ -631,6 +661,9 @@ const handleWebhook = async (req, res) => {
     switch (event.type) {
       case 'payment_intent.succeeded': {
         const pi = event.data.object;
+        if (pi.metadata?.payment_kind === 'authorization_hold' && pi.capture_method === 'manual') {
+          break;
+        }
         await ensurePaymentRecordForIntent(pi.id, pi);
         await pool.query(
           "UPDATE payments SET status = 'succeeded', payment_date = now() WHERE stripe_payment_intent_id = $1",
@@ -641,6 +674,18 @@ const handleWebhook = async (req, res) => {
           await createTransferForPaymentIntent(pi.id);
         } catch (err) {
           // ignore
+        }
+        break;
+      }
+      case 'invoice.paid':
+      case 'invoice.payment_succeeded': {
+        const invoice = event.data.object;
+        const stripeInvoiceId = invoice.id;
+        try {
+          await reconcileFundedStripeInvoicePaid(stripeInvoiceId);
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error('reconcileFundedStripeInvoicePaid:', err.message);
         }
         break;
       }
@@ -914,6 +959,55 @@ const listCustomerPaymentMethods = async (req, res) => {
   }
 };
 
+/** Participant: place card authorization hold on a confirmed private-pay booking. */
+const authorizeBookingHandler = async (req, res) => {
+  try {
+    if (!ensureStripeConfigured(res)) return;
+    if (respondValidation(req, res)) return;
+
+    const participantRes = await pool.query('SELECT id FROM participants WHERE user_id = $1 LIMIT 1', [req.user.userId]);
+    if (participantRes.rowCount === 0) {
+      return res.status(403).json({ ok: false, error: 'Only participants can authorize payment.' });
+    }
+
+    const { bookingId } = req.body;
+    const bookingRes = await pool.query(
+      'SELECT id, participant_id, status, payment_pipeline FROM bookings WHERE id = $1 LIMIT 1',
+      [bookingId]
+    );
+    if (bookingRes.rowCount === 0) {
+      return res.status(404).json({ ok: false, error: 'Booking not found' });
+    }
+    const booking = bookingRes.rows[0];
+    if (booking.participant_id !== participantRes.rows[0].id) {
+      return res.status(403).json({ ok: false, error: 'Forbidden' });
+    }
+    if (booking.payment_pipeline === 'funded') {
+      return res.status(400).json({ ok: false, error: 'Funded bookings use plan-manager invoicing, not card authorization.' });
+    }
+    if (booking.status !== 'confirmed' && booking.status !== 'in_progress' && booking.status !== 'completed') {
+      return res.status(400).json({ ok: false, error: 'Booking must be confirmed before authorizing payment.' });
+    }
+
+    const result = await createBookingAuthorization(bookingId);
+    if (!result.ok) {
+      return res.status(402).json({
+        ok: false,
+        error: result.error || 'Could not authorize card.',
+        requires_card: Boolean(result.requires_card),
+      });
+    }
+    return res.status(200).json({ ok: true, ...result });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('authorizeBookingHandler:', err);
+    return res.status(500).json({
+      ok: false,
+      error: userFacingPaymentMessage(pickErrorMessage(err) || err, 500) || 'Could not authorize payment.',
+    });
+  }
+};
+
 /** Participant: detach (delete) a saved card. */
 const detachCustomerPaymentMethod = async (req, res) => {
   try {
@@ -967,4 +1061,5 @@ module.exports = {
   createCustomerSetupSession,
   listCustomerPaymentMethods,
   detachCustomerPaymentMethod,
+  authorizeBooking: authorizeBookingHandler,
 };

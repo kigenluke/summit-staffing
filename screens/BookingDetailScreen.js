@@ -50,7 +50,9 @@ export function BookingDetailScreen({ route, navigation }) {
   const { user } = useAuthStore();
   const isWorker = user?.role === 'worker';
   const isCoordinator = user?.role === 'coordinator';
-  const canPayForBooking = user?.role === 'participant';
+  const isParticipant = user?.role === 'participant';
+  const canPayForBooking = isParticipant;
+  const [timesheetActionBusy, setTimesheetActionBusy] = useState(false);
   const [booking, setBooking] = useState(null);
   const [loading, setLoading] = useState(true);
   const [reviewRating, setReviewRating] = useState(5);
@@ -332,6 +334,69 @@ export function BookingDetailScreen({ route, navigation }) {
     else Alert.alert('Success', `Invoice ${data?.invoice?.invoice_number || ''} generated!`);
   };
 
+  const handleAuthorizeCard = async () => {
+    setTimesheetActionBusy(true);
+    const { data, error } = await api.post('/api/payments/booking/authorize', { bookingId });
+    setTimesheetActionBusy(false);
+    if (error) Alert.alert('Card authorization', error.message);
+    else if (data?.requires_card) {
+      Alert.alert('Save a card first', 'Go to Profile → Payment Details and save a card via Stripe, then try again.');
+    } else {
+      Alert.alert('Authorized', 'Your card is on hold for this booking. Payment captures when the timesheet is approved.');
+      loadBooking();
+    }
+  };
+
+  const handleApproveTimesheet = async () => {
+    Alert.alert('Approve timesheet', 'Approve hours and trigger payment / invoicing?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Approve',
+        onPress: async () => {
+          setTimesheetActionBusy(true);
+          const { error } = await api.post(`/api/bookings/${bookingId}/timesheet/approve`);
+          setTimesheetActionBusy(false);
+          if (error) Alert.alert('Error', error.message);
+          else {
+            Alert.alert('Approved', 'Timesheet approved. Payment or invoice processing has started.');
+            loadBooking();
+          }
+        },
+      },
+    ]);
+  };
+
+  const handleDisputeTimesheet = async () => {
+    const promptDispute = async (reason) => {
+      if (!reason || reason.trim().length < 3) {
+        Alert.alert('Reason required', 'Please describe the issue (at least 3 characters).');
+        return;
+      }
+      setTimesheetActionBusy(true);
+      const { error } = await api.post(`/api/bookings/${bookingId}/timesheet/dispute`, { reason: reason.trim() });
+      setTimesheetActionBusy(false);
+      if (error) Alert.alert('Error', error.message);
+      else {
+        Alert.alert('Dispute lodged', 'Auto-approval is paused while we review.');
+        loadBooking();
+      }
+    };
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const reason = window.prompt('Why are you disputing this timesheet?', '');
+      await promptDispute(reason);
+      return;
+    }
+    if (Platform.OS === 'ios' && Alert.prompt) {
+      Alert.prompt('Dispute timesheet', 'Describe the issue with logged hours', promptDispute);
+    } else {
+      Alert.alert(
+        'Dispute timesheet',
+        'Open this booking in the web app to lodge a dispute, or contact support with your booking ID.',
+        [{ text: 'OK' }]
+      );
+    }
+  };
+
   if (loading) {
     return <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background }}>
       <ActivityIndicator size="large" color={Colors.primary} />
@@ -386,6 +451,18 @@ export function BookingDetailScreen({ route, navigation }) {
     && (b.status === 'pending' || b.status === 'confirmed')
     && b.end_time
     && (new Date(b.end_time).getTime() < nowMs);
+
+  const isPrivatePayPipeline = b.payment_pipeline === 'private_pay';
+  const isFundedPipeline = b.payment_pipeline === 'funded';
+  const tsApproval = ts?.approval_status;
+  const canReviewTimesheet = isParticipant && tsApproval === 'pending_review' && !!ts?.clock_out_time;
+  const showLegacyPayButton =
+    canPayForBooking
+    && (b.status === 'confirmed' || b.status === 'completed')
+    && !isPrivatePayPipeline
+    && !isFundedPipeline;
+  const needsCardAuthorization =
+    isParticipant && isPrivatePayPipeline && b.authorization_status === 'required' && b.status === 'confirmed';
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: Colors.background }} contentContainerStyle={{ padding: Spacing.lg, paddingBottom: Spacing.xxl }}>
@@ -526,7 +603,87 @@ export function BookingDetailScreen({ route, navigation }) {
         </Pressable>
       )}
 
-      {canPayForBooking && (b.status === 'confirmed' || b.status === 'completed') && (
+      {isPrivatePayPipeline && (
+        <Section title="Private pay">
+          <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, lineHeight: 20 }}>
+            {b.authorization_status === 'authorized'
+              ? 'Card authorized for this booking. Payment captures when you approve the timesheet (or after 24 hours).'
+              : b.authorization_status === 'captured'
+                ? 'Payment captured for this shift.'
+                : 'Save a card and authorize when the worker accepts. Funds are held until timesheet approval.'}
+          </Text>
+        </Section>
+      )}
+
+      {isFundedPipeline && (
+        <Section title="Plan-managed (NDIS)">
+          <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, lineHeight: 20 }}>
+            After timesheet approval, a compliant PDF invoice is emailed to your plan manager with EFT payment details (7–14 day terms).
+          </Text>
+        </Section>
+      )}
+
+      {tsApproval && tsApproval !== 'not_submitted' && (
+        <Section title="Timesheet approval">
+          <Text style={{ color: Colors.text.secondary, marginBottom: Spacing.sm }}>
+            Status: {(tsApproval || '').replace('_', ' ')}
+            {ts?.auto_approve_at && tsApproval === 'pending_review'
+              ? ` · Auto-approves ${new Date(ts.auto_approve_at).toLocaleString()}`
+              : ''}
+          </Text>
+          {canReviewTimesheet && (
+            <View style={{ gap: Spacing.sm }}>
+              <Pressable
+                disabled={timesheetActionBusy}
+                onPress={handleApproveTimesheet}
+                style={({ pressed }) => ({
+                  backgroundColor: Colors.status.success,
+                  paddingVertical: Spacing.md,
+                  borderRadius: Radius.md,
+                  alignItems: 'center',
+                  opacity: pressed || timesheetActionBusy ? 0.8 : 1,
+                })}
+              >
+                <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Approve timesheet</Text>
+              </Pressable>
+              <Pressable
+                disabled={timesheetActionBusy}
+                onPress={handleDisputeTimesheet}
+                style={({ pressed }) => ({
+                  backgroundColor: Colors.surfaceSecondary,
+                  borderWidth: 1,
+                  borderColor: Colors.border,
+                  paddingVertical: Spacing.md,
+                  borderRadius: Radius.md,
+                  alignItems: 'center',
+                  opacity: pressed || timesheetActionBusy ? 0.8 : 1,
+                })}
+              >
+                <Text style={{ color: Colors.status.error, fontWeight: Typography.fontWeight.bold }}>Dispute timesheet</Text>
+              </Pressable>
+            </View>
+          )}
+        </Section>
+      )}
+
+      {needsCardAuthorization && (
+        <Pressable
+          disabled={timesheetActionBusy}
+          onPress={handleAuthorizeCard}
+          style={({ pressed }) => ({
+            backgroundColor: Colors.primary,
+            paddingVertical: Spacing.md,
+            borderRadius: Radius.md,
+            alignItems: 'center',
+            marginBottom: Spacing.md,
+            opacity: pressed || timesheetActionBusy ? 0.8 : 1,
+          })}
+        >
+          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Authorize card for booking</Text>
+        </Pressable>
+      )}
+
+      {showLegacyPayButton && (
         <StripePayBookingButton bookingId={bookingId} onPaid={loadBooking} />
       )}
 
@@ -550,8 +707,8 @@ export function BookingDetailScreen({ route, navigation }) {
         </View>
       )}
 
-      {/* Generate Invoice (worker, completed) */}
-      {isWorker && b.status === 'completed' && (
+      {/* Generate Invoice (worker, funded / legacy) */}
+      {isWorker && b.status === 'completed' && !isPrivatePayPipeline && (
         <Pressable onPress={handleGenerateInvoice} style={({ pressed }) => ({ backgroundColor: Colors.primaryDark, paddingVertical: Spacing.md, borderRadius: Radius.md, alignItems: 'center', marginBottom: Spacing.md, opacity: pressed ? 0.8 : 1 })}>
           <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}> Generate Invoice</Text>
         </Pressable>

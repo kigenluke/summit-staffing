@@ -85,6 +85,42 @@ const createPaymentIntent = async ({ amountCents, currency = 'aud', bookingId, m
   });
 };
 
+/** Private pay: pre-authorize estimated shift total (manual capture). */
+const createAuthorizationHold = async ({
+  amountCents,
+  currency = 'aud',
+  bookingId,
+  customerId,
+  paymentMethodId,
+  metadata = {},
+}) => {
+  return stripe.paymentIntents.create({
+    amount: amountCents,
+    currency,
+    customer: customerId,
+    payment_method: paymentMethodId,
+    capture_method: 'manual',
+    confirm: true,
+    off_session: true,
+    metadata: {
+      bookingId: String(bookingId),
+      pipeline: 'private_pay',
+      payment_kind: 'authorization_hold',
+      ...metadata,
+    },
+  });
+};
+
+const updatePaymentIntentAmount = async (paymentIntentId, amountCents) =>
+  stripe.paymentIntents.update(paymentIntentId, { amount: amountCents });
+
+const capturePaymentIntent = async (paymentIntentId, amountToCaptureCents = null) => {
+  const params = amountToCaptureCents != null ? { amount_to_capture: amountToCaptureCents } : {};
+  return stripe.paymentIntents.capture(paymentIntentId, params);
+};
+
+const cancelPaymentIntent = async (paymentIntentId) => stripe.paymentIntents.cancel(paymentIntentId);
+
 const createTransfer = async ({ amountCents, destination, sourceTransaction, metadata = {} }) => {
   return stripe.transfers.create({
     amount: amountCents,
@@ -143,6 +179,10 @@ module.exports = {
   createAccountLink,
   createAccountLoginLink,
   createPaymentIntent,
+  createAuthorizationHold,
+  updatePaymentIntentAmount,
+  capturePaymentIntent,
+  cancelPaymentIntent,
   createCheckoutSession,
   createTransfer,
   verifyWebhookSignature

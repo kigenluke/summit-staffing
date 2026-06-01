@@ -92,6 +92,24 @@ const start = async () => {
     console.log(`Summit Staffing API running on http://localhost:${port}`);
     // eslint-disable-next-line no-console
     console.log('Summit Staffing Pty Ltd - ABN 73690199501');
+
+    if (process.env.ENABLE_TIMESHEET_CRON !== 'false') {
+      try {
+        const cron = require('node-cron');
+        const { runTimesheetApprovalCron } = require('./jobs/timesheetApprovalCron');
+        cron.schedule('*/15 * * * *', () => {
+          runTimesheetApprovalCron().catch((e) => {
+            // eslint-disable-next-line no-console
+            console.error('[cron] timesheet auto-approval failed:', e.message);
+          });
+        });
+        // eslint-disable-next-line no-console
+        console.log('[cron] Timesheet 24h auto-approval job scheduled (every 15 minutes)');
+      } catch (cronErr) {
+        // eslint-disable-next-line no-console
+        console.warn('[cron] Could not start timesheet job:', cronErr.message);
+      }
+    }
   });
 };
 

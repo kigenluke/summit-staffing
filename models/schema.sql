@@ -926,4 +926,82 @@ BEGIN
   END IF;
 END $$;
 
+-- Hybrid payment & timesheet approval (private pay vs funded NDIS)
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'timesheet_approval_status') THEN
+    CREATE TYPE timesheet_approval_status AS ENUM ('not_submitted', 'pending_review', 'disputed', 'approved', 'auto_approved');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'payment_pipeline_type') THEN
+    CREATE TYPE payment_pipeline_type AS ENUM ('private_pay', 'funded');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'authorization_status_type') THEN
+    CREATE TYPE authorization_status_type AS ENUM ('none', 'required', 'authorized', 'failed', 'captured', 'cancelled');
+  END IF;
+END$$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'bookings' AND column_name = 'payment_pipeline') THEN
+    ALTER TABLE bookings ADD COLUMN payment_pipeline payment_pipeline_type;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'bookings' AND column_name = 'stripe_authorization_intent_id') THEN
+    ALTER TABLE bookings ADD COLUMN stripe_authorization_intent_id TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'bookings' AND column_name = 'authorization_status') THEN
+    ALTER TABLE bookings ADD COLUMN authorization_status authorization_status_type NOT NULL DEFAULT 'none';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'bookings' AND column_name = 'authorized_amount') THEN
+    ALTER TABLE bookings ADD COLUMN authorized_amount NUMERIC(10,2);
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'booking_timesheets' AND column_name = 'approval_status') THEN
+    ALTER TABLE booking_timesheets ADD COLUMN approval_status timesheet_approval_status NOT NULL DEFAULT 'not_submitted';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'booking_timesheets' AND column_name = 'submitted_at') THEN
+    ALTER TABLE booking_timesheets ADD COLUMN submitted_at TIMESTAMPTZ;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'booking_timesheets' AND column_name = 'approved_at') THEN
+    ALTER TABLE booking_timesheets ADD COLUMN approved_at TIMESTAMPTZ;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'booking_timesheets' AND column_name = 'auto_approve_at') THEN
+    ALTER TABLE booking_timesheets ADD COLUMN auto_approve_at TIMESTAMPTZ;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'booking_timesheets' AND column_name = 'disputed_at') THEN
+    ALTER TABLE booking_timesheets ADD COLUMN disputed_at TIMESTAMPTZ;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'booking_timesheets' AND column_name = 'dispute_reason') THEN
+    ALTER TABLE booking_timesheets ADD COLUMN dispute_reason TEXT;
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'invoices' AND column_name = 'eft_reference') THEN
+    ALTER TABLE invoices ADD COLUMN eft_reference TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'invoices' AND column_name = 'stripe_invoice_id') THEN
+    ALTER TABLE invoices ADD COLUMN stripe_invoice_id TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'invoices' AND column_name = 'due_date') THEN
+    ALTER TABLE invoices ADD COLUMN due_date DATE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'invoices' AND column_name = 'plan_manager_email') THEN
+    ALTER TABLE invoices ADD COLUMN plan_manager_email TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'invoices' AND column_name = 'payment_terms_days') THEN
+    ALTER TABLE invoices ADD COLUMN payment_terms_days INTEGER NOT NULL DEFAULT 14;
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'payments' AND column_name = 'payment_kind') THEN
+    ALTER TABLE payments ADD COLUMN payment_kind TEXT NOT NULL DEFAULT 'capture';
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS booking_timesheets_auto_approve_at_idx
+  ON booking_timesheets (auto_approve_at)
+  WHERE approval_status = 'pending_review' AND auto_approve_at IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS invoices_eft_reference_uq ON invoices (eft_reference) WHERE eft_reference IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS invoices_stripe_invoice_id_uq ON invoices (stripe_invoice_id) WHERE stripe_invoice_id IS NOT NULL;
+
 COMMIT;

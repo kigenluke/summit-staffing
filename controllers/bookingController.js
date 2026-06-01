@@ -4,6 +4,9 @@ const pool = require('../config/database');
 const { isWithinRadius } = require('../utils/gpsHelper');
 const { sendPushNotification } = require('../services/notificationService');
 const { sendSMS } = require('../services/smsService');
+const { getPaymentPipeline, isFundedAccount } = require('../utils/fundingPipeline');
+const { createBookingAuthorization, cancelBookingAuthorization } = require('../services/paymentPipelineService');
+const { submitTimesheetForReview } = require('../services/timesheetApprovalService');
 const respondValidation = (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -64,7 +67,11 @@ const hoursBetween = (start, end) => {
 };
 
 const getParticipantForUser = async (userId) => {
-  const res = await pool.query('SELECT id, user_id, phone FROM participants WHERE user_id = $1 LIMIT 1', [userId]);
+  const res = await pool.query(
+    `SELECT id, user_id, phone, funding_type, management_type, plan_manager_email, ndis_number
+     FROM participants WHERE user_id = $1 LIMIT 1`,
+    [userId]
+  );
   return res.rowCount ? res.rows[0] : null;
 };
 
@@ -143,7 +150,9 @@ const createBooking = async (req, res) => {
       });
     }
 
-    if (rate > 0) {
+    const paymentPipeline = getPaymentPipeline(participant);
+
+    if (rate > 0 && isFundedAccount(participant)) {
       const rateCheck = validateParticipantOfferedHourlyRate(service_type, start_time, rate, { highIntensity });
       if (!rateCheck.ok) {
         return res.status(400).json({
@@ -183,8 +192,9 @@ const createBooking = async (req, res) => {
         high_intensity,
         travel_distance_km,
         sleepover_flat_amount,
-        travel_rate_per_km
-      ) VALUES ($1,$2,$3,$4,$5,'pending',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+        travel_rate_per_km,
+        payment_pipeline
+      ) VALUES ($1,$2,$3,$4,$5,'pending',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
       RETURNING *`,
       [
         participant.id,
@@ -203,6 +213,7 @@ const createBooking = async (req, res) => {
         travelKm,
         sleepoverFlat,
         TRAVEL_NON_LABOUR_PER_KM,
+        paymentPipeline,
       ]
     );
 
@@ -381,6 +392,13 @@ const acceptBooking = async (req, res) => {
 
       await client.query('COMMIT');
 
+      let authorization = null;
+      try {
+        authorization = await createBookingAuthorization(id);
+      } catch (authErr) {
+        authorization = { ok: false, error: authErr.message };
+      }
+
       await sendPushNotification(booking.participant_user_id, 'Booking accepted', 'Your booking has been accepted by the worker.', {
         bookingId: booking.id,
         type: 'booking_accepted',
@@ -390,7 +408,7 @@ const acceptBooking = async (req, res) => {
         await sendSMS(booking.participant_phone, `Your booking ${id} has been accepted.`);
       }
 
-      return res.status(200).json({ ok: true, booking: updatedRes.rows[0] });
+      return res.status(200).json({ ok: true, booking: updatedRes.rows[0], authorization });
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;
@@ -531,6 +549,10 @@ const cancelBooking = async (req, res) => {
       );
 
       await client.query('COMMIT');
+
+      try {
+        await cancelBookingAuthorization(id);
+      } catch (_) {}
 
       return res.status(200).json({ ok: true, booking: updatedRes.rows[0] });
     } catch (err) {
@@ -725,7 +747,20 @@ const clockOut = async (req, res) => {
 
       await client.query('COMMIT');
 
-      return res.status(200).json({ ok: true, booking: updatedBooking.rows[0], timesheet: updatedTimesheet.rows[0] || null, actual_hours: actualHours });
+      let timesheetReview = null;
+      try {
+        timesheetReview = await submitTimesheetForReview(id);
+      } catch (submitErr) {
+        timesheetReview = { error: submitErr.message };
+      }
+
+      return res.status(200).json({
+        ok: true,
+        booking: updatedBooking.rows[0],
+        timesheet: updatedTimesheet.rows[0] || null,
+        actual_hours: actualHours,
+        timesheet_review: timesheetReview,
+      });
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;
@@ -779,7 +814,14 @@ const completeBooking = async (req, res) => {
       [id]
     );
 
-    return res.status(200).json({ ok: true, booking: updatedRes.rows[0] });
+    let timesheetReview = null;
+    try {
+      timesheetReview = await submitTimesheetForReview(id);
+    } catch (submitErr) {
+      timesheetReview = { error: submitErr.message };
+    }
+
+    return res.status(200).json({ ok: true, booking: updatedRes.rows[0], timesheet_review: timesheetReview });
   } catch (err) {
     return res.status(500).json({ ok: false, error: 'Failed to complete booking' });
   }

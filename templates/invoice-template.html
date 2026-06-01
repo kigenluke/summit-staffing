@@ -155,7 +155,9 @@
     </table>
 
     <div class="footer">
-      <div><strong>Payment terms:</strong> Payment due within 7 days.</div>
+      <div><strong>Payment terms:</strong> Payment due within {{payment_terms_days}} days.</div>
+      <div style="margin-top:8px"><strong>EFT reference (include on payment):</strong> {{eft_reference}}</div>
+      <div class="muted" style="margin-top:4px">{{eft_bsb}} {{eft_account}} {{eft_account_name}}</div>
       <div style="margin-top:6px">If you have any questions about this invoice please contact info@summitstaffing.com.au.</div>
 
       <div style="margin-top:14px">
@@ -167,8 +169,8 @@
         <div style="margin-top:10px">
           <div style="font-weight:700; color:#0f172a">Payment breakdown:</div>
           <div>• Service fee: ${{total}}</div>
-          <div>• Worker payment (90%): ${{worker_amount}}</div>
-          <div>• Platform fee (10%): ${{platform_fee}}</div>
+          <div>• Worker payment (85%): ${{worker_amount}}</div>
+          <div>• Platform fee (15%): ${{platform_fee}}</div>
         </div>
       </div>
     </div>
