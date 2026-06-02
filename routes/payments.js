@@ -25,6 +25,18 @@ router.post('/connect/login-link', [auth, checkWorker], paymentController.create
 router.post('/connect/disconnect', [auth, checkWorker], paymentController.disconnectConnectAccount);
 
 router.post(
+  '/connect/bank-details',
+  [
+    auth,
+    checkWorker,
+    body('account_holder_name').isString().trim().isLength({ min: 2, max: 120 }),
+    body('bsb').isString().trim().isLength({ min: 6, max: 8 }),
+    body('account_number').isString().trim().isLength({ min: 5, max: 12 }),
+  ],
+  paymentController.saveWorkerBankDetails
+);
+
+router.post(
   '/checkout-session',
   [auth, checkParticipant, body('bookingId').isUUID().withMessage('bookingId is required')],
   paymentController.createCheckoutSession

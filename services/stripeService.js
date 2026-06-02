@@ -20,6 +20,52 @@ const resolveAppBaseUrl = () => {
   return 'http://localhost:3000';
 };
 
+const useCustomConnect = () => String(process.env.STRIPE_CONNECT_MODE || 'custom').toLowerCase() !== 'express';
+
+const createCustomWorkerAccount = async ({ email, firstName, lastName, tosAcceptanceIp }) => {
+  const payload = {
+    type: 'custom',
+    country: 'AU',
+    email: String(email || '').trim(),
+    capabilities: {
+      transfers: { requested: true },
+    },
+    business_type: 'individual',
+    individual: {
+      first_name: String(firstName || '').trim() || 'Worker',
+      last_name: String(lastName || '').trim() || 'User',
+      email: String(email || '').trim(),
+    },
+    tos_acceptance: {
+      date: Math.floor(Date.now() / 1000),
+      ip: tosAcceptanceIp || '127.0.0.1',
+    },
+  };
+  return stripe.accounts.create(payload);
+};
+
+const attachAustralianBankAccount = async (accountId, { accountHolderName, bsb, accountNumber }) => {
+  return stripe.accounts.createExternalAccount(accountId, {
+    external_account: {
+      object: 'bank_account',
+      country: 'AU',
+      currency: 'aud',
+      account_holder_name: accountHolderName,
+      routing_number: String(bsb).replace(/\D/g, ''),
+      account_number: String(accountNumber).replace(/\D/g, ''),
+    },
+    default_for_currency: true,
+  });
+};
+
+const listWorkerBankAccounts = async (accountId) => {
+  const list = await stripe.accounts.listExternalAccounts(accountId, {
+    object: 'bank_account',
+    limit: 5,
+  });
+  return list.data || [];
+};
+
 const createConnectedAccount = async (workerEmail) => {
   const email = String(workerEmail || '').trim();
   if (!email || !email.includes('@')) {
@@ -175,6 +221,10 @@ const verifyWebhookSignature = (payloadBuffer, signature) => {
 module.exports = {
   stripe,
   resolveAppBaseUrl,
+  useCustomConnect,
+  createCustomWorkerAccount,
+  attachAustralianBankAccount,
+  listWorkerBankAccounts,
   createConnectedAccount,
   createAccountLink,
   createAccountLoginLink,

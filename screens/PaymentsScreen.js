@@ -2,7 +2,9 @@
  * Summit Staffing – Payments Screen (History + Stripe connect for workers)
  */
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, FlatList, Pressable, RefreshControl, ActivityIndicator, Alert, Linking, AppState } from 'react-native';
+import {
+  View, Text, FlatList, Pressable, RefreshControl, ActivityIndicator, Alert, Linking, AppState, TextInput,
+} from 'react-native';
 import { api } from '../services/api.js';
 import { useAuthStore } from '../store/authStore.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
@@ -21,6 +23,11 @@ export function PaymentsScreen() {
   const [openingStripe, setOpeningStripe] = useState(false);
   const [savedCards, setSavedCards] = useState([]);
   const [addingCard, setAddingCard] = useState(false);
+  const [bankHolderName, setBankHolderName] = useState('');
+  const [bankBsb, setBankBsb] = useState('');
+  const [bankAccountNumber, setBankAccountNumber] = useState('');
+  const [savingBank, setSavingBank] = useState(false);
+  const [showBankForm, setShowBankForm] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -158,6 +165,40 @@ export function PaymentsScreen() {
     );
   };
 
+  const isCustomConnect = connectStatus?.connect_mode !== 'express';
+
+  const saveBankDetails = async () => {
+    const holder = bankHolderName.trim();
+    const bsb = bankBsb.trim();
+    const acct = bankAccountNumber.trim();
+    if (!holder || bsb.replace(/\D/g, '').length < 6 || acct.replace(/\D/g, '').length < 5) {
+      Alert.alert('Missing details', 'Enter account holder name, 6-digit BSB, and account number.');
+      return;
+    }
+    setSavingBank(true);
+    try {
+      const { data, error } = await api.post('/api/payments/connect/bank-details', {
+        account_holder_name: holder,
+        bsb,
+        account_number: acct,
+      });
+      if (error) {
+        const detail = typeof error?.response?.error === 'string' ? error.response.error : error.message;
+        const hint = typeof error?.response?.hint === 'string' ? error.response.hint : '';
+        Alert.alert('Could not save bank details', [detail, hint].filter(Boolean).join('\n\n'));
+        return;
+      }
+      setBankAccountNumber('');
+      setShowBankForm(false);
+      Alert.alert('Saved', data?.message || 'Bank account saved for payouts.');
+      await load();
+    } catch (_) {
+      Alert.alert('Error', 'Failed to save bank details.');
+    } finally {
+      setSavingBank(false);
+    }
+  };
+
   const disconnectStripe = async () => {
     Alert.alert(
       'Disconnect Stripe?',
@@ -187,8 +228,117 @@ export function PaymentsScreen() {
       {!loading && isWorker && (
         <View style={{ padding: Spacing.md }}>
           <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.sm }}>
-            <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.sm }}>Payment Setup</Text>
-            {connectStatus?.charges_enabled ? (
+            <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.sm }}>Payout bank account</Text>
+            <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, lineHeight: 20, marginBottom: Spacing.md }}>
+              Enter your Australian BSB and account number to receive shift payouts. Details are sent securely to Stripe — we do not store your full account number.
+            </Text>
+
+            {isCustomConnect && connectStatus?.bank_account?.last4 && !showBankForm ? (
+              <>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm }}>
+                  <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.status.success }} />
+                  <Text style={{ color: Colors.status.success, fontWeight: Typography.fontWeight.semibold }}>Bank account connected</Text>
+                </View>
+                <View style={{ backgroundColor: Colors.surfaceSecondary, borderWidth: 1, borderColor: Colors.borderLight, borderRadius: Radius.md, padding: Spacing.sm, marginBottom: Spacing.md }}>
+                  <Text style={{ color: Colors.text.primary, fontWeight: Typography.fontWeight.medium }}>
+                    {connectStatus.bank_account.account_holder_name || 'Account holder'}
+                  </Text>
+                  <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, marginTop: 4 }}>
+                    BSB {connectStatus.bank_account.bsb_display || '—'} · Account •••• {connectStatus.bank_account.last4}
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={() => setShowBankForm(true)}
+                  style={({ pressed }) => ({
+                    backgroundColor: Colors.primary,
+                    paddingVertical: Spacing.sm + 1,
+                    borderRadius: Radius.md,
+                    alignItems: 'center',
+                    opacity: pressed ? 0.88 : 1,
+                    marginBottom: Spacing.sm,
+                  })}
+                >
+                  <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Update bank details</Text>
+                </Pressable>
+                <Pressable onPress={disconnectStripe} style={({ pressed }) => ({ opacity: pressed ? 0.88 : 1 })}>
+                  <Text style={{ color: Colors.status.error, fontWeight: Typography.fontWeight.semibold, textAlign: 'center' }}>Remove payout account</Text>
+                </Pressable>
+              </>
+            ) : isCustomConnect || showBankForm ? (
+              <>
+                <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs, marginBottom: Spacing.sm }}>Account holder name</Text>
+                <TextInput
+                  value={bankHolderName}
+                  onChangeText={setBankHolderName}
+                  placeholder="e.g. Jane Smith"
+                  autoCapitalize="words"
+                  style={{
+                    borderWidth: 1,
+                    borderColor: Colors.border,
+                    borderRadius: Radius.md,
+                    padding: Spacing.sm,
+                    marginBottom: Spacing.md,
+                    color: Colors.text.primary,
+                    backgroundColor: Colors.surface,
+                  }}
+                />
+                <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs, marginBottom: Spacing.sm }}>BSB (6 digits)</Text>
+                <TextInput
+                  value={bankBsb}
+                  onChangeText={setBankBsb}
+                  placeholder="062-000"
+                  keyboardType="number-pad"
+                  maxLength={7}
+                  style={{
+                    borderWidth: 1,
+                    borderColor: Colors.border,
+                    borderRadius: Radius.md,
+                    padding: Spacing.sm,
+                    marginBottom: Spacing.md,
+                    color: Colors.text.primary,
+                    backgroundColor: Colors.surface,
+                  }}
+                />
+                <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs, marginBottom: Spacing.sm }}>Account number</Text>
+                <TextInput
+                  value={bankAccountNumber}
+                  onChangeText={setBankAccountNumber}
+                  placeholder="Account number"
+                  keyboardType="number-pad"
+                  secureTextEntry
+                  maxLength={9}
+                  style={{
+                    borderWidth: 1,
+                    borderColor: Colors.border,
+                    borderRadius: Radius.md,
+                    padding: Spacing.sm,
+                    marginBottom: Spacing.md,
+                    color: Colors.text.primary,
+                    backgroundColor: Colors.surface,
+                  }}
+                />
+                <Pressable
+                  onPress={saveBankDetails}
+                  disabled={savingBank}
+                  style={({ pressed }) => ({
+                    backgroundColor: Colors.primary,
+                    paddingVertical: Spacing.sm + 1,
+                    borderRadius: Radius.md,
+                    alignItems: 'center',
+                    opacity: pressed || savingBank ? 0.85 : 1,
+                  })}
+                >
+                  <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>
+                    {savingBank ? 'Saving…' : 'Save bank account'}
+                  </Text>
+                </Pressable>
+                {connectStatus?.bank_account?.last4 ? (
+                  <Pressable onPress={() => setShowBankForm(false)} style={{ marginTop: Spacing.sm }}>
+                    <Text style={{ color: Colors.text.muted, textAlign: 'center' }}>Cancel</Text>
+                  </Pressable>
+                ) : null}
+              </>
+            ) : connectStatus?.charges_enabled ? (
               <>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm }}>
                   <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.status.success }} />

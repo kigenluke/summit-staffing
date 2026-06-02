@@ -3,7 +3,7 @@
  * Full-screen hero image with sign-up and log-in buttons.
  */
 import React, { useEffect } from 'react';
-import { View, Text, Pressable, ImageBackground, StatusBar, useWindowDimensions, Platform } from 'react-native';
+import { View, Text, Pressable, ImageBackground, Image, StatusBar, useWindowDimensions, Platform, StyleSheet } from 'react-native';
 import { Colors, Spacing, Typography, Radius } from '../../constants/theme.js';
 
 // Import works in both Vite (web → URL string) and Metro (native → asset id)
@@ -30,18 +30,9 @@ export function WelcomeScreen({ navigation }) {
 
   // Vite gives string URL; Metro gives number. ImageBackground accepts both.
   const source = typeof welcomeImage === 'string' ? { uri: welcomeImage } : welcomeImage;
-  return (
-    <View style={{ flex: 1, backgroundColor: '#000' }}>
-      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
 
-      <ImageBackground
-        source={source}
-        style={{ flex: 1, width: '100%', height: '100%' }}
-        resizeMode={isTablet ? 'contain' : 'cover'}
-        imageStyle={{ backgroundColor: '#000' }}
-      >
-        {/* Dark overlay for readability */}
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'flex-end' }}>
+  const overlayContent = (
+    <>
           {/* Summit Staffing text */}
           <View style={{ position: 'absolute', top: 70, left: 0, right: 0, alignItems: 'center' }}>
             <Text style={{
@@ -96,8 +87,38 @@ export function WelcomeScreen({ navigation }) {
               </Text>
             </Pressable>
           </View>
+    </>
+  );
+
+  return (
+    <View style={{ flex: 1, backgroundColor: '#000' }}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+
+      {isTablet ? (
+        <View style={{ flex: 1, backgroundColor: '#000' }}>
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: height * 0.04 }}>
+            <Image
+              source={source}
+              style={{ width: width * 0.88, height: height * 0.52, maxHeight: height * 0.55 }}
+              resizeMode="contain"
+            />
+          </View>
+          <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'flex-end' }} pointerEvents="box-none">
+            {overlayContent}
+          </View>
         </View>
-      </ImageBackground>
+      ) : (
+        <ImageBackground
+          source={source}
+          style={{ flex: 1, width: '100%', height: '100%' }}
+          resizeMode="cover"
+          imageStyle={{ backgroundColor: '#000' }}
+        >
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'flex-end' }}>
+            {overlayContent}
+          </View>
+        </ImageBackground>
+      )}
     </View>
   );
 }

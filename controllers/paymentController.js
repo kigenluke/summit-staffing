@@ -4,14 +4,19 @@ const pool = require('../config/database');
 const {
   stripe,
   resolveAppBaseUrl,
+  useCustomConnect,
+  createCustomWorkerAccount,
+  attachAustralianBankAccount,
+  listWorkerBankAccounts,
   createConnectedAccount,
   createAccountLink,
   createAccountLoginLink,
   createPaymentIntent,
   createCheckoutSession,
   createTransfer,
-  verifyWebhookSignature
+  verifyWebhookSignature,
 } = require('../services/stripeService');
+const { validateAustralianBankDetails, formatBsbDisplay } = require('../utils/bankAccount');
 const { userFacingPaymentMessage } = require('../utils/userFacingPaymentError');
 const { classifyStripeSecretKey } = require('../utils/stripeKeyValidation');
 const { stripeActionHint, isStaleConnectAccountError } = require('../utils/paymentErrorHints');
@@ -121,6 +126,14 @@ const ensurePaymentRecordForIntent = async (paymentIntentId, paymentIntent, opti
 
 const createConnectAccount = async (req, res) => {
   if (!ensureStripeConfigured(res)) return;
+
+  if (useCustomConnect()) {
+    return res.status(400).json({
+      ok: false,
+      error: 'Add your BSB and account number below. Payouts are set up in the app — no Stripe login required.',
+      use_in_app_bank_form: true,
+    });
+  }
 
   let workerRes;
   try {
@@ -302,16 +315,39 @@ const getAccountStatus = async (req, res) => {
       throw retrieveErr;
     }
 
-    const onboardingComplete = Boolean(account.details_submitted) && Boolean(account.charges_enabled) && Boolean(account.payouts_enabled);
+    let bankAccount = null;
+    try {
+      const banks = await listWorkerBankAccounts(accountId);
+      const primary = banks.find((b) => b.default_for_currency) || banks[0];
+      if (primary) {
+        const bsbDigits = String(primary.routing_number || '').replace(/\D/g, '');
+        bankAccount = {
+          last4: primary.last4,
+          bsb_display: bsbDigits.length === 6 ? formatBsbDisplay(bsbDigits) : null,
+          account_holder_name: primary.account_holder_name || null,
+        };
+      }
+    } catch (_) {
+      bankAccount = null;
+    }
+
+    const transfersActive = account.capabilities?.transfers === 'active';
+    const isCustom = account.type === 'custom';
+    const onboardingComplete = isCustom
+      ? Boolean(bankAccount?.last4) && (transfersActive || account.payouts_enabled)
+      : Boolean(account.details_submitted) && Boolean(account.charges_enabled) && Boolean(account.payouts_enabled);
 
     return res.status(200).json({
       ok: true,
       hasAccount: true,
       accountId,
+      connect_mode: useCustomConnect() ? 'custom' : 'express',
       onboardingComplete,
       charges_enabled: account.charges_enabled,
       payouts_enabled: account.payouts_enabled,
       details_submitted: account.details_submitted,
+      transfers_enabled: transfersActive,
+      bank_account: bankAccount,
       account: {
         id: account.id,
         country: account.country,
@@ -322,10 +358,90 @@ const getAccountStatus = async (req, res) => {
         details_submitted: account.details_submitted,
         charges_enabled: account.charges_enabled,
         payouts_enabled: account.payouts_enabled,
-      }
+      },
     });
   } catch (err) {
     return res.status(500).json({ ok: false, error: 'Failed to get Stripe account status' });
+  }
+};
+
+/** Worker: save AU bank details in-app (Stripe Custom Connect — BSB never stored in our DB). */
+const saveWorkerBankDetails = async (req, res) => {
+  if (!ensureStripeConfigured(res)) return;
+  if (respondValidation(req, res)) return;
+
+  const validated = validateAustralianBankDetails(req.body);
+  if (!validated.ok) {
+    return res.status(400).json({ ok: false, error: validated.error });
+  }
+
+  try {
+    const workerRes = await pool.query(
+      `SELECT w.id, w.user_id, w.stripe_account_id, w.first_name, w.last_name, u.email
+       FROM workers w
+       JOIN users u ON u.id = w.user_id
+       WHERE w.user_id = $1
+       LIMIT 1`,
+      [req.user.userId]
+    );
+    if (workerRes.rowCount === 0) {
+      return res.status(403).json({ ok: false, error: 'Worker profile not found.' });
+    }
+    const worker = workerRes.rows[0];
+
+    let accountId = worker.stripe_account_id;
+    if (accountId) {
+      try {
+        const existing = await stripe.accounts.retrieve(accountId);
+        if (existing.type === 'express') {
+          accountId = null;
+        }
+      } catch (e) {
+        if (isStaleConnectAccountError(e)) accountId = null;
+        else throw e;
+      }
+    }
+
+    const clientIp = req.ip || req.headers['x-forwarded-for']?.split(',')[0]?.trim() || '127.0.0.1';
+
+    if (!accountId) {
+      const account = await createCustomWorkerAccount({
+        email: worker.email,
+        firstName: worker.first_name,
+        lastName: worker.last_name,
+        tosAcceptanceIp: clientIp,
+      });
+      accountId = account.id;
+      await pool.query('UPDATE workers SET stripe_account_id = $2, updated_at = now() WHERE id = $1', [
+        worker.id,
+        accountId,
+      ]);
+    }
+
+    const bank = await attachAustralianBankAccount(accountId, {
+      accountHolderName: validated.account_holder_name,
+      bsb: validated.bsb,
+      accountNumber: validated.account_number,
+    });
+
+    return res.status(200).json({
+      ok: true,
+      accountId,
+      bank_account: {
+        last4: bank.last4,
+        bsb_display: formatBsbDisplay(validated.bsb),
+        account_holder_name: validated.account_holder_name,
+      },
+      message: 'Bank account saved. You can receive payouts when shifts are paid.',
+    });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('saveWorkerBankDetails:', err);
+    return res.status(500).json({
+      ok: false,
+      error: userFacingPaymentMessage(pickErrorMessage(err) || err, 500) || 'Could not save bank details.',
+      hint: stripeActionHint(err),
+    });
   }
 };
 
@@ -1062,4 +1178,5 @@ module.exports = {
   listCustomerPaymentMethods,
   detachCustomerPaymentMethod,
   authorizeBooking: authorizeBookingHandler,
+  saveWorkerBankDetails,
 };
