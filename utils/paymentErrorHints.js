@@ -49,6 +49,14 @@ function stripeActionHint(err) {
     );
   }
 
+  if (/collecting requirements|responsibilities for collecting/i.test(msg)) {
+    return (
+      'Stripe Connect Custom is not fully enabled on the platform account. ' +
+      'Dashboard → Settings → Connect → enable Custom accounts (Australia) and complete platform setup. ' +
+      'Until then, use Open Stripe when the app offers it.'
+    );
+  }
+
   if (/connect|platform|capabilities|not enabled/i.test(msg)) {
     return 'In Stripe Dashboard, complete Connect setup: Settings → Connect → get started (Australia).';
   }

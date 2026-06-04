@@ -375,6 +375,7 @@ const saveWorkerBankDetails = async (req, res) => {
     return res.status(400).json({ ok: false, error: validated.error });
   }
 
+  let worker = null;
   try {
     const workerRes = await pool.query(
       `SELECT w.id, w.user_id, w.stripe_account_id, w.first_name, w.last_name, u.email
@@ -387,7 +388,7 @@ const saveWorkerBankDetails = async (req, res) => {
     if (workerRes.rowCount === 0) {
       return res.status(403).json({ ok: false, error: 'Worker profile not found.' });
     }
-    const worker = workerRes.rows[0];
+    worker = workerRes.rows[0];
 
     let accountId = worker.stripe_account_id;
     if (accountId) {
@@ -437,6 +438,43 @@ const saveWorkerBankDetails = async (req, res) => {
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('saveWorkerBankDetails:', err);
+    const rawMsg = pickErrorMessage(err).toLowerCase();
+    const needsPlatformConnect =
+      /collecting requirements|responsibilities for collecting|custom accounts are not enabled/i.test(rawMsg);
+
+    if (needsPlatformConnect && worker) {
+      try {
+        let fallbackAccountId = worker.stripe_account_id;
+        if (fallbackAccountId) {
+          try {
+            const ex = await stripe.accounts.retrieve(fallbackAccountId);
+            if (ex.type === 'custom') fallbackAccountId = null;
+          } catch (_) {
+            fallbackAccountId = null;
+          }
+        }
+        if (!fallbackAccountId) {
+          const acct = await createConnectedAccount(worker.email);
+          fallbackAccountId = acct.id;
+          await pool.query('UPDATE workers SET stripe_account_id = $2, updated_at = now() WHERE id = $1', [
+            worker.id,
+            fallbackAccountId,
+          ]);
+        }
+        const link = await createAccountLink(fallbackAccountId);
+        return res.status(503).json({
+          ok: false,
+          error:
+            'In-app bank setup is not enabled on Stripe yet. Tap Open Stripe to add your bank account there.',
+          hint: stripeActionHint(err),
+          express_onboarding_url: link.url,
+        });
+      } catch (fallbackErr) {
+        // eslint-disable-next-line no-console
+        console.error('saveWorkerBankDetails express fallback:', fallbackErr);
+      }
+    }
+
     return res.status(500).json({
       ok: false,
       error: userFacingPaymentMessage(pickErrorMessage(err) || err, 500) || 'Could not save bank details.',

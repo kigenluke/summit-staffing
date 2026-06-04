@@ -23,14 +23,13 @@ const resolveAppBaseUrl = () => {
 const useCustomConnect = () => String(process.env.STRIPE_CONNECT_MODE || 'custom').toLowerCase() !== 'express';
 
 const createCustomWorkerAccount = async ({ email, firstName, lastName, tosAcceptanceIp }) => {
-  const payload = {
-    type: 'custom',
+  const base = {
     country: 'AU',
     email: String(email || '').trim(),
+    business_type: 'individual',
     capabilities: {
       transfers: { requested: true },
     },
-    business_type: 'individual',
     individual: {
       first_name: String(firstName || '').trim() || 'Worker',
       last_name: String(lastName || '').trim() || 'User',
@@ -39,23 +38,57 @@ const createCustomWorkerAccount = async ({ email, firstName, lastName, tosAccept
     tos_acceptance: {
       date: Math.floor(Date.now() / 1000),
       ip: tosAcceptanceIp || '127.0.0.1',
+      service_agreement: 'recipient',
+    },
+    settings: {
+      payouts: {
+        schedule: { interval: 'daily' },
+      },
     },
   };
-  return stripe.accounts.create(payload);
+
+  try {
+    return await stripe.accounts.create({
+      type: 'custom',
+      controller: {
+        stripe_dashboard: { type: 'none' },
+        fees: { payer: 'application' },
+        losses: { payments: 'application' },
+        requirement_collection: 'application',
+      },
+      ...base,
+    });
+  } catch (_) {
+    return stripe.accounts.create({ type: 'custom', ...base });
+  }
 };
 
 const attachAustralianBankAccount = async (accountId, { accountHolderName, bsb, accountNumber }) => {
-  return stripe.accounts.createExternalAccount(accountId, {
-    external_account: {
-      object: 'bank_account',
-      country: 'AU',
-      currency: 'aud',
-      account_holder_name: accountHolderName,
-      routing_number: String(bsb).replace(/\D/g, ''),
-      account_number: String(accountNumber).replace(/\D/g, ''),
-    },
-    default_for_currency: true,
-  });
+  const routing = String(bsb).replace(/\D/g, '');
+  const accountNum = String(accountNumber).replace(/\D/g, '');
+  const bankPayload = {
+    country: 'AU',
+    currency: 'aud',
+    account_holder_name: accountHolderName,
+    routing_number: routing,
+    account_number: accountNum,
+  };
+
+  try {
+    const token = await stripe.tokens.create({ bank_account: bankPayload });
+    return stripe.accounts.createExternalAccount(accountId, {
+      external_account: token.id,
+      default_for_currency: true,
+    });
+  } catch (_) {
+    return stripe.accounts.createExternalAccount(accountId, {
+      external_account: {
+        object: 'bank_account',
+        ...bankPayload,
+      },
+      default_for_currency: true,
+    });
+  }
 };
 
 const listWorkerBankAccounts = async (accountId) => {

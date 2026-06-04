@@ -183,8 +183,30 @@ export function PaymentsScreen() {
         account_number: acct,
       });
       if (error) {
-        const detail = typeof error?.response?.error === 'string' ? error.response.error : error.message;
-        const hint = typeof error?.response?.hint === 'string' ? error.response.hint : '';
+        const res = error?.response;
+        const detail = typeof res?.error === 'string' ? res.error : error.message;
+        const hint = typeof res?.hint === 'string' ? res.hint : '';
+        const expressUrl = res?.express_onboarding_url;
+        if (expressUrl) {
+          Alert.alert(
+            'Complete setup in Stripe',
+            [detail, hint].filter(Boolean).join('\n\n') || 'Open Stripe to add your bank account for payouts.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Open Stripe',
+                onPress: async () => {
+                  try {
+                    await Linking.openURL(expressUrl);
+                  } catch (_) {
+                    Alert.alert('Error', 'Could not open Stripe.');
+                  }
+                },
+              },
+            ],
+          );
+          return;
+        }
         Alert.alert('Could not save bank details', [detail, hint].filter(Boolean).join('\n\n'));
         return;
       }
@@ -305,7 +327,8 @@ export function PaymentsScreen() {
                   onChangeText={setBankAccountNumber}
                   placeholder="Account number"
                   keyboardType="number-pad"
-                  secureTextEntry
+                  autoComplete="off"
+                  textContentType="none"
                   maxLength={9}
                   style={{
                     borderWidth: 1,

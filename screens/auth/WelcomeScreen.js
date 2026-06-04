@@ -1,17 +1,17 @@
 /**
  * Summit Staffing – Welcome / Landing Screen
- * Full-screen hero image with sign-up and log-in buttons.
+ * Portrait hero (both subjects centered) on phones; landscape original on wide screens.
  */
-import React, { useEffect } from 'react';
-import { View, Text, Pressable, ImageBackground, Image, StatusBar, useWindowDimensions, Platform, StyleSheet } from 'react-native';
+import React, { useEffect, useMemo } from 'react';
+import { View, Text, Pressable, ImageBackground, StatusBar, useWindowDimensions, Platform } from 'react-native';
 import { Colors, Spacing, Typography, Radius } from '../../constants/theme.js';
 
-// Import works in both Vite (web → URL string) and Metro (native → asset id)
-import welcomeImage from '../../welcome.jpg';
+import welcomeLandscape from '../../welcome.jpg';
+import welcomePortrait from '../../welcome-hero.jpg';
 
 export function WelcomeScreen({ navigation }) {
   const { width, height } = useWindowDimensions();
-  const isTablet = Math.min(width, height) >= 768;
+  const isPortraitLayout = height >= width;
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
@@ -28,43 +28,82 @@ export function WelcomeScreen({ navigation }) {
     } catch (_) {}
   }, [navigation]);
 
-  // Vite gives string URL; Metro gives number. ImageBackground accepts both.
-  const source = typeof welcomeImage === 'string' ? { uri: welcomeImage } : welcomeImage;
+  const source = useMemo(() => {
+    const asset = isPortraitLayout ? welcomePortrait : welcomeLandscape;
+    return typeof asset === 'string' ? { uri: asset } : asset;
+  }, [isPortraitLayout]);
 
-  const overlayContent = (
-    <>
-          {/* Summit Staffing text */}
-          <View style={{ position: 'absolute', top: 70, left: 0, right: 0, alignItems: 'center' }}>
-            <Text style={{
-              fontSize: 34, fontWeight: Typography.fontWeight.bold, color: '#FFFFFF',
-              textShadowColor: 'rgba(0,0,0,0.6)', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 6,
-              letterSpacing: 1,
-            }}>
+  const imageStyle =
+    Platform.OS === 'web'
+      ? {
+          width: '100%',
+          height: '100%',
+          minHeight: '100vh',
+          objectFit: 'cover',
+          objectPosition: 'center center',
+        }
+      : { width, height };
+
+  return (
+    <View style={{ flex: 1, width: '100%', height: '100%', backgroundColor: '#000' }}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+
+      <ImageBackground
+        source={source}
+        style={{ flex: 1, width: '100%', height: '100%' }}
+        resizeMode="cover"
+        imageStyle={imageStyle}
+      >
+        <View style={{ flex: 1, width: '100%', backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-end' }}>
+          <View style={{ position: 'absolute', top: 56, left: 0, right: 0, alignItems: 'center', paddingHorizontal: Spacing.md }}>
+            <Text
+              style={{
+                fontSize: 32,
+                fontWeight: Typography.fontWeight.bold,
+                color: '#FFFFFF',
+                textShadowColor: 'rgba(0,0,0,0.75)',
+                textShadowOffset: { width: 0, height: 2 },
+                textShadowRadius: 8,
+                letterSpacing: 1,
+                textAlign: 'center',
+              }}
+            >
               Summit Staffing
             </Text>
-            <Text style={{
-              marginTop: Spacing.sm,
-              fontSize: Typography.fontSize.base,
-              fontWeight: Typography.fontWeight.semibold,
-              color: 'rgba(255,255,255,0.95)',
-              textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4,
-            }}>
+            <Text
+              style={{
+                marginTop: Spacing.sm,
+                fontSize: Typography.fontSize.sm,
+                fontWeight: Typography.fontWeight.semibold,
+                color: 'rgba(255,255,255,0.95)',
+                textShadowColor: 'rgba(0,0,0,0.65)',
+                textShadowOffset: { width: 0, height: 1 },
+                textShadowRadius: 6,
+                textAlign: 'center',
+              }}
+            >
               Trusted support, Australia-wide
             </Text>
           </View>
 
-          {/* Bottom buttons */}
-          <View style={{
-            paddingHorizontal: Spacing.lg,
-            paddingTop: Spacing.xl,
-            paddingBottom: Spacing.xxl + 20,
-            alignItems: 'center',
-          }}>
+          <View
+            style={{
+              paddingHorizontal: Spacing.lg,
+              paddingTop: Spacing.md,
+              paddingBottom: Spacing.xxl + 16,
+              alignItems: 'center',
+            }}
+          >
             <Pressable
               onPress={() => navigation.navigate('SignUpRoleChoice')}
               style={({ pressed }) => ({
-                width: '100%', backgroundColor: Colors.primary, paddingVertical: 16,
-                borderRadius: Radius.md, alignItems: 'center', marginBottom: Spacing.md,
+                width: '100%',
+                maxWidth: 400,
+                backgroundColor: Colors.primary,
+                paddingVertical: 16,
+                borderRadius: Radius.md,
+                alignItems: 'center',
+                marginBottom: Spacing.md,
                 opacity: pressed ? 0.85 : 1,
               })}
             >
@@ -76,9 +115,14 @@ export function WelcomeScreen({ navigation }) {
             <Pressable
               onPress={() => navigation.navigate('Login')}
               style={({ pressed }) => ({
-                width: '100%', borderWidth: 2, borderColor: '#FFFFFF',
-                paddingVertical: 14, borderRadius: Radius.md, alignItems: 'center',
-                backgroundColor: 'rgba(255,255,255,0.15)',
+                width: '100%',
+                maxWidth: 400,
+                borderWidth: 2,
+                borderColor: '#FFFFFF',
+                paddingVertical: 14,
+                borderRadius: Radius.md,
+                alignItems: 'center',
+                backgroundColor: 'rgba(255,255,255,0.12)',
                 opacity: pressed ? 0.85 : 1,
               })}
             >
@@ -87,38 +131,8 @@ export function WelcomeScreen({ navigation }) {
               </Text>
             </Pressable>
           </View>
-    </>
-  );
-
-  return (
-    <View style={{ flex: 1, backgroundColor: '#000' }}>
-      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-
-      {isTablet ? (
-        <View style={{ flex: 1, backgroundColor: '#000' }}>
-          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: height * 0.04 }}>
-            <Image
-              source={source}
-              style={{ width: width * 0.88, height: height * 0.52, maxHeight: height * 0.55 }}
-              resizeMode="contain"
-            />
-          </View>
-          <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'flex-end' }} pointerEvents="box-none">
-            {overlayContent}
-          </View>
         </View>
-      ) : (
-        <ImageBackground
-          source={source}
-          style={{ flex: 1, width: '100%', height: '100%' }}
-          resizeMode="cover"
-          imageStyle={{ backgroundColor: '#000' }}
-        >
-          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'flex-end' }}>
-            {overlayContent}
-          </View>
-        </ImageBackground>
-      )}
+      </ImageBackground>
     </View>
   );
 }

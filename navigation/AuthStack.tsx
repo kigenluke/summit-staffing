@@ -54,7 +54,11 @@ export const AuthStack = () => {
         ) : null,
       })}
     >
-      <Stack.Screen name="Welcome" component={WelcomeScreen} options={{ headerShown: false }} />
+      <Stack.Screen
+        name="Welcome"
+        component={WelcomeScreen}
+        options={{ headerShown: false, contentStyle: { backgroundColor: '#000000' } }}
+      />
       <Stack.Screen name="Login" component={LoginScreen} options={{ title: 'Sign in', headerShown: true }} />
       <Stack.Screen name="SignUpRoleChoice" component={SignUpRoleChoice} options={{ title: 'Sign up' }} />
       <Stack.Screen name="Register" component={RegisterScreen} options={{ title: 'Sign up' }} />
