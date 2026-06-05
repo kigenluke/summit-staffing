@@ -124,109 +124,15 @@ const ensurePaymentRecordForIntent = async (paymentIntentId, paymentIntent, opti
   return inserted.rows[0];
 };
 
+/** @deprecated Express onboarding — workers use POST /connect/bank-details (Custom Connect). */
 const createConnectAccount = async (req, res) => {
   if (!ensureStripeConfigured(res)) return;
-
-  if (useCustomConnect()) {
-    return res.status(400).json({
-      ok: false,
-      error: 'Add your BSB and account number below. Payouts are set up in the app — no Stripe login required.',
-      use_in_app_bank_form: true,
-    });
-  }
-
-  let workerRes;
-  try {
-    workerRes = await pool.query(
-      `SELECT w.id, w.user_id, w.stripe_account_id, u.email
-       FROM workers w
-       JOIN users u ON u.id = w.user_id
-       WHERE w.user_id = $1
-       LIMIT 1`,
-      [req.user.userId]
-    );
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('createConnectAccount fetch worker:', err);
-    return res.status(500).json({
-      ok: false,
-      error: userFacingPaymentMessage(pickErrorMessage(err) || err, 500) || 'Could not load your profile. Please try again.',
-    });
-  }
-
-  if (workerRes.rowCount === 0) {
-    return res.status(403).json({
-      ok: false,
-      error: 'Worker profile not found. Complete worker setup (profile / Manage) before connecting Stripe.',
-    });
-  }
-
-  const worker = workerRes.rows[0];
-  let accountId = worker.stripe_account_id;
-
-  if (!accountId) {
-    let account;
-    try {
-      account = await createConnectedAccount(worker.email);
-      accountId = account.id;
-    } catch (err) {
-      console.error('createConnectAccount Stripe accounts.create:', err);
-      return res.status(500).json({
-        ok: false,
-        error: userFacingPaymentMessage(pickErrorMessage(err) || err, 500) || 'Could not connect Stripe. Please try again.',
-        hint: stripeActionHint(err),
-      });
-    }
-
-    try {
-      await pool.query('UPDATE workers SET stripe_account_id = $2, updated_at = now() WHERE id = $1', [worker.id, accountId]);
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error('createConnectAccount save stripe_account_id:', err);
-      return res.status(500).json({
-        ok: false,
-        error: userFacingPaymentMessage(pickErrorMessage(err) || err, 500) || 'Could not save Stripe connection. Please try again.',
-      });
-    }
-  }
-
-  const makeOnboardingLink = async (acctId) => {
-    return createAccountLink(acctId);
-  };
-
-  let link;
-  try {
-    link = await makeOnboardingLink(accountId);
-  } catch (err) {
-    if (isStaleConnectAccountError(err)) {
-      try {
-        const recreated = await createConnectedAccount(worker.email);
-        accountId = recreated.id;
-        await pool.query('UPDATE workers SET stripe_account_id = $2, updated_at = now() WHERE id = $1', [worker.id, accountId]);
-        link = await makeOnboardingLink(accountId);
-        return res.status(200).json({ ok: true, accountId, onboardingUrl: link.url, recovered: true });
-      } catch (recoverErr) {
-        // eslint-disable-next-line no-console
-        console.error('createConnectAccount account recovery failed:', recoverErr);
-        return res.status(502).json({
-          ok: false,
-          error: userFacingPaymentMessage(pickErrorMessage(recoverErr) || recoverErr, 502) || 'Could not connect Stripe. Please try again.',
-        });
-      }
-    }
-
-    // eslint-disable-next-line no-console
-    console.error('createConnectAccount Stripe accountLinks.create:', err);
-    return res.status(502).json({
-      ok: false,
-      error: userFacingPaymentMessage(pickErrorMessage(err) || err, 502) || 'Could not open Stripe setup. Please try again.',
-      hint:
-        stripeActionHint(err)
-        || 'Set APP_URL on the server to your public https API URL (e.g. Railway URL), and STRIPE_SECRET_KEY to sk_live_... or sk_test_....',
-    });
-  }
-
-  return res.status(200).json({ ok: true, accountId, onboardingUrl: link.url });
+  return res.status(400).json({
+    ok: false,
+    error: 'Enter your BSB and account number on this screen and tap Save bank account. No Stripe login is required.',
+    use_in_app_bank_form: true,
+    connect_mode: 'custom',
+  });
 };
 
 /**
@@ -285,6 +191,8 @@ const getAccountStatus = async (req, res) => {
         hasWorkerProfile: false,
         hasAccount: false,
         onboardingComplete: false,
+        connect_mode: 'custom',
+        preferred_setup: 'in_app_bank',
         charges_enabled: false,
         payouts_enabled: false,
         details_submitted: false,
@@ -293,7 +201,13 @@ const getAccountStatus = async (req, res) => {
 
     const accountId = workerRes.rows[0].stripe_account_id;
     if (!accountId) {
-      return res.status(200).json({ ok: true, hasAccount: false, onboardingComplete: false });
+      return res.status(200).json({
+        ok: true,
+        hasAccount: false,
+        onboardingComplete: false,
+        connect_mode: 'custom',
+        preferred_setup: 'in_app_bank',
+      });
     }
 
     let account;
@@ -341,7 +255,8 @@ const getAccountStatus = async (req, res) => {
       ok: true,
       hasAccount: true,
       accountId,
-      connect_mode: useCustomConnect() ? 'custom' : 'express',
+      connect_mode: isCustom ? 'custom' : 'express',
+      preferred_setup: 'in_app_bank',
       onboardingComplete,
       charges_enabled: account.charges_enabled,
       payouts_enabled: account.payouts_enabled,
@@ -442,7 +357,7 @@ const saveWorkerBankDetails = async (req, res) => {
     const needsPlatformConnect =
       /collecting requirements|responsibilities for collecting|custom accounts are not enabled/i.test(rawMsg);
 
-    if (needsPlatformConnect && worker) {
+    if (needsPlatformConnect && worker && !useCustomConnect()) {
       try {
         let fallbackAccountId = worker.stripe_account_id;
         if (fallbackAccountId) {

@@ -203,12 +203,12 @@ const NDIS_OTHER_RATE_HINTS = [
 ];
 
 const NDIS_PERSONAL_CARE_RATE_HINTS = [
-  { label: 'Weekday 6am–8pm', rate: '$70.23/hr' },
-  { label: 'Weekday after 8pm–midnight', rate: '$77.38/hr' },
-  { label: 'Weekday midnight–6am', rate: '$78.81/hr' },
-  { label: 'Saturday', rate: '$98.83/hr' },
-  { label: 'Sunday', rate: '$127.43/hr' },
-  { label: 'NSW public holiday', rate: '$156.03/hr' },
+  { label: 'Weekday 6am–8pm', rate: '$52.00 – $70.23/hr' },
+  { label: 'Weekday 8pm–midnight', rate: '$57.00 – $77.38/hr' },
+  { label: 'Weekday midnight–6am', rate: '$58.00 – $78.81/hr' },
+  { label: 'Saturday', rate: '$73.00 – $98.83/hr' },
+  { label: 'Sunday', rate: '$93.00 – $127.43/hr' },
+  { label: 'NSW public holiday', rate: '$117.00 – $156.03/hr' },
   { label: 'Sleepover (flat / night)', rate: '$297.60' },
 ];
 
@@ -622,7 +622,10 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo }) {
       return;
     }
     if (offered > 0) {
-      const rateCheck = validateParticipantOfferedHourlyRate(serviceType, start_time, offered, { highIntensity: highIntensitySupport });
+      const rateCheck = validateParticipantOfferedHourlyRate(serviceType, start_time, offered, {
+        highIntensity: highIntensitySupport,
+        endTimeIso: end_time,
+      });
       if (!rateCheck.ok) {
         const rateMsg = rateCheck.error || `Allowed range $${Number(rateCheck.minimum).toFixed(2)} – $${Number(rateCheck.maximum).toFixed(2)}/hr.`;
         const belowMax = rateCheck.maximum != null && offered > Number(rateCheck.maximum) + 1e-6;
@@ -748,17 +751,46 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo }) {
       };
     }
     try {
-      const iso = combineDateAndTimeIso(date, startTime || '9:00 AM', 0);
-      if (!iso || !serviceType) {
+      const startIso = combineDateAndTimeIso(date, startTime || '9:00 AM', 0);
+      const startMins = parseTimeToMinutes(startTime || '9:00 AM');
+      const endMins = parseTimeToMinutes(endTime || '5:00 PM');
+      const endDayOffset = startMins != null && endMins != null && endMins <= startMins ? 1 : 0;
+      const endIso = combineDateAndTimeIso(date, endTime || '5:00 PM', endDayOffset);
+      if (!startIso || !endIso || !serviceType) {
         return {
           borderColor: Colors.border,
           status: 'neutral',
-          main: 'Select service, date, and shift start to check your rate.',
+          main: 'Select service, date, and shift times to check your rate.',
           detail: null,
         };
       }
-      const min = getNdisMinimumHourlyRate(serviceType, iso);
-      const max = getNdisMaximumHourlyRate(serviceType, iso, { highIntensity: highIntensitySupport });
+      const min = getNdisMinimumHourlyRate(serviceType, startIso, endIso);
+      const max = getNdisMaximumHourlyRate(serviceType, startIso, {
+        highIntensity: highIntensitySupport,
+        endTimeIso: endIso,
+      });
+      const rateCheck = validateParticipantOfferedHourlyRate(serviceType, startIso, offered, {
+        highIntensity: highIntensitySupport,
+        endTimeIso: endIso,
+      });
+      if (!rateCheck.ok && rateCheck.error) {
+        if (offered + 1e-6 < min) {
+          return {
+            borderColor: Colors.status.error,
+            status: 'low',
+            main: `Below minimum ($${min.toFixed(2)}/hr)`,
+            detail: rateCheck.error,
+          };
+        }
+        if (offered > max + 1e-6) {
+          return {
+            borderColor: Colors.status.warning,
+            status: 'high',
+            main: `Above maximum ($${max.toFixed(2)}/hr)`,
+            detail: rateCheck.error,
+          };
+        }
+      }
       if (offered + 1e-6 < min) {
         return {
           borderColor: Colors.status.error,
@@ -778,13 +810,13 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo }) {
       return {
         borderColor: Colors.border,
         status: 'ok',
-        main: `In range for this start time`,
-        detail: `$${min.toFixed(2)} – $${max.toFixed(2)}/hr${Math.abs(min - max) < 0.005 ? ' (single cap)' : ''}`,
+        main: 'In range for this shift',
+        detail: `$${min.toFixed(2)} – $${max.toFixed(2)}/hr (all time segments). You may offer below the NDIS cap to save budget.`,
       };
     } catch (_) {
       return { borderColor: Colors.border, status: 'neutral', main: null, detail: null };
     }
-  }, [hourlyRate, date, startTime, serviceType, highIntensitySupport, includeSleepover]);
+  }, [hourlyRate, date, startTime, endTime, serviceType, highIntensitySupport, includeSleepover]);
 
   const renderCommonDetailsFields = () => (
     <>
@@ -821,7 +853,7 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo }) {
 
       <Text style={labelStyle}>Hourly labour rate ($) *</Text>
       <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.secondary, marginTop: -Spacing.xs, marginBottom: Spacing.sm }}>
-        NDIS min/max apply from your service type and shift start (Sydney). Use $0 only for sleepover + travel only; high-intensity raises weekday daytime cap.
+        Offer between the minimum (platform floor) and NDIS maximum for your shift times (Sydney). Long shifts crossing evening/midnight use the tightest band across all segments. High-intensity raises weekday 6am–8pm cap to $75.98/hr.
       </Text>
       <TextInput
         style={[

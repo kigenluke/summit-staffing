@@ -16,7 +16,6 @@ import { ComplianceDateField, fromYmd } from './ComplianceDateField.js';
 import {
   getComplianceProgress,
   getLatestDocumentForType,
-  DOC_TYPE_LABELS,
 } from '../utils/complianceProgress.js';
 import { formatDateDMY } from '../utils/dateFormat.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
@@ -133,17 +132,22 @@ function StatusBadge({ status }) {
 
 function DocumentTypeCard({ docType, doc, selected, required, onSelect }) {
   const status = doc?.status || 'missing';
+  const isMissing = status === 'missing';
 
   return (
     <Pressable
       onPress={() => onSelect(docType.key)}
+      accessibilityRole="button"
+      accessibilityLabel={`${docType.label}. ${isMissing ? 'Tap to upload' : 'Tap to view or replace'}`}
       style={({ pressed }) => ({
         borderRadius: Radius.lg,
         padding: Spacing.md,
-        marginBottom: Spacing.sm,
+        marginBottom: selected ? 0 : Spacing.sm,
         backgroundColor: selected ? `${Colors.primary}12` : Colors.surface,
         borderWidth: 1.5,
         borderColor: selected ? Colors.primary : Colors.border,
+        borderBottomLeftRadius: selected ? Radius.sm : Radius.lg,
+        borderBottomRightRadius: selected ? Radius.sm : Radius.lg,
         opacity: pressed ? 0.92 : 1,
         ...Shadows.sm,
       })}
@@ -162,6 +166,11 @@ function DocumentTypeCard({ docType, doc, selected, required, onSelect }) {
           <View style={{ marginTop: 6 }}>
             <StatusBadge status={status} />
           </View>
+          {isMissing && !selected ? (
+            <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.primary, marginTop: 6, fontWeight: Typography.fontWeight.semibold }}>
+              Tap + or anywhere on this row to upload
+            </Text>
+          ) : null}
           {doc?.expiry_date ? (
             <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: 4 }}>
               Expires {formatDateDMY(doc.expiry_date)}
@@ -206,35 +215,36 @@ function FileDropZone({ file, onFileSelected, disabled }) {
     if (next) applyFile(next);
   };
 
-  const pickNative = () => {
+  const guessMimeFromName = (name) => {
+    const lower = String(name || '').toLowerCase();
+    if (lower.endsWith('.pdf')) return 'application/pdf';
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+    return '';
+  };
+
+  const pickNative = async () => {
     if (disabled) return;
     try {
-      const pickerLib = require('react-native-image-picker');
-      const launch = pickerLib?.launchImageLibrary;
-      if (typeof launch !== 'function') {
-        Alert.alert('Unavailable', 'File picker is not available on this device.');
-        return;
-      }
-      launch(
-        { mediaType: 'photo', selectionLimit: 1 },
-        (response) => {
-          if (response?.didCancel) return;
-          if (response?.errorCode) {
-            Alert.alert('Error', response.errorMessage || 'Could not pick file');
-            return;
-          }
-          const asset = response?.assets?.[0];
-          if (!asset?.uri) return;
-          applyFile({
-            uri: asset.uri,
-            name: asset.fileName || `document_${Date.now()}.jpg`,
-            type: asset.type || 'image/jpeg',
-            size: asset.fileSize,
-          });
-        },
-      );
-    } catch (_) {
-      Alert.alert('Unavailable', 'File picker is not available right now.');
+      const { pick, types, isErrorWithCode, errorCodes } = require('@react-native-documents/picker');
+      const results = await pick({
+        type: [types.pdf, types.images],
+        allowMultiSelection: false,
+      });
+      const result = results?.[0];
+      if (!result?.uri) return;
+      const name = result.name || `document_${Date.now()}`;
+      const type = result.type || guessMimeFromName(name) || 'application/octet-stream';
+      applyFile({
+        uri: result.uri,
+        name,
+        type,
+        size: result.size,
+      });
+    } catch (err) {
+      if (isErrorWithCode?.(err) && err.code === errorCodes.OPERATION_CANCELED) return;
+      Alert.alert('Error', err?.message || 'Could not pick file');
     }
   };
 
@@ -326,12 +336,12 @@ function FileDropZone({ file, onFileSelected, disabled }) {
           opacity: disabled ? 0.6 : pressed ? 0.9 : 1,
         })}
       >
-        <Text style={{ fontSize: 28, marginBottom: Spacing.xs }}>📷</Text>
+        <Text style={{ fontSize: 28, marginBottom: Spacing.xs }}>📄</Text>
         <Text style={{ fontWeight: Typography.fontWeight.semibold, color: Colors.text.primary, textAlign: 'center' }}>
-          {file ? 'Tap to replace photo' : 'Tap to choose photo'}
+          {file ? 'Tap to replace file' : 'Tap to choose a file'}
         </Text>
         <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: 4, textAlign: 'center' }}>
-          JPG or PNG from your gallery. For PDF, use the web app.
+          PDF, JPG, or PNG from your device (max {MAX_FILE_MB} MB)
         </Text>
       </Pressable>
       {file ? (
@@ -348,6 +358,77 @@ function FileDropZone({ file, onFileSelected, disabled }) {
   );
 }
 
+function DocumentUploadSection({
+  label,
+  file,
+  onFileSelected,
+  issueDate,
+  expiryDate,
+  onIssueDateChange,
+  onExpiryDateChange,
+  onUpload,
+  uploading,
+}) {
+  const issueDateObj = fromYmd(issueDate);
+
+  return (
+    <View
+      style={{
+        marginBottom: Spacing.md,
+        padding: Spacing.lg,
+        borderRadius: Radius.lg,
+        borderTopLeftRadius: Radius.sm,
+        borderTopRightRadius: Radius.sm,
+        backgroundColor: Colors.surface,
+        borderWidth: 1.5,
+        borderColor: Colors.primary,
+        borderTopWidth: 0,
+        ...Shadows.sm,
+      }}
+    >
+      <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, fontSize: Typography.fontSize.lg, marginBottom: 4 }}>
+        Upload {label}
+      </Text>
+      <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: Spacing.md }}>
+        Choose a PDF or image below, then tap Upload document.
+      </Text>
+
+      <FileDropZone file={file} onFileSelected={onFileSelected} disabled={uploading} />
+
+      <View style={{ marginTop: Spacing.md, gap: Spacing.md }}>
+        <ComplianceDateField label="Issue date (optional)" value={issueDate} onChange={onIssueDateChange} />
+        <ComplianceDateField
+          label="Expiry date (optional)"
+          value={expiryDate}
+          onChange={onExpiryDateChange}
+          minDate={issueDateObj || undefined}
+        />
+      </View>
+
+      <Pressable
+        onPress={onUpload}
+        disabled={uploading || !file}
+        style={({ pressed }) => ({
+          marginTop: Spacing.lg,
+          backgroundColor: uploading || !file ? Colors.text.muted : Colors.primary,
+          borderRadius: Radius.md,
+          paddingVertical: Spacing.md,
+          alignItems: 'center',
+          flexDirection: 'row',
+          justifyContent: 'center',
+          gap: Spacing.sm,
+          opacity: pressed ? 0.9 : 1,
+        })}
+      >
+        {uploading ? <ActivityIndicator color={Colors.text.white} size="small" /> : null}
+        <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold, fontSize: Typography.fontSize.base }}>
+          {uploading ? 'Uploading…' : 'Upload document'}
+        </Text>
+      </Pressable>
+    </View>
+  );
+}
+
 export function ComplianceDocumentsPanel({
   docTypes,
   documents = [],
@@ -359,6 +440,8 @@ export function ComplianceDocumentsPanel({
   onSubmitVerification,
   title = 'Compliance documents',
   subtitle,
+  /** When set (e.g. from checklist), selects that type and opens upload below it */
+  focusDocumentType,
 }) {
   const requiredSet = useMemo(() => new Set(requiredTypes), [requiredTypes]);
   const progress = useMemo(() => getComplianceProgress(documents, requiredTypes), [documents, requiredTypes]);
@@ -378,9 +461,17 @@ export function ComplianceDocumentsPanel({
     if (firstMissing) setSelectedDocType(firstMissing);
   }, [firstMissing]);
 
-  const selectedLabel = DOC_TYPE_LABELS[selectedDocType] || docTypes.find((d) => d.key === selectedDocType)?.label || 'Document';
+  useEffect(() => {
+    if (!focusDocumentType) return;
+    if (docTypes.some((d) => d.key === focusDocumentType)) {
+      setSelectedDocType(focusDocumentType);
+      setSelectedFile(null);
+      setIssueDate('');
+      setExpiryDate('');
+    }
+  }, [focusDocumentType, docTypes]);
+
   const pct = progress.total ? Math.round((progress.uploadedCount / progress.total) * 100) : 0;
-  const issueDateObj = fromYmd(issueDate);
 
   const handleUpload = useCallback(async () => {
     if (!selectedDocType) {
@@ -435,82 +526,43 @@ export function ComplianceDocumentsPanel({
         Your documents
       </Text>
       <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: Spacing.md }}>
-        Tap a document to upload or replace it. Admin will review after you submit.
+        Tap a document (or the + icon) — the upload form opens right below it. Admin will review after you submit.
       </Text>
 
       {docTypes.map((dt) => {
         const doc = getLatestDocumentForType(documents, dt.key);
         const cardStatus = doc ? doc.status : 'missing';
+        const isSelected = selectedDocType === dt.key;
         return (
-          <DocumentTypeCard
-            key={dt.key}
-            docType={dt}
-            doc={doc ? { ...doc, status: cardStatus } : null}
-            selected={selectedDocType === dt.key}
-            required={requiredSet.has(dt.key)}
-            onSelect={(key) => {
-              setSelectedDocType(key);
-              setSelectedFile(null);
-            }}
-          />
+          <View key={dt.key}>
+            <DocumentTypeCard
+              docType={dt}
+              doc={doc ? { ...doc, status: cardStatus } : null}
+              selected={isSelected}
+              required={requiredSet.has(dt.key)}
+              onSelect={(key) => {
+                setSelectedDocType(key);
+                setSelectedFile(null);
+                setIssueDate('');
+                setExpiryDate('');
+              }}
+            />
+            {isSelected ? (
+              <DocumentUploadSection
+                label={dt.label}
+                file={selectedFile}
+                onFileSelected={setSelectedFile}
+                issueDate={issueDate}
+                expiryDate={expiryDate}
+                onIssueDateChange={setIssueDate}
+                onExpiryDateChange={setExpiryDate}
+                onUpload={handleUpload}
+                uploading={uploading}
+              />
+            ) : null}
+          </View>
         );
       })}
-
-      <View
-        style={{
-          marginTop: Spacing.md,
-          padding: Spacing.lg,
-          borderRadius: Radius.lg,
-          backgroundColor: Colors.surface,
-          borderWidth: 1,
-          borderColor: Colors.border,
-          ...Shadows.sm,
-        }}
-      >
-        <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, fontSize: Typography.fontSize.lg, marginBottom: 4 }}>
-          Upload {selectedLabel}
-        </Text>
-        <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: Spacing.md }}>
-          Clear photo or PDF scan. Optional dates help track expiry.
-        </Text>
-
-        <FileDropZone file={selectedFile} onFileSelected={setSelectedFile} disabled={uploading} />
-
-        <View style={{ marginTop: Spacing.md, gap: Spacing.md }}>
-          <ComplianceDateField
-            label="Issue date (optional)"
-            value={issueDate}
-            onChange={setIssueDate}
-          />
-          <ComplianceDateField
-            label="Expiry date (optional)"
-            value={expiryDate}
-            onChange={setExpiryDate}
-            minDate={issueDateObj || undefined}
-          />
-        </View>
-
-        <Pressable
-          onPress={handleUpload}
-          disabled={uploading || !selectedFile}
-          style={({ pressed }) => ({
-            marginTop: Spacing.lg,
-            backgroundColor: uploading || !selectedFile ? Colors.text.muted : Colors.primary,
-            borderRadius: Radius.md,
-            paddingVertical: Spacing.md,
-            alignItems: 'center',
-            flexDirection: 'row',
-            justifyContent: 'center',
-            gap: Spacing.sm,
-            opacity: pressed ? 0.9 : 1,
-          })}
-        >
-          {uploading ? <ActivityIndicator color={Colors.text.white} size="small" /> : null}
-          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold, fontSize: Typography.fontSize.base }}>
-            {uploading ? 'Uploading…' : 'Upload document'}
-          </Text>
-        </Pressable>
-      </View>
 
       <ComplianceSubmitPanel
         progress={progress}

@@ -20,10 +20,16 @@ const resolveAppBaseUrl = () => {
   return 'http://localhost:3000';
 };
 
+/** In-app BSB is the default; set STRIPE_CONNECT_MODE=express only for legacy testing. */
 const useCustomConnect = () => String(process.env.STRIPE_CONNECT_MODE || 'custom').toLowerCase() !== 'express';
 
+/**
+ * Custom Connect worker account (separate charges & transfers — no worker Stripe dashboard).
+ * Stripe minimum: type custom, country AU, transfers capability.
+ */
 const createCustomWorkerAccount = async ({ email, firstName, lastName, tosAcceptanceIp }) => {
-  const base = {
+  const payload = {
+    type: 'custom',
     country: 'AU',
     email: String(email || '').trim(),
     business_type: 'individual',
@@ -48,18 +54,17 @@ const createCustomWorkerAccount = async ({ email, firstName, lastName, tosAccept
   };
 
   try {
-    return await stripe.accounts.create({
-      type: 'custom',
+    return await stripe.accounts.create(payload);
+  } catch (minimalErr) {
+    return stripe.accounts.create({
+      ...payload,
       controller: {
         stripe_dashboard: { type: 'none' },
         fees: { payer: 'application' },
         losses: { payments: 'application' },
         requirement_collection: 'application',
       },
-      ...base,
     });
-  } catch (_) {
-    return stripe.accounts.create({ type: 'custom', ...base });
   }
 };
 

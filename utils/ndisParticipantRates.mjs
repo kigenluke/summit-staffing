@@ -1,32 +1,57 @@
 /**
- * NDIS-aligned min/max hourly rates, sleepover flat, and travel (non-labour) for participant offers.
- * Uses Australia/Sydney calendar for day-of-week, time-of-day, and NSW public holidays.
+ * NDIS-aligned min/max hourly rates (platform floor + government cap), sleepover, travel.
+ * Sydney calendar for day-of-week, time-of-day, NSW public holidays.
+ * Shifts crossing 6am / 8pm / midnight are split ("Midnight Splitter") for validation and totals.
  */
 
 const TRAVEL_NON_LABOUR_PER_KM = 0.99;
-
-/** NDIS sleepover allowance (per night, price guide snapshot). */
 const SLEEPOVER_FLAT_NIGHTLY = 297.6;
-
-/** Absolute floor when service type is unknown (safety buffer / general labour). */
 const GENERAL_MIN_HOURLY = 55.0;
-
-/** Weekday daytime “high intensity” cap (separate from standard $70.23 cap). */
 const HIGH_INTENSITY_WEEKDAY_DAYTIME_MAX = 75.98;
 
+/** Default floors/caps — override via NDIS_SHIFT_<TYPE>_MIN / _MAX env vars. */
+const DEFAULT_SHIFT_TYPES = {
+  weekday_day: { min: 52.0, max: 70.23 },
+  weekday_evening: { min: 57.0, max: 77.38 },
+  weekday_night: { min: 58.0, max: 78.81 },
+  saturday: { min: 73.0, max: 98.83 },
+  sunday: { min: 93.0, max: 127.43 },
+  public_holiday: { min: 117.0, max: 156.03 },
+};
+
+function envShiftLimit(typeId, bound) {
+  const key = `NDIS_SHIFT_${String(typeId).toUpperCase()}_${bound === 'min' ? 'MIN' : 'MAX'}`;
+  const raw = process.env[key];
+  if (raw == null || raw === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+function buildShiftTypesConfig() {
+  const out = {};
+  for (const [id, defaults] of Object.entries(DEFAULT_SHIFT_TYPES)) {
+    const min = envShiftLimit(id, 'min') ?? defaults.min;
+    const max = envShiftLimit(id, 'max') ?? defaults.max;
+    out[id] = { min, max };
+  }
+  return out;
+}
+
+const SHIFT_TYPES = buildShiftTypesConfig();
+
+/** @deprecated Use SHIFT_TYPES — kept for screens that reference RATES.* caps */
 const RATES = {
-  standardWeekdayDaytime: 70.23,
-  standardWeekdayEvening: 77.38,
-  standardWeekdayNight: 78.81,
-  standardSaturday: 98.83,
-  standardSunday: 127.43,
-  standardPublicHoliday: 156.03,
+  standardWeekdayDaytime: SHIFT_TYPES.weekday_day.max,
+  standardWeekdayEvening: SHIFT_TYPES.weekday_evening.max,
+  standardWeekdayNight: SHIFT_TYPES.weekday_night.max,
+  standardSaturday: SHIFT_TYPES.saturday.max,
+  standardSunday: SHIFT_TYPES.sunday.max,
+  standardPublicHoliday: SHIFT_TYPES.public_holiday.max,
   houseCleaningYard: 56.98,
   personalDomesticActivities: 59.06,
   registeredNurseWeekdayDaytime: 123.65,
 };
 
-/** Verified NSW public holidays (inclusive). Extend periodically from NSW Government / Fair Work. */
 const NSW_PUBLIC_HOLIDAY_YMD = new Set([
   '2025-01-01', '2025-01-27', '2025-04-18', '2025-04-19', '2025-04-20', '2025-04-21',
   '2025-04-25', '2025-06-09', '2025-08-04', '2025-10-06', '2025-12-25', '2025-12-26',
@@ -44,7 +69,7 @@ function pad2(n) {
   return String(n).padStart(2, '0');
 }
 
-/** @returns {{ ymd: string, hour: number, jsWeekday: number }} jsWeekday: 0=Sun … 6=Sat (Sydney calendar date) */
+/** @returns {{ ymd: string, hour: number, jsWeekday: number }} */
 function getSydneyYmdAndHour(isoOrDate) {
   const d = isoOrDate instanceof Date ? isoOrDate : new Date(isoOrDate);
   if (Number.isNaN(d.getTime())) return null;
@@ -65,8 +90,7 @@ function getSydneyYmdAndHour(isoOrDate) {
     weekday: 'short',
   }).format(d);
   const map = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-  const jsWeekday = map[wk] ?? 0;
-  return { ymd, hour, jsWeekday };
+  return { ymd, hour, jsWeekday: map[wk] ?? 0 };
 }
 
 function gregorianEasterSundayUtcNoon(year) {
@@ -88,23 +112,16 @@ function gregorianEasterSundayUtcNoon(year) {
 }
 
 function addUtcDays(dateUtcNoon, delta) {
-  const t = dateUtcNoon.getTime() + delta * 86400000;
-  return new Date(t);
+  return new Date(dateUtcNoon.getTime() + delta * 86400000);
 }
 
 function ymdFromUtcNoon(d) {
-  const y = d.getUTCFullYear();
-  const m = pad2(d.getUTCMonth() + 1);
-  const day = pad2(d.getUTCDate());
-  return `${y}-${m}-${day}`;
+  return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
 }
 
 function sydneyJsWeekdayOnCalendarDate(year, month1to12, day) {
   const d = new Date(Date.UTC(year, month1to12 - 1, day, 14, 0, 0));
-  const wk = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Australia/Sydney',
-    weekday: 'short',
-  }).format(d);
+  const wk = new Intl.DateTimeFormat('en-US', { timeZone: 'Australia/Sydney', weekday: 'short' }).format(d);
   const map = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
   return map[wk] ?? 0;
 }
@@ -112,11 +129,9 @@ function sydneyJsWeekdayOnCalendarDate(year, month1to12, day) {
 function buildDynamicNswHolidayYmds(year) {
   const out = new Set();
   const easterSun = gregorianEasterSundayUtcNoon(year);
-  const goodFri = addUtcDays(easterSun, -2);
-  const easterSat = addUtcDays(easterSun, -1);
-  const easterMon = addUtcDays(easterSun, 1);
-  [goodFri, easterSat, easterSun, easterMon].forEach((dt) => out.add(ymdFromUtcNoon(dt)));
-
+  [addUtcDays(easterSun, -2), addUtcDays(easterSun, -1), easterSun, addUtcDays(easterSun, 1)].forEach((dt) =>
+    out.add(ymdFromUtcNoon(dt)),
+  );
   const nthMonday = (monthIndex0, n) => {
     let count = 0;
     for (let day = 1; day <= 31; day++) {
@@ -129,29 +144,23 @@ function buildDynamicNswHolidayYmds(year) {
     }
     return null;
   };
-
   const kings = nthMonday(5, 2);
   const bank = nthMonday(7, 1);
   const labour = nthMonday(9, 1);
   if (kings) out.add(kings);
   if (bank) out.add(bank);
   if (labour) out.add(labour);
-
   out.add(`${year}-01-01`);
   out.add(`${year}-04-25`);
-
   const wkJan26 = sydneyJsWeekdayOnCalendarDate(year, 1, 26);
   if (wkJan26 === 0) out.add(`${year}-01-27`);
   else if (wkJan26 === 6) out.add(`${year}-01-28`);
   else out.add(`${year}-01-26`);
-
   const wkApr25 = sydneyJsWeekdayOnCalendarDate(year, 4, 25);
   if (wkApr25 === 6) out.add(`${year}-04-27`);
   if (wkApr25 === 0) out.add(`${year}-04-26`);
-
   out.add(`${year}-12-25`);
   out.add(`${year}-12-26`);
-
   return out;
 }
 
@@ -161,44 +170,84 @@ function isNswPublicHolidayYmd(ymd) {
   if (!m) return false;
   const year = parseInt(m[1], 10);
   if (year < 2029) return false;
-  const dyn = buildDynamicNswHolidayYmds(year);
-  return dyn.has(ymd);
+  return buildDynamicNswHolidayYmds(year).has(ymd);
 }
 
 /**
- * NDIS price-limit for standard support (same ladder as minimums; high-intensity bumps weekday daytime max only).
+ * Resolve shift type ID at an instant (Sydney).
+ * @returns {keyof typeof DEFAULT_SHIFT_TYPES}
  */
-function getStandardSupportMaximumHourly(startIso, opts = {}) {
-  const parts = getSydneyYmdAndHour(startIso);
-  if (!parts) return RATES.standardWeekdayDaytime;
-
-  if (isNswPublicHolidayYmd(parts.ymd)) return RATES.standardPublicHoliday;
-
-  const { hour, jsWeekday } = parts;
-  if (jsWeekday === 0) return RATES.standardSunday;
-  if (jsWeekday === 6) return RATES.standardSaturday;
-
-  if (hour >= 6 && hour < 20) {
-    if (opts.highIntensity) return HIGH_INTENSITY_WEEKDAY_DAYTIME_MAX;
-    return RATES.standardWeekdayDaytime;
-  }
-  if (hour >= 20 && hour <= 23) return RATES.standardWeekdayEvening;
-  return RATES.standardWeekdayNight;
+function getShiftTypeIdAt(isoOrDate) {
+  const parts = getSydneyYmdAndHour(isoOrDate);
+  if (!parts) return 'weekday_day';
+  if (isNswPublicHolidayYmd(parts.ymd)) return 'public_holiday';
+  if (parts.jsWeekday === 0) return 'sunday';
+  if (parts.jsWeekday === 6) return 'saturday';
+  if (parts.hour >= 6 && parts.hour < 20) return 'weekday_day';
+  if (parts.hour >= 20) return 'weekday_evening';
+  return 'weekday_night';
 }
 
-function getStandardSupportMinimumHourly(startIso) {
-  const parts = getSydneyYmdAndHour(startIso);
-  if (!parts) return RATES.standardWeekdayDaytime;
+function getShiftTypeLimits(shiftTypeId) {
+  return SHIFT_TYPES[shiftTypeId] || SHIFT_TYPES.weekday_day;
+}
 
-  if (isNswPublicHolidayYmd(parts.ymd)) return RATES.standardPublicHoliday;
+function getSegmentMaximum(shiftTypeId, opts = {}) {
+  if (shiftTypeId === 'weekday_day' && opts.highIntensity) {
+    return HIGH_INTENSITY_WEEKDAY_DAYTIME_MAX;
+  }
+  return getShiftTypeLimits(shiftTypeId).max;
+}
 
-  const { hour, jsWeekday } = parts;
-  if (jsWeekday === 0) return RATES.standardSunday;
-  if (jsWeekday === 6) return RATES.standardSaturday;
+function mergeAdjacentSegments(segments) {
+  if (!segments.length) return [];
+  const out = [{ ...segments[0] }];
+  for (let i = 1; i < segments.length; i++) {
+    const cur = segments[i];
+    const prev = out[out.length - 1];
+    if (prev.shiftTypeId === cur.shiftTypeId) {
+      prev.hours = Number((prev.hours + cur.hours).toFixed(4));
+      prev.endIso = cur.endIso;
+    } else {
+      out.push({ ...cur });
+    }
+  }
+  return out;
+}
 
-  if (hour >= 6 && hour < 20) return RATES.standardWeekdayDaytime;
-  if (hour >= 20 && hour <= 23) return RATES.standardWeekdayEvening;
-  return RATES.standardWeekdayNight;
+/**
+ * Midnight splitter: slice shift into segments with hours per NDIS shift type.
+ * @returns {Array<{ shiftTypeId: string, hours: number, startIso: string, endIso: string }>}
+ */
+function splitShiftIntoRateSegments(startIso, endIso) {
+  const startMs = new Date(startIso).getTime();
+  const endMs = new Date(endIso).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return [];
+
+  const raw = [];
+  let segStartMs = startMs;
+  let currentType = getShiftTypeIdAt(new Date(segStartMs));
+
+  for (let t = segStartMs + 60000; t <= endMs; t += 60000) {
+    const probeMs = Math.min(t, endMs);
+    const typeAtProbe = getShiftTypeIdAt(new Date(probeMs));
+    if (typeAtProbe !== currentType || probeMs === endMs) {
+      const hours = (probeMs - segStartMs) / 3600000;
+      if (hours > 1e-9) {
+        raw.push({
+          shiftTypeId: currentType,
+          hours: Number(hours.toFixed(4)),
+          startIso: new Date(segStartMs).toISOString(),
+          endIso: new Date(probeMs).toISOString(),
+        });
+      }
+      if (probeMs === endMs) break;
+      segStartMs = probeMs;
+      currentType = typeAtProbe;
+    }
+  }
+
+  return mergeAdjacentSegments(raw);
 }
 
 function getServiceCategoryMinimum(serviceType) {
@@ -211,38 +260,129 @@ function getServiceCategoryMinimum(serviceType) {
   return null;
 }
 
-function getServiceCategoryMaximum(serviceType) {
-  return getServiceCategoryMinimum(serviceType);
-}
-
 /**
- * Minimum hourly rate (AUD) a participant must offer for this service and shift start time.
+ * Allowed min/max for a flat hourly rate across the whole shift window (intersection of segment bounds).
  */
-function getNdisMinimumHourlyRate(serviceType, startTimeIso) {
-  const specific = getServiceCategoryMinimum(serviceType);
-  const standard = getStandardSupportMinimumHourly(startTimeIso);
-  if (specific != null) {
-    return Math.max(specific, standard);
-  }
-  return Math.max(GENERAL_MIN_HOURLY, standard);
-}
+function getShiftWindowRateBounds(serviceType, startTimeIso, endTimeIso, opts = {}) {
+  const endIso = endTimeIso || startTimeIso;
+  const segments = splitShiftIntoRateSegments(startTimeIso, endIso);
+  const list = segments.length ? segments : [{ shiftTypeId: getShiftTypeIdAt(startTimeIso), hours: 0 }];
 
-/**
- * Maximum hourly rate (NDIS price limit) for this service, time, and optional high-intensity weekday daytime.
- */
-function getNdisMaximumHourlyRate(serviceType, startTimeIso, opts = {}) {
-  const specific = getServiceCategoryMaximum(serviceType);
-  const standard = getStandardSupportMaximumHourly(startTimeIso, opts);
-  if (specific != null) {
-    return Math.max(specific, standard);
+  const serviceMin = getServiceCategoryMinimum(serviceType);
+  let minimum = GENERAL_MIN_HOURLY;
+  let maximum = Infinity;
+
+  for (const seg of list) {
+    const limits = getShiftTypeLimits(seg.shiftTypeId);
+    minimum = Math.max(minimum, limits.min);
+    if (serviceMin != null) minimum = Math.max(minimum, serviceMin);
+    maximum = Math.min(maximum, getSegmentMaximum(seg.shiftTypeId, opts));
   }
-  return Math.max(GENERAL_MIN_HOURLY, standard);
+
+  if (!Number.isFinite(maximum)) maximum = SHIFT_TYPES.weekday_day.max;
+
+  return { minimum, maximum, segments: list };
 }
 
 function formatAud(amount) {
   const n = Number(amount);
   if (!Number.isFinite(n)) return '$0.00';
   return `$${n.toFixed(2)}`;
+}
+
+/**
+ * @example validateWorkerRate('weekday_evening', 57)
+ */
+function validateWorkerRate(shiftType, proposedRate) {
+  const limits = getShiftTypeLimits(shiftType);
+  const rate = Number(proposedRate);
+  if (!Number.isFinite(rate)) {
+    return { valid: false, message: 'Hourly rate must be a valid number.' };
+  }
+  if (rate + 1e-6 < limits.min) {
+    return {
+      valid: false,
+      message: `To cover your 15% platform fee and stay profitable, the minimum rate for this shift type is ${formatAud(limits.min)}/hr.`,
+    };
+  }
+  if (rate > limits.max + 1e-6) {
+    return {
+      valid: false,
+      message: `This rate exceeds the legal NDIS maximum price cap of ${formatAud(limits.max)}/hr for this shift type.`,
+    };
+  }
+  return { valid: true };
+}
+
+function getNdisMinimumHourlyRate(serviceType, startTimeIso, endTimeIso) {
+  const { minimum } = getShiftWindowRateBounds(serviceType, startTimeIso, endTimeIso || startTimeIso, {});
+  return minimum;
+}
+
+function getNdisMaximumHourlyRate(serviceType, startTimeIso, opts = {}) {
+  const endIso = opts.endTimeIso || startTimeIso;
+  const { maximum } = getShiftWindowRateBounds(serviceType, startTimeIso, endIso, opts);
+  return maximum;
+}
+
+function getStandardSupportMinimumHourly(startIso) {
+  return getShiftTypeLimits(getShiftTypeIdAt(startIso)).min;
+}
+
+function getStandardSupportMaximumHourly(startIso, opts = {}) {
+  const id = getShiftTypeIdAt(startIso);
+  return getSegmentMaximum(id, opts);
+}
+
+/**
+ * @param opts {{ highIntensity?: boolean, endTimeIso?: string }}
+ */
+function validateParticipantOfferedHourlyRate(serviceType, startTimeIso, hourlyRate, opts = {}) {
+  const rate = Number(hourlyRate);
+  if (!Number.isFinite(rate) || rate < 0) {
+    return { ok: false, error: 'Hourly rate must be a valid non-negative number.', minimum: 0, maximum: 0 };
+  }
+  if (rate === 0) {
+    return { ok: true, minimum: 0, maximum: 0 };
+  }
+
+  const endIso = opts.endTimeIso || startTimeIso;
+  const { minimum, maximum, segments } = getShiftWindowRateBounds(serviceType, startTimeIso, endIso, opts);
+
+  for (const seg of segments) {
+    const check = validateWorkerRate(seg.shiftTypeId, rate);
+    if (!check.valid) {
+      const label = seg.shiftTypeId.replace(/_/g, ' ');
+      return {
+        ok: false,
+        minimum,
+        maximum,
+        segments,
+        error: `${check.message} (applies to ${seg.hours.toFixed(2)}h in this shift — ${label}).`,
+      };
+    }
+  }
+
+  if (rate + 1e-6 < minimum) {
+    return {
+      ok: false,
+      minimum,
+      maximum,
+      segments,
+      error: `Hourly rate must be at least ${formatAud(minimum)}/hr for this shift (NDIS minimum across all time segments).`,
+    };
+  }
+  if (rate > maximum + 1e-6) {
+    return {
+      ok: false,
+      minimum,
+      maximum,
+      segments,
+      error: `Hourly rate cannot exceed ${formatAud(maximum)}/hr (NDIS maximum across all time segments${opts.highIntensity ? '; high intensity weekday daytime' : ''}).`,
+    };
+  }
+
+  return { ok: true, minimum, maximum, segments };
 }
 
 function computeTravelCharge(km, perKm = TRAVEL_NON_LABOUR_PER_KM) {
@@ -253,9 +393,6 @@ function computeTravelCharge(km, perKm = TRAVEL_NON_LABOUR_PER_KM) {
 
 const MAX_TRAVEL_KM = 2000;
 
-/**
- * @returns {{ ok: true } | { ok: false, error: string }}
- */
 function validateTravelDistanceKm(km) {
   const k = Number(km);
   if (km == null || km === '') return { ok: true };
@@ -268,9 +405,6 @@ function validateTravelDistanceKm(km) {
   return { ok: true };
 }
 
-/**
- * @returns {{ ok: true } | { ok: false, error: string }}
- */
 function validateSleepoverFlatAmount(amount) {
   if (amount == null || amount === '' || Number(amount) === 0) return { ok: true };
   const a = Number(amount);
@@ -281,46 +415,18 @@ function validateSleepoverFlatAmount(amount) {
   return { ok: true };
 }
 
-/**
- * @param opts {{ highIntensity?: boolean }}
- * @returns {{ ok: true, minimum: number, maximum: number } | { ok: false, error: string, minimum?: number, maximum?: number }}
- */
-function validateParticipantOfferedHourlyRate(serviceType, startTimeIso, hourlyRate, opts = {}) {
-  const rate = Number(hourlyRate);
-  if (!Number.isFinite(rate) || rate < 0) {
-    return { ok: false, error: 'Hourly rate must be a valid non-negative number.', minimum: 0, maximum: 0 };
-  }
-  if (rate === 0) {
-    return { ok: true, minimum: 0, maximum: 0 };
-  }
-  const highIntensity = Boolean(opts.highIntensity);
-  const minimum = getNdisMinimumHourlyRate(serviceType, startTimeIso);
-  const maximum = getNdisMaximumHourlyRate(serviceType, startTimeIso, { highIntensity });
-  if (rate + 1e-6 < minimum) {
-    return {
-      ok: false,
-      minimum,
-      maximum,
-      error: `Hourly rate must be at least ${formatAud(minimum)} (NDIS minimum for this service and start time).`,
-    };
-  }
-  if (rate > maximum + 1e-6) {
-    return {
-      ok: false,
-      minimum,
-      maximum,
-      error: `Hourly rate cannot exceed ${formatAud(maximum)} (NDIS maximum for this service and start time${highIntensity ? ', high intensity' : ''}).`,
-    };
-  }
-  return { ok: true, minimum, maximum };
-}
-
 export {
   TRAVEL_NON_LABOUR_PER_KM,
   SLEEPOVER_FLAT_NIGHTLY,
   GENERAL_MIN_HOURLY,
   HIGH_INTENSITY_WEEKDAY_DAYTIME_MAX,
+  SHIFT_TYPES,
   RATES,
+  getShiftTypeIdAt,
+  getShiftTypeLimits,
+  splitShiftIntoRateSegments,
+  getShiftWindowRateBounds,
+  validateWorkerRate,
   getNdisMinimumHourlyRate,
   getNdisMaximumHourlyRate,
   getStandardSupportMinimumHourly,
@@ -332,20 +438,21 @@ export {
   getSydneyYmdAndHour,
 };
 
-const ndisParticipantRatesDefault = {
+export default {
   TRAVEL_NON_LABOUR_PER_KM,
   SLEEPOVER_FLAT_NIGHTLY,
   GENERAL_MIN_HOURLY,
   HIGH_INTENSITY_WEEKDAY_DAYTIME_MAX,
+  SHIFT_TYPES,
   RATES,
+  getShiftTypeIdAt,
+  splitShiftIntoRateSegments,
+  validateWorkerRate,
   getNdisMinimumHourlyRate,
   getNdisMaximumHourlyRate,
-  getStandardSupportMinimumHourly,
-  getStandardSupportMaximumHourly,
   validateParticipantOfferedHourlyRate,
   computeTravelCharge,
   validateTravelDistanceKm,
   validateSleepoverFlatAmount,
   getSydneyYmdAndHour,
 };
-export default ndisParticipantRatesDefault;

@@ -8,6 +8,7 @@ import { useAuthStore } from '../store/authStore.js';
 import { useAccountAccess } from '../context/WorkerGateContext.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius } from '../constants/theme.js';
+import { SUPPORT_EMAIL, openSupportDocumentsEmail } from '../utils/verificationPrompt.js';
 
 export function VerificationGateScreen() {
   const navigation = useNavigation();
@@ -76,9 +77,20 @@ export function VerificationGateScreen() {
         <Text style={{ fontSize: Typography.fontSize.xxl, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.md }}>
           {title}
         </Text>
-        <Text style={{ fontSize: Typography.fontSize.base, color: Colors.text.secondary, lineHeight: 22, marginBottom: Spacing.lg }}>
+        <Text style={{ fontSize: Typography.fontSize.base, color: Colors.text.secondary, lineHeight: 22, marginBottom: Spacing.md }}>
           {message}
         </Text>
+        <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: Spacing.xs }}>
+          Or email your documents to:
+        </Text>
+        <Pressable
+          onPress={openSupportDocumentsEmail}
+          style={({ pressed }) => ({ marginBottom: Spacing.lg, opacity: pressed ? 0.85 : 1, alignSelf: 'flex-start' })}
+        >
+          <Text style={{ fontSize: Typography.fontSize.base, color: Colors.primary, fontWeight: Typography.fontWeight.semibold, textDecorationLine: 'underline' }}>
+            {SUPPORT_EMAIL}
+          </Text>
+        </Pressable>
 
         {accessPhase === 'loading' && <ActivityIndicator color={Colors.primary} />}
 

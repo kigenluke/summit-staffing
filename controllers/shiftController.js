@@ -337,7 +337,10 @@ const createShift = async (req, res) => {
     }
 
     if (hr > 0) {
-      const rateCheck = validateParticipantOfferedHourlyRate(service_type, start_time, hr, { highIntensity });
+      const rateCheck = validateParticipantOfferedHourlyRate(service_type, start_time, hr, {
+        highIntensity,
+        endTimeIso: end_time,
+      });
       if (!rateCheck.ok) {
         return res.status(400).json({
           ok: false,

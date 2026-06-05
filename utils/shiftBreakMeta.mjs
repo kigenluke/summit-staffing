@@ -1,3 +1,5 @@
+import { splitShiftIntoRateSegments, getShiftTypeLimits } from './ndisParticipantRates.mjs';
+
 /** e.g. 7.5 → "7h 30m", 8 → "8h" (for clear paid-time display). */
 function formatDecimalHoursAsHhMm(decimalHours) {
   if (!Number.isFinite(decimalHours) || decimalHours <= 0) return '0h';
@@ -45,6 +47,18 @@ function getShiftPayEstimate(startTime, endTime, hourlyRate, description, billin
     paidHoursAtRate = Math.max(0, shiftHours - breakMinutes / 60);
   }
 
+  const rateSegments = splitShiftIntoRateSegments(start.toISOString(), end.toISOString());
+  const segmentBreakdown = rateSegments.map((seg) => {
+    const limits = getShiftTypeLimits(seg.shiftTypeId);
+    const lineAmount = Number((seg.hours * rate).toFixed(2));
+    return {
+      ...seg,
+      lineAmount,
+      minRate: limits.min,
+      maxRate: limits.max,
+    };
+  });
+
   let labourSubtotal = paidHoursAtRate * rate;
   if (breakIsPaid && breakPay > 0) {
     labourSubtotal += breakPay;
@@ -73,6 +87,7 @@ function getShiftPayEstimate(startTime, endTime, hourlyRate, description, billin
     travelKm,
     travelCharge,
     estimatedTotal,
+    rateSegments: segmentBreakdown,
   };
 }
 

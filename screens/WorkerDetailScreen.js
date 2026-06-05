@@ -164,7 +164,10 @@ export function WorkerDetailScreen({ route, navigation }) {
       return;
     }
     if (rate > 0) {
-      const rateCheck = validateParticipantOfferedHourlyRate(serviceType.trim(), start.toISOString(), rate, { highIntensity: highIntensityBooking });
+      const rateCheck = validateParticipantOfferedHourlyRate(serviceType.trim(), start.toISOString(), rate, {
+        highIntensity: highIntensityBooking,
+        endTimeIso: end.toISOString(),
+      });
       if (!rateCheck.ok) {
         Alert.alert('Hourly rate', rateCheck.error || `Allowed $${Number(rateCheck.minimum).toFixed(2)} – $${Number(rateCheck.maximum).toFixed(2)}/hr`);
         return;
@@ -320,7 +323,7 @@ export function WorkerDetailScreen({ route, navigation }) {
             keyboardType="decimal-pad"
           />
           <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: -4, marginBottom: Spacing.sm }}>
-            NDIS min/max apply by service and start time (Sydney). Weekday daytime high-intensity cap $75.98/hr when toggled below.
+            NDIS min/max by service and full shift times (Sydney). Minimum is the platform floor; maximum is the NDIS cap (you may offer lower to save budget).
           </Text>
 
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: Spacing.sm }}>

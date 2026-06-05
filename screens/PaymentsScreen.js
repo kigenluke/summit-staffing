@@ -20,7 +20,6 @@ export function PaymentsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [connectStatus, setConnectStatus] = useState(null);
-  const [openingStripe, setOpeningStripe] = useState(false);
   const [savedCards, setSavedCards] = useState([]);
   const [addingCard, setAddingCard] = useState(false);
   const [bankHolderName, setBankHolderName] = useState('');
@@ -64,44 +63,12 @@ export function PaymentsScreen() {
     return () => sub.remove();
   }, [load]);
 
-  const setupStripe = async () => {
-    try {
-      const { data, error } = await api.post('/api/payments/connect/onboard');
-      if (error) {
-        const res = error.response;
-        const detail =
-          typeof res?.error === 'string'
-            ? res.error
-            : (res?.error && typeof res.error?.message === 'string' ? res.error.message : null)
-            || error.message;
-        const hint = typeof res?.hint === 'string' ? res.hint : '';
-        const lines = [detail, hint].filter(Boolean);
-        Alert.alert(
-          'Could not connect Stripe',
-          lines.length ? lines.join('\n\n') : 'Please try again later or contact support.',
-        );
-        return;
-      }
-      const redirectUrl = data?.onboardingUrl || data?.url;
-      if (redirectUrl) {
-        const supported = await Linking.canOpenURL(redirectUrl);
-        if (!supported) {
-          Alert.alert('Error', 'Unable to open Stripe onboarding link.');
-          return;
-        }
-        setOpeningStripe(true);
-        await Linking.openURL(redirectUrl);
-        // Best-effort refresh shortly after opening, and AppState listener will refresh on return.
-        setTimeout(() => {
-          load();
-          setOpeningStripe(false);
-        }, 1500);
-        return;
-      }
-      Alert.alert('Success', 'Stripe account setup initiated');
-    } catch (_) {
-      Alert.alert('Error', 'Failed to start Stripe setup.');
-    }
+  const setupStripe = () => {
+    Alert.alert(
+      'Use the form below',
+      'Enter your account holder name, BSB, and account number, then tap Save bank account. You do not need to sign up for Stripe.',
+    );
+    setShowBankForm(true);
   };
 
   const openStripeDashboard = async () => {
@@ -165,7 +132,9 @@ export function PaymentsScreen() {
     );
   };
 
-  const isCustomConnect = connectStatus?.connect_mode !== 'express';
+  const isLegacyExpressAccount = connectStatus?.account?.type === 'express';
+  const hasSavedBank = Boolean(connectStatus?.bank_account?.last4);
+  const showInAppBankForm = showBankForm || !isLegacyExpressAccount || !hasSavedBank;
 
   const saveBankDetails = async () => {
     const holder = bankHolderName.trim();
@@ -252,10 +221,10 @@ export function PaymentsScreen() {
           <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.sm }}>
             <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.sm }}>Payout bank account</Text>
             <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, lineHeight: 20, marginBottom: Spacing.md }}>
-              Enter your Australian BSB and account number to receive shift payouts. Details are sent securely to Stripe — we do not store your full account number.
+              Enter your Australian BSB and account number to receive payouts (85% of approved shifts). Summit sends details securely to our payment partner — we never store your full account number in our database.
             </Text>
 
-            {isCustomConnect && connectStatus?.bank_account?.last4 && !showBankForm ? (
+            {hasSavedBank && !showInAppBankForm ? (
               <>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm }}>
                   <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.status.success }} />
@@ -286,7 +255,7 @@ export function PaymentsScreen() {
                   <Text style={{ color: Colors.status.error, fontWeight: Typography.fontWeight.semibold, textAlign: 'center' }}>Remove payout account</Text>
                 </Pressable>
               </>
-            ) : isCustomConnect || showBankForm ? (
+            ) : showInAppBankForm ? (
               <>
                 <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs, marginBottom: Spacing.sm }}>Account holder name</Text>
                 <TextInput
@@ -361,60 +330,30 @@ export function PaymentsScreen() {
                   </Pressable>
                 ) : null}
               </>
-            ) : connectStatus?.charges_enabled ? (
+            ) : isLegacyExpressAccount && connectStatus?.charges_enabled ? (
               <>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm }}>
                   <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.status.success }} />
-                  <Text style={{ color: Colors.status.success, fontWeight: Typography.fontWeight.semibold }}>Stripe connected - payouts enabled</Text>
+                  <Text style={{ color: Colors.status.success, fontWeight: Typography.fontWeight.semibold }}>Legacy Stripe Express — payouts enabled</Text>
                 </View>
-                <View style={{ backgroundColor: Colors.surfaceSecondary, borderWidth: 1, borderColor: Colors.borderLight, borderRadius: Radius.md, padding: Spacing.sm, marginBottom: Spacing.md }}>
-                  <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs, marginBottom: 2 }}>
-                    Connected account
-                  </Text>
-                  <Text style={{ color: Colors.text.primary, fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.medium, marginBottom: 6 }}>
-                    {connectStatus?.account?.id || connectStatus?.accountId || '—'}
-                  </Text>
-                  <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs }}>
-                    {connectStatus?.account?.email || 'Email not provided'}
-                  </Text>
-                </View>
-                <Pressable onPress={openStripeDashboard} style={({ pressed }) => ({ backgroundColor: '#635BFF', paddingVertical: Spacing.sm + 1, borderRadius: Radius.md, alignItems: 'center', opacity: pressed ? 0.88 : 1, marginBottom: Spacing.sm })}>
-                  <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Manage Stripe Account</Text>
-                </Pressable>
-                <Pressable onPress={disconnectStripe} style={({ pressed }) => ({ backgroundColor: Colors.surfaceSecondary, borderWidth: 1, borderColor: Colors.status.error, paddingVertical: Spacing.sm + 1, borderRadius: Radius.md, alignItems: 'center', opacity: pressed ? 0.88 : 1 })}>
-                  <Text style={{ color: Colors.status.error, fontWeight: Typography.fontWeight.bold }}>Use Another Account</Text>
-                </Pressable>
-              </>
-            ) : connectStatus?.details_submitted ? (
-              <>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm }}>
-                  <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.status.warning }} />
-                  <Text style={{ color: Colors.status.warning, fontWeight: Typography.fontWeight.semibold }}>Stripe details submitted</Text>
-                </View>
-                <Text style={{ color: Colors.text.secondary, marginBottom: Spacing.md }}>
-                  Account is under review or requires more info before payouts are enabled.
+                <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, marginBottom: Spacing.md }}>
+                  Prefer in-app BSB? Tap “Switch to BSB form” below. We only store your Stripe account ID, not raw bank numbers.
                 </Text>
-                <Pressable onPress={setupStripe} style={({ pressed }) => ({ backgroundColor: '#635BFF', paddingVertical: Spacing.sm + 1, borderRadius: Radius.md, alignItems: 'center', opacity: pressed ? 0.88 : 1, marginBottom: Spacing.sm })}>
-                    <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Manage Account</Text>
+                <Pressable onPress={openStripeDashboard} style={({ pressed }) => ({ backgroundColor: '#635BFF', paddingVertical: Spacing.sm + 1, borderRadius: Radius.md, alignItems: 'center', opacity: pressed ? 0.88 : 1, marginBottom: Spacing.sm })}>
+                  <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Open Stripe dashboard</Text>
                 </Pressable>
-                <Pressable onPress={disconnectStripe} style={({ pressed }) => ({ backgroundColor: Colors.surfaceSecondary, borderWidth: 1, borderColor: Colors.status.error, paddingVertical: Spacing.sm + 1, borderRadius: Radius.md, alignItems: 'center', opacity: pressed ? 0.88 : 1 })}>
-                  <Text style={{ color: Colors.status.error, fontWeight: Typography.fontWeight.bold }}>Use Another Account</Text>
+                <Pressable onPress={() => setShowBankForm(true)} style={({ pressed }) => ({ backgroundColor: Colors.primary, paddingVertical: Spacing.sm + 1, borderRadius: Radius.md, alignItems: 'center', opacity: pressed ? 0.88 : 1, marginBottom: Spacing.sm })}>
+                  <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Switch to BSB form</Text>
+                </Pressable>
+                <Pressable onPress={disconnectStripe} style={({ pressed }) => ({ opacity: pressed ? 0.88 : 1 })}>
+                  <Text style={{ color: Colors.status.error, fontWeight: Typography.fontWeight.semibold, textAlign: 'center' }}>Remove payout account</Text>
                 </Pressable>
               </>
             ) : connectStatus?.hasWorkerProfile === false ? (
               <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm }}>
-                Complete your worker profile first (Profile → worker setup), then you can connect Stripe for payouts.
+                Complete your worker profile first (Profile → Manage Worker Profile), then add your bank details here.
               </Text>
-            ) : (
-              <>
-                <Text style={{ color: Colors.text.secondary, marginBottom: Spacing.sm }}>Connect your bank account via Stripe to receive payouts.</Text>
-                <Pressable onPress={setupStripe} style={({ pressed }) => ({ backgroundColor: '#635BFF', paddingVertical: Spacing.sm + 1, borderRadius: Radius.md, alignItems: 'center', opacity: pressed ? 0.88 : 1 })}>
-                  <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>
-                    {openingStripe ? 'Opening Stripe...' : 'Setup Stripe Account'}
-                  </Text>
-                </Pressable>
-              </>
-            )}
+            ) : null}
           </View>
         </View>
       )}

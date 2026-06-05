@@ -22,8 +22,8 @@ export function DocumentsScreen({ navigation }) {
   const { user } = useAuthStore();
   const isWorker = user?.role === 'worker';
   const isParticipant = user?.role === 'participant';
-  const addDocsTarget = isWorker ? 'WorkerManage' : 'Invoices';
-  const secondaryLabel = isParticipant ? 'Saved cards' : 'Add Bank Details';
+  const openComplianceUpload = () => navigation.navigate('WorkerManage', { focusDocument: 'ndis_screening' });
+  const secondaryLabel = isParticipant ? 'Saved cards' : 'Bank account (BSB)';
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -60,51 +60,59 @@ export function DocumentsScreen({ navigation }) {
                 Your Documents
               </Text>
               <Text style={{ fontSize: Typography.fontSize.sm, color: 'rgba(255,255,255,0.85)', marginTop: Spacing.xs }}>
-                View your invoices and service documents below.
+                {isWorker
+                  ? 'Invoices from completed bookings appear below. Compliance certificates upload in My Worker Profile.'
+                  : 'View your invoices and service documents below.'}
               </Text>
             </View>
 
-            <View style={{ flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.md }}>
-              {!isParticipant && (
-                <Pressable
-                  onPress={() => navigation.navigate(addDocsTarget)}
-                  style={({ pressed }) => ({
-                    flex: 1,
-                    backgroundColor: Colors.surface,
-                    borderWidth: 1,
-                    borderColor: Colors.border,
-                    borderRadius: Radius.md,
-                    paddingVertical: Spacing.sm,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    opacity: pressed ? 0.9 : 1,
-                    ...Shadows.sm,
-                  })}
-                >
-                  <Text style={{ color: Colors.text.primary, fontWeight: Typography.fontWeight.semibold }}>
-                    Add Documents
-                  </Text>
-                </Pressable>
-              )}
-
+            {isWorker ? (
               <Pressable
-                onPress={() => navigation.navigate('Payments')}
+                onPress={openComplianceUpload}
                 style={({ pressed }) => ({
-                  flex: 1,
+                  marginBottom: Spacing.sm,
                   backgroundColor: Colors.primary,
                   borderRadius: Radius.md,
-                  paddingVertical: Spacing.sm,
+                  paddingVertical: Spacing.md,
                   alignItems: 'center',
-                  justifyContent: 'center',
                   opacity: pressed ? 0.9 : 1,
                   ...Shadows.sm,
                 })}
               >
-                <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>
+                <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>
+                  Upload compliance documents
+                </Text>
+                <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: Typography.fontSize.xs, marginTop: 4 }}>
+                  Opens My Worker Profile → document upload
+                </Text>
+              </Pressable>
+            ) : null}
+
+            {isWorker || isParticipant ? (
+              <Pressable
+                onPress={() => navigation.navigate('Payments')}
+                style={({ pressed }) => ({
+                  marginBottom: Spacing.md,
+                  backgroundColor: isWorker ? Colors.surface : Colors.primary,
+                  borderWidth: isWorker ? 1 : 0,
+                  borderColor: Colors.border,
+                  borderRadius: Radius.md,
+                  paddingVertical: Spacing.sm,
+                  alignItems: 'center',
+                  opacity: pressed ? 0.9 : 1,
+                  ...Shadows.sm,
+                })}
+              >
+                <Text
+                  style={{
+                    color: isWorker ? Colors.text.primary : Colors.text.white,
+                    fontWeight: Typography.fontWeight.semibold,
+                  }}
+                >
                   {secondaryLabel}
                 </Text>
               </Pressable>
-            </View>
+            ) : null}
           </View>
         }
         renderItem={({ item }) => (

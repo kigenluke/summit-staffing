@@ -2,7 +2,7 @@
  * Summit Staffing – Worker Management Screen
  * Skills, Documents, Availability, all from Profile tab
  */
-import React, { useEffect, useState, useCallback, useMemo, createElement } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef, createElement } from 'react';
 import { View, Text, ScrollView, Pressable, TextInput, Alert, ActivityIndicator, RefreshControl, Platform, Modal } from 'react-native';
 import { api } from '../services/api.js';
 import { useAuthStore } from '../store/authStore.js';
@@ -133,6 +133,26 @@ export function WorkerManageScreen({ route, navigation }) {
   const [webPickerHour, setWebPickerHour] = useState('9');
   const [webPickerMinute, setWebPickerMinute] = useState('00');
   const [webPickerPeriod, setWebPickerPeriod] = useState('AM');
+  const scrollRef = useRef(null);
+  const documentsSectionY = useRef(0);
+  const [focusDocumentType, setFocusDocumentType] = useState(route?.params?.focusDocument || null);
+
+  const scrollToDocuments = useCallback((documentType) => {
+    if (documentType) setFocusDocumentType(documentType);
+    requestAnimationFrame(() => {
+      const y = Math.max(0, documentsSectionY.current - 12);
+      scrollRef.current?.scrollTo?.({ y, animated: true });
+    });
+  }, []);
+
+  useEffect(() => {
+    const focus = route?.params?.focusDocument;
+    if (focus && worker) {
+      setFocusDocumentType(focus);
+      const t = setTimeout(() => scrollToDocuments(focus), 400);
+      return () => clearTimeout(t);
+    }
+  }, [route?.params?.focusDocument, worker, scrollToDocuments]);
 
   const load = useCallback(async () => {
     try {
@@ -216,7 +236,12 @@ export function WorkerManageScreen({ route, navigation }) {
     const hasABN = !!(worker.abn && String(worker.abn).replace(/\D/g, '').length >= 11);
     const coreInfoStatus = hasLegalEntity && hasABN ? 'verified' : (hasLegalEntity || hasABN ? 'pending' : 'not_started');
     const contactStatus = worker.phone && worker.address ? 'verified' : ((worker.phone || worker.address) ? 'pending' : 'not_started');
-    const bankStatus = connectStatus?.charges_enabled ? 'verified' : (connectStatus ? 'pending' : 'not_started');
+    const hasBankOnFile = !!(connectStatus?.bank_account?.last4);
+    const bankStatus = hasBankOnFile || connectStatus?.charges_enabled
+      ? 'verified'
+      : connectStatus?.details_submitted
+        ? 'pending'
+        : 'not_started';
 
     const cardDefinitions = [
       {
@@ -232,27 +257,32 @@ export function WorkerManageScreen({ route, navigation }) {
         id: 'financials',
         title: 'Financials',
         items: [
-          { key: 'bank', label: 'Bank payout setup (Stripe)', status: bankStatus, actionLabel: 'Open payments', action: () => navigation.navigate('Payments') },
-          { key: 'gst', label: 'GST status', status: 'not_started' },
+          {
+            key: 'bank',
+            label: 'Bank account for payouts (BSB)',
+            status: bankStatus,
+            actionLabel: hasBankOnFile ? 'View bank details' : 'Add BSB & account',
+            action: () => navigation.navigate('Payments'),
+          },
         ],
       },
       {
         id: 'risk',
         title: 'Risk Management',
         items: [
-          { key: 'insurance', label: 'Insurance document', status: docStatus('insurance'), actionLabel: 'Upload docs', action: () => navigation.navigate('Documents') },
-          { key: 'police', label: 'National Police Check', status: docStatus('police_check'), actionLabel: 'Upload docs', action: () => navigation.navigate('Documents') },
+          { key: 'insurance', label: 'Insurance document', status: docStatus('insurance'), docType: 'insurance' },
+          { key: 'police', label: 'National Police Check', status: docStatus('police_check'), docType: 'police_check' },
         ],
       },
       {
         id: 'care_standards',
         title: 'Care Standards',
         items: [
-          { key: 'ndis', label: 'NDIS Worker Screening', status: docStatus('ndis_screening'), actionLabel: 'Upload docs', action: () => navigation.navigate('Documents') },
-          { key: 'blue', label: 'Blue Card / WWCC', status: docStatus('wwcc'), actionLabel: 'Upload docs', action: () => navigation.navigate('Documents') },
-          { key: 'yellow', label: 'Yellow Card (QLD)', status: docStatus('yellow_card'), actionLabel: 'Upload docs', action: () => navigation.navigate('Documents') },
-          { key: 'firstaid', label: 'First Aid / CPR', status: docStatus('first_aid'), actionLabel: 'Upload docs', action: () => navigation.navigate('Documents') },
-          { key: 'manual', label: 'Manual Handling', status: docStatus('manual_handling'), actionLabel: 'Upload docs', action: () => navigation.navigate('Documents') },
+          { key: 'ndis', label: 'NDIS Worker Screening', status: docStatus('ndis_screening'), docType: 'ndis_screening' },
+          { key: 'blue', label: 'Blue Card / WWCC', status: docStatus('wwcc'), docType: 'wwcc' },
+          { key: 'yellow', label: 'Yellow Card (QLD)', status: docStatus('yellow_card'), docType: 'yellow_card' },
+          { key: 'firstaid', label: 'First Aid / CPR', status: docStatus('first_aid'), docType: 'first_aid' },
+          { key: 'manual', label: 'Manual Handling', status: docStatus('manual_handling'), docType: 'manual_handling' },
         ],
       },
       {
@@ -612,8 +642,12 @@ export function WorkerManageScreen({ route, navigation }) {
   }
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: Colors.background }} contentContainerStyle={{ padding: Spacing.lg, paddingBottom: Spacing.xxl }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}>
+    <ScrollView
+      ref={scrollRef}
+      style={{ flex: 1, backgroundColor: Colors.background }}
+      contentContainerStyle={{ padding: Spacing.lg, paddingBottom: Spacing.xxl }}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
+    >
 
       {!availabilityOnly && (
         <>
@@ -646,6 +680,9 @@ export function WorkerManageScreen({ route, navigation }) {
       </Section>
 
       <Section title=" Compliance Checklist">
+        <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: Spacing.md }}>
+          Tap an incomplete item to jump to upload or bank setup on this page. Invoices are under the Documents tab.
+        </Text>
         {compliance.cards.map((card) => (
           <View
             key={card.id}
@@ -675,41 +712,73 @@ export function WorkerManageScreen({ route, navigation }) {
 
             {expandedCard === card.id && (
               <View style={{ borderTopWidth: 1, borderTopColor: Colors.borderLight, padding: Spacing.md }}>
-                {card.items.map((item) => (
-                  <View key={item.key} style={{ marginBottom: Spacing.sm }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <Text style={{ color: Colors.text.primary, flex: 1, marginRight: Spacing.sm }}>
-                        {STATUS[item.status].icon} {item.label}
-                      </Text>
-                      <Text style={{ color: STATUS[item.status].color, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.semibold }}>
-                        {STATUS[item.status].label}
-                      </Text>
-                    </View>
-                    {item.action && item.status !== 'verified' && (
-                      <Pressable
-                        onPress={item.action}
-                        style={({ pressed }) => ({
-                          alignSelf: 'flex-start',
-                          marginTop: 6,
-                          paddingHorizontal: Spacing.sm,
-                          paddingVertical: 4,
-                          borderRadius: Radius.full,
-                          backgroundColor: `${Colors.primary}22`,
-                          opacity: pressed ? 0.75 : 1,
-                        })}
-                      >
-                        <Text style={{ color: Colors.primary, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.semibold }}>
-                          {item.actionLabel || 'Complete'}
+                {card.items.map((item) => {
+                  const canUploadDoc = item.docType && item.status !== 'verified';
+                  const canAct = item.action && item.status !== 'verified';
+                  const isTappable = canUploadDoc || canAct;
+                  const RowWrap = isTappable ? Pressable : View;
+                  const rowPress = canUploadDoc
+                    ? () => scrollToDocuments(item.docType)
+                    : canAct
+                      ? item.action
+                      : undefined;
+                  const rowStyle = isTappable
+                    ? ({ pressed }) => ({
+                        marginBottom: Spacing.sm,
+                        paddingVertical: 4,
+                        opacity: pressed ? 0.85 : 1,
+                      })
+                    : { marginBottom: Spacing.sm };
+                  return (
+                    <RowWrap key={item.key} onPress={rowPress} style={rowStyle}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <Text style={{ color: Colors.text.primary, flex: 1, marginRight: Spacing.sm }}>
+                          {STATUS[item.status].icon} {item.label}
                         </Text>
-                      </Pressable>
-                    )}
-                  </View>
-                ))}
+                        <Text style={{ color: STATUS[item.status].color, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.semibold }}>
+                          {STATUS[item.status].label}
+                        </Text>
+                      </View>
+                      {canUploadDoc ? (
+                        <Text style={{ color: Colors.primary, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.semibold, marginTop: 4 }}>
+                          Tap to upload below ↓
+                        </Text>
+                      ) : null}
+                      {canAct && !canUploadDoc ? (
+                        <Text style={{ color: Colors.primary, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.semibold, marginTop: 4 }}>
+                          {item.actionLabel || 'Complete'} →
+                        </Text>
+                      ) : null}
+                    </RowWrap>
+                  );
+                })}
               </View>
             )}
           </View>
         ))}
       </Section>
+
+      <View
+        onLayout={(e) => {
+          documentsSectionY.current = e.nativeEvent.layout.y;
+        }}
+      >
+        <Section title=" Documents & compliance uploads">
+          <ComplianceDocumentsPanel
+            title="Vendor documentation"
+            subtitle="Upload certificates here (PDF or photo). Required items must be submitted for admin verification."
+            docTypes={DOC_TYPES}
+            documents={worker?.documents || []}
+            requiredTypes={REQUIRED_WORKER_COMPLIANCE_DOCS}
+            onUpload={handleDocumentUpload}
+            uploading={uploadingDoc}
+            verificationSubmittedAt={worker?.verification_submitted_at}
+            verificationStatus={worker?.verification_status}
+            onSubmitVerification={handleSubmitVerification}
+            focusDocumentType={focusDocumentType}
+          />
+        </Section>
+      </View>
 
       {/* Verification Status */}
       <Section title=" Verification Status">
@@ -730,21 +799,6 @@ export function WorkerManageScreen({ route, navigation }) {
           onAddCustomSkill={addCustomSkill}
           addingSkill={addingSkill}
           skillBusyKey={skillBusyKey}
-        />
-      </Section>
-
-      <Section title=" Documents">
-        <ComplianceDocumentsPanel
-          title="Vendor documentation"
-          subtitle="Upload compliance certificates and insurance. Required documents must be submitted for admin verification."
-          docTypes={DOC_TYPES}
-          documents={worker?.documents || []}
-          requiredTypes={REQUIRED_WORKER_COMPLIANCE_DOCS}
-          onUpload={handleDocumentUpload}
-          uploading={uploadingDoc}
-          verificationSubmittedAt={worker?.verification_submitted_at}
-          verificationStatus={worker?.verification_status}
-          onSubmitVerification={handleSubmitVerification}
         />
       </Section>
         </>

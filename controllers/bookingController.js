@@ -153,7 +153,10 @@ const createBooking = async (req, res) => {
     const paymentPipeline = getPaymentPipeline(participant);
 
     if (rate > 0 && isFundedAccount(participant)) {
-      const rateCheck = validateParticipantOfferedHourlyRate(service_type, start_time, rate, { highIntensity });
+      const rateCheck = validateParticipantOfferedHourlyRate(service_type, start_time, rate, {
+        highIntensity,
+        endTimeIso: end_time,
+      });
       if (!rateCheck.ok) {
         return res.status(400).json({
           ok: false,
