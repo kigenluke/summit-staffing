@@ -51,9 +51,10 @@ function stripeActionHint(err) {
 
   if (/collecting requirements|responsibilities for collecting/i.test(msg)) {
     return (
-      'Stripe Connect Custom is not fully enabled on the platform account. ' +
-      'Dashboard → Settings → Connect → enable Custom accounts (Australia) and complete platform setup. ' +
-      'Until then, use Open Stripe when the app offers it.'
+      'Stripe platform owner: Dashboard → Settings → Connect → Platform setup (or Platform profile). ' +
+      'Confirm your platform collects worker verification info (requirement_collection = application) and accepts liability for losses. ' +
+      'See https://docs.stripe.com/connect/custom/onboarding — then redeploy and try Save bank account again. ' +
+      'If the app offers Open Stripe, you can add bank details there temporarily.'
     );
   }
 

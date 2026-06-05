@@ -27,6 +27,7 @@ export function PaymentsScreen() {
   const [bankAccountNumber, setBankAccountNumber] = useState('');
   const [savingBank, setSavingBank] = useState(false);
   const [showBankForm, setShowBankForm] = useState(false);
+  const [startingExpressOnboarding, setStartingExpressOnboarding] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -79,6 +80,27 @@ export function PaymentsScreen() {
     }
     if (data?.loginUrl) {
       await Linking.openURL(data.loginUrl);
+    }
+  };
+
+  const openStripeExpressOnboarding = async () => {
+    try {
+      setStartingExpressOnboarding(true);
+      const { data, error } = await api.post('/api/payments/connect/express/onboarding');
+      if (error) {
+        Alert.alert('Error', error.message || 'Failed to start Stripe onboarding');
+        return;
+      }
+      const url = data?.express_onboarding_url;
+      if (!url) {
+        Alert.alert('Error', 'Stripe did not return an onboarding URL.');
+        return;
+      }
+      await Linking.openURL(url);
+    } catch (_) {
+      Alert.alert('Error', 'Could not open Stripe onboarding.');
+    } finally {
+      setStartingExpressOnboarding(false);
     }
   };
 
@@ -221,139 +243,69 @@ export function PaymentsScreen() {
           <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.sm }}>
             <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.sm }}>Payout bank account</Text>
             <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, lineHeight: 20, marginBottom: Spacing.md }}>
-              Enter your Australian BSB and account number to receive payouts (85% of approved shifts). Summit sends details securely to our payment partner — we never store your full account number in our database.
+              Add your bank details using Stripe’s hosted Express flow. This is the same screen you see on Stripe for Express onboarding.
             </Text>
 
-            {hasSavedBank && !showInAppBankForm ? (
-              <>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm }}>
-                  <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.status.success }} />
-                  <Text style={{ color: Colors.status.success, fontWeight: Typography.fontWeight.semibold }}>Bank account connected</Text>
-                </View>
-                <View style={{ backgroundColor: Colors.surfaceSecondary, borderWidth: 1, borderColor: Colors.borderLight, borderRadius: Radius.md, padding: Spacing.sm, marginBottom: Spacing.md }}>
-                  <Text style={{ color: Colors.text.primary, fontWeight: Typography.fontWeight.medium }}>
-                    {connectStatus.bank_account.account_holder_name || 'Account holder'}
-                  </Text>
-                  <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, marginTop: 4 }}>
-                    BSB {connectStatus.bank_account.bsb_display || '—'} · Account •••• {connectStatus.bank_account.last4}
-                  </Text>
-                </View>
-                <Pressable
-                  onPress={() => setShowBankForm(true)}
-                  style={({ pressed }) => ({
-                    backgroundColor: Colors.primary,
-                    paddingVertical: Spacing.sm + 1,
-                    borderRadius: Radius.md,
-                    alignItems: 'center',
-                    opacity: pressed ? 0.88 : 1,
-                    marginBottom: Spacing.sm,
-                  })}
-                >
-                  <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Update bank details</Text>
-                </Pressable>
-                <Pressable onPress={disconnectStripe} style={({ pressed }) => ({ opacity: pressed ? 0.88 : 1 })}>
-                  <Text style={{ color: Colors.status.error, fontWeight: Typography.fontWeight.semibold, textAlign: 'center' }}>Remove payout account</Text>
-                </Pressable>
-              </>
-            ) : showInAppBankForm ? (
-              <>
-                <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs, marginBottom: Spacing.sm }}>Account holder name</Text>
-                <TextInput
-                  value={bankHolderName}
-                  onChangeText={setBankHolderName}
-                  placeholder="e.g. Jane Smith"
-                  autoCapitalize="words"
-                  style={{
-                    borderWidth: 1,
-                    borderColor: Colors.border,
-                    borderRadius: Radius.md,
-                    padding: Spacing.sm,
-                    marginBottom: Spacing.md,
-                    color: Colors.text.primary,
-                    backgroundColor: Colors.surface,
-                  }}
-                />
-                <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs, marginBottom: Spacing.sm }}>BSB (6 digits)</Text>
-                <TextInput
-                  value={bankBsb}
-                  onChangeText={setBankBsb}
-                  placeholder="062-000"
-                  keyboardType="number-pad"
-                  maxLength={7}
-                  style={{
-                    borderWidth: 1,
-                    borderColor: Colors.border,
-                    borderRadius: Radius.md,
-                    padding: Spacing.sm,
-                    marginBottom: Spacing.md,
-                    color: Colors.text.primary,
-                    backgroundColor: Colors.surface,
-                  }}
-                />
-                <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs, marginBottom: Spacing.sm }}>Account number</Text>
-                <TextInput
-                  value={bankAccountNumber}
-                  onChangeText={setBankAccountNumber}
-                  placeholder="Account number"
-                  keyboardType="number-pad"
-                  autoComplete="off"
-                  textContentType="none"
-                  maxLength={9}
-                  style={{
-                    borderWidth: 1,
-                    borderColor: Colors.border,
-                    borderRadius: Radius.md,
-                    padding: Spacing.sm,
-                    marginBottom: Spacing.md,
-                    color: Colors.text.primary,
-                    backgroundColor: Colors.surface,
-                  }}
-                />
-                <Pressable
-                  onPress={saveBankDetails}
-                  disabled={savingBank}
-                  style={({ pressed }) => ({
-                    backgroundColor: Colors.primary,
-                    paddingVertical: Spacing.sm + 1,
-                    borderRadius: Radius.md,
-                    alignItems: 'center',
-                    opacity: pressed || savingBank ? 0.85 : 1,
-                  })}
-                >
-                  <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>
-                    {savingBank ? 'Saving…' : 'Save bank account'}
-                  </Text>
-                </Pressable>
-                {connectStatus?.bank_account?.last4 ? (
-                  <Pressable onPress={() => setShowBankForm(false)} style={{ marginTop: Spacing.sm }}>
-                    <Text style={{ color: Colors.text.muted, textAlign: 'center' }}>Cancel</Text>
-                  </Pressable>
-                ) : null}
-              </>
-            ) : isLegacyExpressAccount && connectStatus?.charges_enabled ? (
-              <>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm }}>
-                  <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.status.success }} />
-                  <Text style={{ color: Colors.status.success, fontWeight: Typography.fontWeight.semibold }}>Legacy Stripe Express — payouts enabled</Text>
-                </View>
-                <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, marginBottom: Spacing.md }}>
-                  Prefer in-app BSB? Tap “Switch to BSB form” below. We only store your Stripe account ID, not raw bank numbers.
-                </Text>
-                <Pressable onPress={openStripeDashboard} style={({ pressed }) => ({ backgroundColor: '#635BFF', paddingVertical: Spacing.sm + 1, borderRadius: Radius.md, alignItems: 'center', opacity: pressed ? 0.88 : 1, marginBottom: Spacing.sm })}>
-                  <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Open Stripe dashboard</Text>
-                </Pressable>
-                <Pressable onPress={() => setShowBankForm(true)} style={({ pressed }) => ({ backgroundColor: Colors.primary, paddingVertical: Spacing.sm + 1, borderRadius: Radius.md, alignItems: 'center', opacity: pressed ? 0.88 : 1, marginBottom: Spacing.sm })}>
-                  <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Switch to BSB form</Text>
-                </Pressable>
-                <Pressable onPress={disconnectStripe} style={({ pressed }) => ({ opacity: pressed ? 0.88 : 1 })}>
-                  <Text style={{ color: Colors.status.error, fontWeight: Typography.fontWeight.semibold, textAlign: 'center' }}>Remove payout account</Text>
-                </Pressable>
-              </>
-            ) : connectStatus?.hasWorkerProfile === false ? (
+            {connectStatus?.hasWorkerProfile === false ? (
               <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm }}>
-                Complete your worker profile first (Profile → Manage Worker Profile), then add your bank details here.
+                Complete your worker profile first (Profile → Manage Worker Profile), then add your bank details using Stripe.
               </Text>
-            ) : null}
+            ) : (
+              <>
+                {hasSavedBank ? (
+                  <>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm }}>
+                      <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.status.success }} />
+                      <Text style={{ color: Colors.status.success, fontWeight: Typography.fontWeight.semibold }}>Bank account connected</Text>
+                    </View>
+                    <View style={{ backgroundColor: Colors.surfaceSecondary, borderWidth: 1, borderColor: Colors.borderLight, borderRadius: Radius.md, padding: Spacing.sm, marginBottom: Spacing.md }}>
+                      <Text style={{ color: Colors.text.primary, fontWeight: Typography.fontWeight.medium }}>
+                        {connectStatus.bank_account.account_holder_name || 'Account holder'}
+                      </Text>
+                      <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, marginTop: 4 }}>
+                        BSB {connectStatus.bank_account.bsb_display || '—'} · Account •••• {connectStatus.bank_account.last4}
+                      </Text>
+                    </View>
+                    <Pressable
+                      onPress={openStripeExpressOnboarding}
+                      disabled={startingExpressOnboarding}
+                      style={({ pressed }) => ({
+                        backgroundColor: Colors.primary,
+                        paddingVertical: Spacing.sm + 1,
+                        borderRadius: Radius.md,
+                        alignItems: 'center',
+                        opacity: pressed || startingExpressOnboarding ? 0.85 : 1,
+                        marginBottom: Spacing.sm,
+                      })}
+                    >
+                      <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>
+                        {startingExpressOnboarding ? 'Opening…' : 'Update bank details'}
+                      </Text>
+                    </Pressable>
+                    <Pressable onPress={disconnectStripe} style={({ pressed }) => ({ opacity: pressed ? 0.88 : 1 })}>
+                      <Text style={{ color: Colors.status.error, fontWeight: Typography.fontWeight.semibold, textAlign: 'center' }}>Remove payout account</Text>
+                    </Pressable>
+                  </>
+                ) : (
+                  <Pressable
+                    onPress={openStripeExpressOnboarding}
+                    disabled={startingExpressOnboarding}
+                    style={({ pressed }) => ({
+                      backgroundColor: Colors.primary,
+                      paddingVertical: Spacing.sm + 1,
+                      borderRadius: Radius.md,
+                      alignItems: 'center',
+                      opacity: pressed || startingExpressOnboarding ? 0.85 : 1,
+                      marginBottom: Spacing.sm,
+                    })}
+                  >
+                    <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>
+                      {startingExpressOnboarding ? 'Opening…' : 'Add bank details (Stripe Express)'}
+                    </Text>
+                  </Pressable>
+                )}
+              </>
+            )}
           </View>
         </View>
       )}
