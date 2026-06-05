@@ -25,10 +25,10 @@ const useCustomConnect = () => String(process.env.STRIPE_CONNECT_MODE || 'custom
 
 /**
  * Custom Connect worker account (separate charges & transfers — no worker Stripe dashboard).
- * Stripe minimum: type custom, country AU, transfers capability.
+ * Stripe minimum: type custom, country AU, transfers capability only (no `controller` — mutually exclusive with `type`).
  */
-const createCustomWorkerAccount = async ({ email, firstName, lastName, tosAcceptanceIp }) => {
-  const payload = {
+const createCustomWorkerAccount = async ({ email, firstName, lastName, tosAcceptanceIp }) =>
+  stripe.accounts.create({
     type: 'custom',
     country: 'AU',
     email: String(email || '').trim(),
@@ -51,22 +51,7 @@ const createCustomWorkerAccount = async ({ email, firstName, lastName, tosAccept
         schedule: { interval: 'daily' },
       },
     },
-  };
-
-  try {
-    return await stripe.accounts.create(payload);
-  } catch (minimalErr) {
-    return stripe.accounts.create({
-      ...payload,
-      controller: {
-        stripe_dashboard: { type: 'none' },
-        fees: { payer: 'application' },
-        losses: { payments: 'application' },
-        requirement_collection: 'application',
-      },
-    });
-  }
-};
+  });
 
 const attachAustralianBankAccount = async (accountId, { accountHolderName, bsb, accountNumber }) => {
   const routing = String(bsb).replace(/\D/g, '');

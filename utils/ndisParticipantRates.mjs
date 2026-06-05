@@ -19,9 +19,24 @@ const DEFAULT_SHIFT_TYPES = {
   public_holiday: { min: 117.0, max: 156.03 },
 };
 
+/** Node (Railway) uses process.env; Vite web has no process — use defaults there. */
+function readEnv(key) {
+  try {
+    if (typeof process !== 'undefined' && process.env && process.env[key] != null) {
+      return process.env[key];
+    }
+  } catch (_) {}
+  try {
+    if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key] != null) {
+      return import.meta.env[key];
+    }
+  } catch (_) {}
+  return null;
+}
+
 function envShiftLimit(typeId, bound) {
   const key = `NDIS_SHIFT_${String(typeId).toUpperCase()}_${bound === 'min' ? 'MIN' : 'MAX'}`;
-  const raw = process.env[key];
+  const raw = readEnv(key);
   if (raw == null || raw === '') return null;
   const n = Number(raw);
   return Number.isFinite(n) ? n : null;
