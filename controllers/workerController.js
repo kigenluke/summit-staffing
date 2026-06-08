@@ -17,7 +17,7 @@ const respondValidation = (req, res) => {
   return false;
 };
 
-const VALID_DOCUMENT_TYPES = ['ndis_screening', 'wwcc', 'yellow_card', 'police_check', 'first_aid', 'manual_handling', 'insurance', 'other'];
+const { VALID_WORKER_DOCUMENT_TYPES: VALID_DOCUMENT_TYPES } = require('../utils/workerDocumentCatalog.cjs');
 
 const parseCsv = (value) => {
   if (!value) return [];

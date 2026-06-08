@@ -3,8 +3,10 @@ import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import {
   getComplianceProgress,
+  getExpiredComplianceDocuments,
   REQUIRED_WORKER_COMPLIANCE_DOCS,
   REQUIRED_PARTICIPANT_COMPLIANCE_DOCS,
+  DOC_TYPE_LABELS,
 } from '../utils/complianceProgress.js';
 
 /**
@@ -13,6 +15,7 @@ import {
  * - needs_documents (required docs not all uploaded)
  * - ready_to_submit (all uploaded, not yet submitted)
  * - pending_verification (submitted, awaiting admin)
+ * - documents_expired (one or more required docs past expiry)
  * - verified
  */
 const AccountAccessContext = createContext({
@@ -20,12 +23,14 @@ const AccountAccessContext = createContext({
   accessChecking: false,
   loaded: false,
   accessPhase: 'loading',
+  expiredDocuments: [],
   refresh: async () => {},
   syncFromWorkerProfile: () => {},
   syncFromParticipantProfile: () => {},
 });
 
-function derivePhase({ progress, verified, submitted }) {
+function derivePhase({ progress, verified, submitted, expiredDocuments }) {
+  if (expiredDocuments?.length > 0) return 'documents_expired';
   if (!progress?.allUploaded) return 'needs_documents';
   if (!submitted) return 'ready_to_submit';
   if (!verified) return 'pending_verification';
@@ -44,19 +49,22 @@ export function WorkerGateProvider({ children }) {
     progress: null,
     verified: false,
     submitted: false,
+    expiredDocuments: [],
     accessPhase: 'loading',
   });
 
   const applyFromProfile = useCallback((profile, documents, requiredTypes) => {
     const progress = getComplianceProgress(documents, requiredTypes);
+    const expiredDocuments = getExpiredComplianceDocuments(documents, requiredTypes, DOC_TYPE_LABELS);
     const verified = profile?.verification_status === 'verified';
     const submitted = Boolean(profile?.verification_submitted_at);
-    const accessPhase = derivePhase({ progress, verified, submitted });
+    const accessPhase = derivePhase({ progress, verified, submitted, expiredDocuments });
     setState({
       loaded: true,
       progress,
       verified,
       submitted,
+      expiredDocuments,
       accessPhase,
     });
   }, []);
@@ -68,6 +76,7 @@ export function WorkerGateProvider({ children }) {
         progress: { allUploaded: true, uploadedCount: 0, total: 0, missing: [] },
         verified: true,
         submitted: true,
+        expiredDocuments: [],
         accessPhase: 'verified',
       });
       return;
@@ -79,14 +88,14 @@ export function WorkerGateProvider({ children }) {
         if (data?.ok && data?.worker) {
           applyFromProfile(data.worker, data.documents || [], REQUIRED_WORKER_COMPLIANCE_DOCS);
         } else {
-          setState({ loaded: true, progress: null, verified: false, submitted: false, accessPhase: 'needs_documents' });
+          setState({ loaded: true, progress: null, verified: false, submitted: false, expiredDocuments: [], accessPhase: 'needs_documents' });
         }
         return;
       }
 
       // Participant compliance gating removed — nothing to load here.
     } catch {
-      setState({ loaded: true, progress: null, verified: false, submitted: false, accessPhase: 'needs_documents' });
+      setState({ loaded: true, progress: null, verified: false, submitted: false, expiredDocuments: [], accessPhase: 'needs_documents' });
     }
   }, [isGatedRole, isWorker, isParticipant, applyFromProfile]);
 
@@ -114,6 +123,7 @@ export function WorkerGateProvider({ children }) {
         loaded: state.loaded,
         accessPhase: state.accessPhase,
         progress: state.progress,
+        expiredDocuments: state.expiredDocuments,
         refresh,
         syncFromWorkerProfile,
         syncFromParticipantProfile,

@@ -19,17 +19,21 @@ const DEFAULT_SHIFT_TYPES = {
   public_holiday: { min: 117.0, max: 156.03 },
 };
 
-/** Node (Railway) uses process.env; Vite web has no process — use defaults there. */
+/** Node (Railway) uses process.env; Vite web uses import.meta.env; RN uses defaults. */
 function readEnv(key) {
   try {
     if (typeof process !== 'undefined' && process.env && process.env[key] != null) {
       return process.env[key];
     }
   } catch (_) {}
+  // Keep import.meta inside Function so Metro/Hermes does not fail parsing release bundles.
   try {
-    if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key] != null) {
-      return import.meta.env[key];
-    }
+    const getter = new Function(
+      'k',
+      'try { return import.meta?.env?.[k]; } catch (_) { return undefined; }'
+    );
+    const v = getter(key);
+    if (v != null && v !== '') return v;
   } catch (_) {}
   return null;
 }

@@ -20,38 +20,61 @@ const resolveAppBaseUrl = () => {
   return 'http://localhost:3000';
 };
 
-/** In-app BSB is the default; set STRIPE_CONNECT_MODE=express only for legacy testing. */
-const useCustomConnect = () => String(process.env.STRIPE_CONNECT_MODE || 'custom').toLowerCase() !== 'express';
+/** Express Connect is the default for worker payouts; set STRIPE_CONNECT_MODE=custom only for legacy in-app BSB. */
+const useCustomConnect = () => String(process.env.STRIPE_CONNECT_MODE || 'express').toLowerCase() === 'custom';
+
+const buildCustomWorkerAccountBase = ({ email, firstName, lastName, tosAcceptanceIp }) => ({
+  country: 'AU',
+  email: String(email || '').trim(),
+  business_type: 'individual',
+  capabilities: {
+    transfers: { requested: true },
+  },
+  individual: {
+    first_name: String(firstName || '').trim() || 'Worker',
+    last_name: String(lastName || '').trim() || 'User',
+    email: String(email || '').trim(),
+  },
+  tos_acceptance: {
+    date: Math.floor(Date.now() / 1000),
+    ip: tosAcceptanceIp || '127.0.0.1',
+    service_agreement: 'recipient',
+  },
+  settings: {
+    payouts: {
+      schedule: { interval: 'daily' },
+    },
+  },
+});
 
 /**
- * Custom Connect worker account (separate charges & transfers — no worker Stripe dashboard).
- * Stripe minimum: type custom, country AU, transfers capability only (no `controller` — mutually exclusive with `type`).
+ * Custom Connect worker (no Stripe dashboard). Uses controller properties — do NOT pass `type` with `controller`.
+ * @see https://docs.stripe.com/connect/migrate-to-controller-properties
  */
-const createCustomWorkerAccount = async ({ email, firstName, lastName, tosAcceptanceIp }) =>
-  stripe.accounts.create({
-    type: 'custom',
-    country: 'AU',
-    email: String(email || '').trim(),
-    business_type: 'individual',
-    capabilities: {
-      transfers: { requested: true },
-    },
-    individual: {
-      first_name: String(firstName || '').trim() || 'Worker',
-      last_name: String(lastName || '').trim() || 'User',
-      email: String(email || '').trim(),
-    },
-    tos_acceptance: {
-      date: Math.floor(Date.now() / 1000),
-      ip: tosAcceptanceIp || '127.0.0.1',
-      service_agreement: 'recipient',
-    },
-    settings: {
-      payouts: {
-        schedule: { interval: 'daily' },
+const createCustomWorkerAccount = async ({ email, firstName, lastName, tosAcceptanceIp }) => {
+  const base = buildCustomWorkerAccountBase({ email, firstName, lastName, tosAcceptanceIp });
+
+  try {
+    return await stripe.accounts.create({
+      ...base,
+      controller: {
+        stripe_dashboard: { type: 'none' },
+        fees: { payer: 'application' },
+        losses: { payments: 'application' },
+        requirement_collection: 'application',
       },
-    },
-  });
+    });
+  } catch (controllerErr) {
+    const msg = String(controllerErr?.message || '').toLowerCase();
+    if (/mutually exclusive|may not provide the `type`/i.test(msg)) {
+      throw controllerErr;
+    }
+    return stripe.accounts.create({
+      type: 'custom',
+      ...base,
+    });
+  }
+};
 
 const attachAustralianBankAccount = async (accountId, { accountHolderName, bsb, accountNumber }) => {
   const routing = String(bsb).replace(/\D/g, '');

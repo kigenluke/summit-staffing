@@ -16,6 +16,7 @@ import { ComplianceDateField, fromYmd } from './ComplianceDateField.js';
 import {
   getComplianceProgress,
   getLatestDocumentForType,
+  getDocumentChecklistStatus,
 } from '../utils/complianceProgress.js';
 import { formatDateDMY } from '../utils/dateFormat.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
@@ -23,11 +24,21 @@ import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme
 const ACCEPTED_MIME = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg', 'image/webp'];
 const MAX_FILE_MB = 10;
 
+const CHECKLIST_ICON_META = {
+  check: { bg: Colors.status.success, icon: '✓' },
+  clock: { bg: `${Colors.primary}99`, icon: '⏱' },
+  alert: { bg: Colors.status.error, icon: '!' },
+  plus: { bg: Colors.primary, icon: 'plus' },
+};
+
 const STATUS_META = {
-  approved: { label: 'Approved', color: Colors.status.success, bg: Colors.status.success, icon: '✓' },
-  pending: { label: 'Pending review', color: Colors.status.warning, bg: Colors.status.warning, icon: '⏳' },
-  rejected: { label: 'Rejected', color: Colors.status.error, bg: Colors.status.error, icon: '!' },
-  missing: { label: 'Not uploaded', color: Colors.primary, bg: Colors.primary, icon: '+' },
+  approved: { label: 'Approved', color: Colors.status.success },
+  pending: { label: 'Pending review', color: Colors.status.warning },
+  rejected: { label: 'Rejected', color: Colors.status.error },
+  missing: { label: 'Not uploaded', color: Colors.primary },
+  verified: { label: 'Verified', color: Colors.status.success },
+  expiring: { label: 'Expiring soon', color: Colors.status.warning },
+  expired: { label: 'Expired', color: Colors.status.error },
 };
 
 function PlusIcon({ color = Colors.text.white, size = 20 }) {
@@ -57,16 +68,20 @@ function PlusIcon({ color = Colors.text.white, size = 20 }) {
   );
 }
 
-function DocStatusIcon({ status }) {
-  const meta = STATUS_META[status] || STATUS_META.missing;
-  const isPlus = status === 'missing';
+function DocStatusIcon({ iconKey = 'plus', visualStatus }) {
+  const meta = CHECKLIST_ICON_META[iconKey] || CHECKLIST_ICON_META.plus;
+  const isPlus = iconKey === 'plus';
+  const bg =
+    iconKey === 'clock' && visualStatus === 'expiring'
+      ? Colors.status.warning
+      : meta.bg;
   return (
     <View
       style={{
         width: 42,
         height: 42,
         borderRadius: 21,
-        backgroundColor: meta.bg,
+        backgroundColor: bg,
         alignItems: 'center',
         justifyContent: 'center',
         ...Shadows.sm,
@@ -131,8 +146,8 @@ function StatusBadge({ status }) {
 }
 
 function DocumentTypeCard({ docType, doc, selected, required, onSelect }) {
-  const status = doc?.status || 'missing';
-  const isMissing = status === 'missing';
+  const checklist = getDocumentChecklistStatus(doc);
+  const isMissing = checklist.visualStatus === 'missing';
 
   return (
     <Pressable
@@ -152,33 +167,47 @@ function DocumentTypeCard({ docType, doc, selected, required, onSelect }) {
         ...Shadows.sm,
       })}
     >
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.md }}>
-        <DocStatusIcon status={status} />
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.md }}>
+        <DocStatusIcon iconKey={checklist.iconKey} visualStatus={checklist.visualStatus} />
         <View style={{ flex: 1 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.sm }}>
-            <Text style={{ flex: 1, fontWeight: Typography.fontWeight.semibold, color: Colors.text.primary, fontSize: Typography.fontSize.base }}>
+            <Text style={{ flex: 1, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, fontSize: Typography.fontSize.base }}>
               {docType.label}
             </Text>
-            {required ? (
+            {required && isMissing ? (
               <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.primary, fontWeight: Typography.fontWeight.semibold }}>Required</Text>
             ) : null}
           </View>
-          <View style={{ marginTop: 6 }}>
-            <StatusBadge status={status} />
-          </View>
-          {isMissing && !selected ? (
-            <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.primary, marginTop: 6, fontWeight: Typography.fontWeight.semibold }}>
-              Tap + or anywhere on this row to upload
+          {docType.subtitle ? (
+            <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: 2 }}>
+              {docType.subtitle}
             </Text>
           ) : null}
-          {doc?.expiry_date ? (
+          {docType.hint ? (
+            <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: 6, lineHeight: 20 }}>
+              {docType.hint}
+            </Text>
+          ) : null}
+          {checklist.message ? (
+            <Text
+              style={{
+                fontSize: Typography.fontSize.sm,
+                color: Colors.text.primary,
+                marginTop: 8,
+                fontWeight: Typography.fontWeight.bold,
+                lineHeight: 20,
+              }}
+            >
+              {checklist.message}
+            </Text>
+          ) : isMissing && !selected ? (
+            <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.primary, marginTop: 8, fontWeight: Typography.fontWeight.semibold }}>
+              Tap + to upload
+            </Text>
+          ) : null}
+          {doc?.expiry_date && checklist.visualStatus !== 'missing' ? (
             <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: 4 }}>
               Expires {formatDateDMY(doc.expiry_date)}
-            </Text>
-          ) : null}
-          {doc?.rejection_reason ? (
-            <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.status.error, marginTop: 4 }}>
-              {doc.rejection_reason}
             </Text>
           ) : null}
           {doc?.file_url ? (
@@ -531,13 +560,12 @@ export function ComplianceDocumentsPanel({
 
       {docTypes.map((dt) => {
         const doc = getLatestDocumentForType(documents, dt.key);
-        const cardStatus = doc ? doc.status : 'missing';
         const isSelected = selectedDocType === dt.key;
         return (
           <View key={dt.key}>
             <DocumentTypeCard
               docType={dt}
-              doc={doc ? { ...doc, status: cardStatus } : null}
+              doc={doc || null}
               selected={isSelected}
               required={requiredSet.has(dt.key)}
               onSelect={(key) => {

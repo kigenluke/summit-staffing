@@ -102,22 +102,43 @@ const ROLE_WELCOME_LABELS = {
 };
 
 const sendWelcomeEmail = async (email, { firstName, role } = {}) => {
+  const to = String(email || '').trim().toLowerCase();
+  if (!to || !to.includes('@')) {
+    throw new Error('Welcome email: missing or invalid recipient address');
+  }
+  if (!isOutboundEmailConfigured()) {
+    throw new Error('Welcome email: MAILGUN_API_KEY and MAILGUN_DOMAIN are not set on the server');
+  }
+
   const appUrl = getClientAppBaseUrl();
   const safeName = firstName ? String(firstName).trim().replace(/</g, '&lt;') : '';
   const greeting = safeName ? `Hi ${safeName},` : 'Hi there,';
   const roleLabel = ROLE_WELCOME_LABELS[role] || 'member';
   const subject = 'Welcome to Summit Staffing';
   const html = `
-    <p>${greeting}</p>
-    <p>Thank you for joining <strong>Summit Staffing</strong> as a ${roleLabel}.</p>
-    <p>Your account has been created. You can sign in anytime here:</p>
-    <p><a href="${appUrl}">${appUrl}</a></p>
-    <p>Complete your profile and upload any required documents so we can verify your account.</p>
-    <p>If you did not create this account, please contact us at info@summitstaffing.com.au.</p>
-    <p>— Summit Staffing</p>
+    <div style="font-family:system-ui,-apple-system,sans-serif;max-width:520px;margin:0 auto;color:#1a1a1a;">
+      <h2 style="color:#0d9488;margin-bottom:8px;">Welcome to Summit Staffing</h2>
+      <p>${greeting}</p>
+      <p>Thank you for creating your account as a <strong>${roleLabel}</strong>.</p>
+      <p>Your sign-in email is: <strong>${to.replace(/</g, '&lt;')}</strong></p>
+      <p style="margin:24px 0;">
+        <a href="${appUrl}" style="display:inline-block;background:#0d9488;color:#ffffff;padding:12px 24px;text-decoration:none;border-radius:8px;font-weight:600;">
+          Open Summit Staffing
+        </a>
+      </p>
+      <p style="font-size:14px;color:#555;">Complete your profile and upload any required documents so we can verify your account.</p>
+      <p style="font-size:14px;color:#777;margin-top:24px;">If you did not create this account, contact us at support@summitstaffing.com.au.</p>
+      <p>— Summit Staffing</p>
+    </div>
   `;
-  const text = `${greeting}\n\nThank you for joining Summit Staffing as a ${roleLabel}.\n\nSign in: ${appUrl}\n\nComplete your profile and upload required documents for verification.\n\n— Summit Staffing`;
-  return sendEmail(email, subject, html, [], text);
+  const text =
+    `${greeting}\n\n`
+    + `Thank you for creating your Summit Staffing account as a ${roleLabel}.\n\n`
+    + `Sign-in email: ${to}\n\n`
+    + `Open the app: ${appUrl}\n\n`
+    + `Complete your profile and upload required documents for verification.\n\n`
+    + `— Summit Staffing`;
+  return sendEmail(to, subject, html, [], text);
 };
 
 const sendCoordinatorInviteEmail = async (toEmail, participantDisplayName, signupUrl) => {

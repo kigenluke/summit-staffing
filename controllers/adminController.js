@@ -432,13 +432,17 @@ const getBookingMetrics = async (req, res) => {
   }
 };
 
-const COMPLIANCE_DOC_MAP = {
-  ndis_screening: { label: 'NDIS Worker Screening', documentType: 'ndis_screening' },
-  blue_card: { label: 'Blue Card / WWCC', documentType: 'wwcc' },
-  police_check: { label: 'National Police Check', documentType: 'police_check' },
-  first_aid: { label: 'First Aid / CPR', documentType: 'first_aid' },
-  insurance: { label: 'Insurance', documentType: 'insurance' },
-};
+const {
+  WORKER_DOCUMENT_CATALOG,
+  DOC_TYPE_LABELS,
+} = require('../utils/workerDocumentCatalog.cjs');
+
+const COMPLIANCE_DOC_MAP = Object.fromEntries(
+  WORKER_DOCUMENT_CATALOG.filter((d) => d.key !== 'other').map((d) => [
+    d.key,
+    { label: DOC_TYPE_LABELS[d.key] || d.label, documentType: d.key },
+  ])
+);
 
 const normalizeComplianceStatus = (doc) => {
   if (!doc) return 'not_started';

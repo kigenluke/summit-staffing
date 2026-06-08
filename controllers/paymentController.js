@@ -124,17 +124,6 @@ const ensurePaymentRecordForIntent = async (paymentIntentId, paymentIntent, opti
   return inserted.rows[0];
 };
 
-/** @deprecated Express onboarding — workers use POST /connect/bank-details (Custom Connect). */
-const createConnectAccount = async (req, res) => {
-  if (!ensureStripeConfigured(res)) return;
-  return res.status(400).json({
-    ok: false,
-    error: 'Enter your BSB and account number on this screen and tap Save bank account. No Stripe login is required.',
-    use_in_app_bank_form: true,
-    connect_mode: 'custom',
-  });
-};
-
 /**
  * Worker-only: safe diagnostics for Stripe Connect (no secrets exposed).
  * Use when onboard fails — verify Railway env without guessing.
@@ -191,8 +180,8 @@ const getAccountStatus = async (req, res) => {
         hasWorkerProfile: false,
         hasAccount: false,
         onboardingComplete: false,
-        connect_mode: 'custom',
-        preferred_setup: 'in_app_bank',
+        connect_mode: 'express',
+        preferred_setup: 'stripe_express',
         charges_enabled: false,
         payouts_enabled: false,
         details_submitted: false,
@@ -205,8 +194,8 @@ const getAccountStatus = async (req, res) => {
         ok: true,
         hasAccount: false,
         onboardingComplete: false,
-        connect_mode: 'custom',
-        preferred_setup: 'in_app_bank',
+        connect_mode: 'express',
+        preferred_setup: 'stripe_express',
       });
     }
 
@@ -256,7 +245,7 @@ const getAccountStatus = async (req, res) => {
       hasAccount: true,
       accountId,
       connect_mode: isCustom ? 'custom' : 'express',
-      preferred_setup: 'in_app_bank',
+      preferred_setup: 'stripe_express',
       onboardingComplete,
       charges_enabled: account.charges_enabled,
       payouts_enabled: account.payouts_enabled,
@@ -279,6 +268,63 @@ const getAccountStatus = async (req, res) => {
     return res.status(500).json({ ok: false, error: 'Failed to get Stripe account status' });
   }
 };
+
+/** Worker: Stripe Express onboarding (hosted) to add/update bank details for payouts. */
+const getExpressOnboardingUrlHandler = async (req, res) => {
+  try {
+    if (!ensureStripeConfigured(res)) return;
+
+    const workerRes = await pool.query(
+      `SELECT w.id, w.stripe_account_id, u.email
+       FROM workers w
+       JOIN users u ON u.id = w.user_id
+       WHERE w.user_id = $1
+       LIMIT 1`,
+      [req.user.userId]
+    );
+
+    if (workerRes.rowCount === 0) {
+      return res.status(403).json({ ok: false, error: 'Worker profile not found.' });
+    }
+
+    let accountId = workerRes.rows[0].stripe_account_id;
+
+    if (accountId) {
+      try {
+        const existing = await stripe.accounts.retrieve(accountId);
+        if (existing.type !== 'express') accountId = null; // e.g. old custom account -> replace with express
+      } catch (e) {
+        if (isStaleConnectAccountError(e)) accountId = null;
+        else throw e;
+      }
+    }
+
+    if (!accountId) {
+      const acct = await createConnectedAccount(workerRes.rows[0].email);
+      accountId = acct.id;
+      await pool.query(
+        'UPDATE workers SET stripe_account_id = $2, updated_at = now() WHERE id = $1',
+        [workerRes.rows[0].id, accountId]
+      );
+    }
+
+    const link = await createAccountLink(accountId);
+    return res.status(200).json({
+      ok: true,
+      connect_mode: 'express',
+      express_onboarding_url: link.url,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: userFacingPaymentMessage(pickErrorMessage(err) || err, 500) || 'Failed to start Stripe onboarding.',
+      hint: stripeActionHint(err),
+    });
+  }
+};
+
+/** Worker: create/reuse Express Connect account and return hosted onboarding URL. */
+const createConnectAccount = getExpressOnboardingUrlHandler;
 
 /** Worker: save AU bank details in-app (Stripe Custom Connect — BSB never stored in our DB). */
 const saveWorkerBankDetails = async (req, res) => {
@@ -357,7 +403,7 @@ const saveWorkerBankDetails = async (req, res) => {
     const needsPlatformConnect =
       /collecting requirements|responsibilities for collecting|custom accounts are not enabled/i.test(rawMsg);
 
-    if (needsPlatformConnect && worker && !useCustomConnect()) {
+    if (needsPlatformConnect && worker) {
       try {
         let fallbackAccountId = worker.stripe_account_id;
         if (fallbackAccountId) {
@@ -380,7 +426,7 @@ const saveWorkerBankDetails = async (req, res) => {
         return res.status(503).json({
           ok: false,
           error:
-            'In-app bank setup is not enabled on Stripe yet. Tap Open Stripe to add your bank account there.',
+            'In-app bank setup needs one more step in Stripe Dashboard (platform collects worker verification). Use Open Stripe below to add your bank for now.',
           hint: stripeActionHint(err),
           express_onboarding_url: link.url,
         });
@@ -1110,6 +1156,7 @@ module.exports = {
   createConnectAccount,
   getConnectConfigCheck,
   getAccountStatus,
+  getExpressOnboardingUrl: getExpressOnboardingUrlHandler,
   createConnectLoginLink: createConnectLoginLinkHandler,
   disconnectConnectAccount: disconnectConnectAccountHandler,
   createPaymentIntent: createPaymentIntentHandler,

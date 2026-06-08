@@ -23,6 +23,7 @@ router.get('/connect/config-check', [auth, checkWorker], paymentController.getCo
 router.get('/connect/status', [auth, checkWorker], paymentController.getAccountStatus);
 router.post('/connect/login-link', [auth, checkWorker], paymentController.createConnectLoginLink);
 router.post('/connect/disconnect', [auth, checkWorker], paymentController.disconnectConnectAccount);
+router.post('/connect/express/onboarding', [auth, checkWorker], paymentController.getExpressOnboardingUrl);
 
 router.post(
   '/connect/bank-details',

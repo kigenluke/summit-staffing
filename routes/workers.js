@@ -51,10 +51,12 @@ router.get(
 router.get('/me', [auth, checkWorker], workerController.getMe);
 router.post('/me/submit-verification', [auth, checkWorker], workerController.submitVerification);
 
+const { VALID_WORKER_DOCUMENT_TYPES } = require('../utils/workerDocumentCatalog.cjs');
+
 const workerDocumentValidators = [
   complianceUpload.single('file'),
   body('documentType')
-    .isIn(['ndis_screening', 'wwcc', 'yellow_card', 'police_check', 'first_aid', 'manual_handling', 'insurance', 'other'])
+    .isIn(VALID_WORKER_DOCUMENT_TYPES)
     .withMessage('Invalid documentType'),
   body('issue_date').optional({ checkFalsy: true }).isISO8601().toDate(),
   body('expiry_date').optional({ checkFalsy: true }).isISO8601().toDate(),

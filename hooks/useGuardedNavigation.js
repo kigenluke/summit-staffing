@@ -1,7 +1,7 @@
 import { useMemo, useCallback } from 'react';
 import { useNavigation } from '@react-navigation/native';
 import { useWorkerGate } from '../context/WorkerGateContext.js';
-import { showVerificationRequiredAlert } from '../utils/verificationPrompt.js';
+import { showVerificationRequiredAlert, showExpiredDocumentsAlert } from '../utils/verificationPrompt.js';
 
 /** Stack routes allowed while account verification is incomplete. */
 export const ALLOWED_ROUTES_WHILE_RESTRICTED = new Set([
@@ -19,16 +19,17 @@ export const ALLOWED_ROUTES_WHILE_RESTRICTED = new Set([
  */
 export function useGuardedNavigation() {
   const navigation = useNavigation();
-  const { restricted } = useWorkerGate();
+  const { restricted, accessPhase } = useWorkerGate();
 
   const guard = useCallback(
     (routeName) => {
       if (!restricted) return true;
       if (ALLOWED_ROUTES_WHILE_RESTRICTED.has(routeName)) return true;
-      showVerificationRequiredAlert();
+      if (accessPhase === 'documents_expired') showExpiredDocumentsAlert();
+      else showVerificationRequiredAlert();
       return false;
     },
-    [restricted]
+    [restricted, accessPhase]
   );
 
   const navigate = useCallback(

@@ -198,17 +198,27 @@ const register = async (req, res) => {
 
       await client.query('COMMIT');
 
-      try {
-        await sendWelcomeEmail(user.email, { firstName: req.body.first_name, role: user.role });
-      } catch (emailErr) {
-        // eslint-disable-next-line no-console
-        console.error('Welcome email failed (non-fatal):', emailErr?.message || emailErr);
-      }
+      if (isOutboundEmailConfigured()) {
+        try {
+          await sendWelcomeEmail(normalizedEmail, { firstName: req.body.first_name, role: user.role });
+          // eslint-disable-next-line no-console
+          console.log(`[email] Welcome email sent to ${normalizedEmail}`);
+        } catch (emailErr) {
+          // eslint-disable-next-line no-console
+          console.error('Welcome email failed (non-fatal):', emailErr?.message || emailErr);
+        }
 
-      try {
-        await sendVerificationEmail(user.email, verificationToken);
-      } catch (emailErr) {
-        // Email failure should not block registration
+        try {
+          await sendVerificationEmail(normalizedEmail, verificationToken);
+        } catch (emailErr) {
+          // eslint-disable-next-line no-console
+          console.error('Verification email failed (non-fatal):', emailErr?.message || emailErr);
+        }
+      } else {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[email] Sign-up for ${normalizedEmail} — welcome email skipped (set MAILGUN_API_KEY and MAILGUN_DOMAIN on the server)`,
+        );
       }
 
       const token = generateToken({ userId: user.id, role: user.role, email: user.email }, '24h');
