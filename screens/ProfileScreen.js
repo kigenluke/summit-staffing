@@ -307,7 +307,7 @@ export function ProfileScreen({ navigation }) {
       </View>
 
       <MenuSection>
-        <MenuItem label="Notifications" badge={unreadCount} disabled={restricted} onPress={() => safeNavigate('Notifications')} />
+        <MenuItem label="Notifications" badge={unreadCount} onPress={() => safeNavigate('Notifications')} />
         <MenuItem label="Inbox" disabled={restricted} onPress={() => safeNavigate('Messages')} />
       </MenuSection>
 

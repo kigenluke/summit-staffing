@@ -515,8 +515,8 @@ export function WorkerManageScreen({ route, navigation }) {
         });
       }
       form.append('documentType', documentType);
-      if (issueDate) form.append('issue_date', issueDate);
-      if (expiryDate) form.append('expiry_date', expiryDate);
+      form.append('issue_date', issueDate);
+      form.append('expiry_date', expiryDate);
 
       const uploadPath = `/api/workers/${workerId}/documents`;
       const { error } = await api.post(uploadPath, form);

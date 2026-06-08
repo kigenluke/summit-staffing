@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  useWindowDimensions,
 } from 'react-native';
 import { ComplianceSubmitPanel } from './ComplianceSubmitPanel.js';
 import { DocumentViewLink } from './DocumentViewLink.js';
@@ -399,6 +400,8 @@ function DocumentUploadSection({
   uploading,
 }) {
   const issueDateObj = fromYmd(issueDate);
+  const { width: screenWidth } = useWindowDimensions();
+  const stackDates = screenWidth < 560;
 
   return (
     <View
@@ -419,27 +422,76 @@ function DocumentUploadSection({
         Upload {label}
       </Text>
       <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: Spacing.md }}>
-        Choose a PDF or image below, then tap Upload document.
+        Choose a PDF or image, enter start and end dates, then tap Upload document.
       </Text>
 
       <FileDropZone file={file} onFileSelected={onFileSelected} disabled={uploading} />
 
-      <View style={{ marginTop: Spacing.md, gap: Spacing.md }}>
-        <ComplianceDateField label="Issue date (optional)" value={issueDate} onChange={onIssueDateChange} />
-        <ComplianceDateField
-          label="Expiry date (optional)"
-          value={expiryDate}
-          onChange={onExpiryDateChange}
-          minDate={issueDateObj || undefined}
-        />
+      <View
+        style={{
+          marginTop: Spacing.lg,
+          padding: Spacing.md,
+          borderRadius: Radius.lg,
+          backgroundColor: Colors.background,
+          borderWidth: 1,
+          borderColor: Colors.borderLight,
+        }}
+      >
+        <Text
+          style={{
+            fontSize: Typography.fontSize.sm,
+            fontWeight: Typography.fontWeight.bold,
+            color: Colors.text.primary,
+            marginBottom: 4,
+          }}
+        >
+          Document validity
+        </Text>
+        <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.secondary, marginBottom: Spacing.md, lineHeight: 18 }}>
+          Enter when this certificate or check starts and when it expires.
+        </Text>
+        <View
+          style={{
+            flexDirection: stackDates ? 'column' : 'row',
+            gap: Spacing.md,
+            alignItems: stackDates ? 'stretch' : 'flex-start',
+          }}
+        >
+          <View style={{ flex: stackDates ? undefined : 1, width: stackDates ? '100%' : undefined }}>
+          <ComplianceDateField
+            label="Start date"
+            value={issueDate}
+            onChange={onIssueDateChange}
+            required
+            helper="When the document was issued"
+            placeholder="Select start date"
+          />
+          </View>
+          <View style={{ flex: stackDates ? undefined : 1, width: stackDates ? '100%' : undefined }}>
+          <ComplianceDateField
+            label="End date"
+            value={expiryDate}
+            onChange={onExpiryDateChange}
+            minDate={issueDateObj || undefined}
+            required
+            helper="When the document expires"
+            placeholder="Select end date"
+            error={
+              issueDate.trim() && expiryDate.trim() && expiryDate.trim() < issueDate.trim()
+                ? 'Must be on or after start date'
+                : undefined
+            }
+          />
+          </View>
+        </View>
       </View>
 
       <Pressable
         onPress={onUpload}
-        disabled={uploading || !file}
+        disabled={uploading || !file || !issueDate.trim() || !expiryDate.trim()}
         style={({ pressed }) => ({
           marginTop: Spacing.lg,
-          backgroundColor: uploading || !file ? Colors.text.muted : Colors.primary,
+          backgroundColor: uploading || !file || !issueDate.trim() || !expiryDate.trim() ? Colors.text.muted : Colors.primary,
           borderRadius: Radius.md,
           paddingVertical: Spacing.md,
           alignItems: 'center',
@@ -512,12 +564,22 @@ export function ComplianceDocumentsPanel({
       Alert.alert('Missing file', fileErr);
       return;
     }
+    const start = issueDate.trim();
+    const end = expiryDate.trim();
+    if (!start || !end) {
+      Alert.alert('Dates required', 'Please enter both start date and end date.');
+      return;
+    }
+    if (end < start) {
+      Alert.alert('Invalid dates', 'End date must be on or after start date.');
+      return;
+    }
     try {
       await onUpload({
         documentType: selectedDocType,
         file: selectedFile,
-        issueDate: issueDate.trim() || undefined,
-        expiryDate: expiryDate.trim() || undefined,
+        issueDate: start,
+        expiryDate: end,
       });
       setSelectedFile(null);
       setIssueDate('');

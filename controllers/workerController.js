@@ -502,6 +502,13 @@ const uploadDocument = async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Invalid document type' });
     }
 
+    if (!issue_date || !expiry_date) {
+      return res.status(400).json({ ok: false, error: 'Start date and end date are required' });
+    }
+    if (new Date(expiry_date) < new Date(issue_date)) {
+      return res.status(400).json({ ok: false, error: 'End date must be on or after start date' });
+    }
+
     await replaceStaleComplianceUpload(pool, {
       table: 'worker',
       subjectId: worker.id,

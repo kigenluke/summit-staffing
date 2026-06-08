@@ -58,8 +58,8 @@ const workerDocumentValidators = [
   body('documentType')
     .isIn(VALID_WORKER_DOCUMENT_TYPES)
     .withMessage('Invalid documentType'),
-  body('issue_date').optional({ checkFalsy: true }).isISO8601().toDate(),
-  body('expiry_date').optional({ checkFalsy: true }).isISO8601().toDate(),
+  body('issue_date').notEmpty().withMessage('Start date is required').isISO8601().toDate(),
+  body('expiry_date').notEmpty().withMessage('End date is required').isISO8601().toDate(),
 ];
 
 router.post(

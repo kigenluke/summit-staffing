@@ -12,6 +12,7 @@ export const ALLOWED_ROUTES_WHILE_RESTRICTED = new Set([
   'WorkerManage',
   'ParticipantCompliance',
   'Documents',
+  'Notifications',
 ]);
 
 /**

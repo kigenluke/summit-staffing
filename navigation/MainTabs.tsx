@@ -24,7 +24,6 @@ const Tab = createBottomTabNavigator();
 
 function HomeHeaderRight() {
   const nav = useNavigation();
-  const { restricted, accessPhase } = useAccountAccess();
   const [unreadCount, setUnreadCount] = React.useState(0);
 
   const loadUnreadCount = React.useCallback(async () => {
@@ -48,11 +47,6 @@ function HomeHeaderRight() {
   return (
     <Pressable
       onPress={() => {
-        if (restricted) {
-          if (accessPhase === 'documents_expired') showExpiredDocumentsAlert();
-          else showVerificationRequiredAlert();
-          return;
-        }
         nav.navigate('Notifications' as never);
       }}
       style={({ pressed }) => ({

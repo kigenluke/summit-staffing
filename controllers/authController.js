@@ -12,6 +12,7 @@ const {
 } = require('../services/emailService');
 const { normalizePhoneForStorage } = require('../utils/phoneValidation');
 const { getWebClientBaseUrlWarning } = require('../utils/clientAppUrl');
+const { sendWelcomeNotification, ensureWelcomeNotification } = require('../services/notificationService');
 
 const SALT_ROUNDS = 12;
 const TOKEN_BYTES = 32;
@@ -221,6 +222,13 @@ const register = async (req, res) => {
         );
       }
 
+      try {
+        await sendWelcomeNotification(user.id, { firstName: req.body.first_name, role: user.role });
+      } catch (notifErr) {
+        // eslint-disable-next-line no-console
+        console.error('Welcome notification failed (non-fatal):', notifErr?.message || notifErr);
+      }
+
       const token = generateToken({ userId: user.id, role: user.role, email: user.email }, '24h');
       return res.status(201).json({ ok: true, token, user });
     } catch (err) {
@@ -262,6 +270,13 @@ const login = async (req, res) => {
     }
 
     await pool.query('UPDATE users SET last_login_at = now(), updated_at = now() WHERE id = $1', [user.id]);
+
+    try {
+      await ensureWelcomeNotification(user.id, { role: user.role });
+    } catch (notifErr) {
+      // eslint-disable-next-line no-console
+      console.error('Welcome notification on login failed (non-fatal):', notifErr?.message || notifErr);
+    }
 
     const token = generateToken({ userId: user.id, role: user.role, email: user.email }, '24h');
     return res.status(200).json({

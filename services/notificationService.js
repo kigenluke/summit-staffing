@@ -69,6 +69,38 @@ const sendPushNotification = async (userId, title, body, data = {}) => {
   }
 };
 
+const ROLE_WELCOME_LABELS = {
+  worker: 'worker',
+  participant: 'participant',
+  coordinator: 'coordinator',
+  admin: 'administrator',
+};
+
+/** In-app welcome notification for new accounts (shown in Notifications screen). */
+const sendWelcomeNotification = async (userId, { firstName, role } = {}) => {
+  const roleLabel = ROLE_WELCOME_LABELS[role] || 'member';
+  const greeting = firstName ? `Hi ${String(firstName).trim()},` : 'Hi there,';
+  const title = 'Welcome to Summit Staffing';
+  const body = `${greeting} Thanks for joining as a ${roleLabel}. Complete your profile and upload your required documents to get started.`;
+  await sendPushNotification(userId, title, body, { type: 'welcome' });
+};
+
+/** Send welcome once if the user has never received one (e.g. first login after sign-up). */
+const ensureWelcomeNotification = async (userId, { firstName, role } = {}) => {
+  try {
+    const existing = await pool.query(
+      `SELECT id FROM notifications WHERE user_id = $1 AND type = 'welcome' LIMIT 1`,
+      [userId]
+    );
+    if (existing.rowCount > 0) return;
+    await sendWelcomeNotification(userId, { firstName, role });
+  } catch (err) {
+    console.error('ensureWelcomeNotification failed:', err.message);
+  }
+};
+
 module.exports = {
-  sendPushNotification
+  sendPushNotification,
+  sendWelcomeNotification,
+  ensureWelcomeNotification,
 };
