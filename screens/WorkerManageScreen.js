@@ -10,6 +10,7 @@ import { useAccountAccess } from '../context/WorkerGateContext.js';
 import { ComplianceDocumentsPanel } from '../components/ComplianceDocumentsPanel.js';
 import { WorkerSkillsPanel } from '../components/WorkerSkillsPanel.js';
 import { REQUIRED_WORKER_COMPLIANCE_DOCS } from '../utils/complianceProgress.js';
+import { WORKER_DOCUMENT_CATALOG } from '../utils/workerDocumentCatalog.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { formatDateDMY } from '../utils/dateFormat.js';
 import { VENDOR_CATEGORIES } from '../constants/vendorCategories.js';
@@ -35,16 +36,7 @@ const WEB_SELECT_STYLE = {
   padding: '8px',
   color: Colors.text.primary,
 };
-const DOC_TYPES = [
-  { key: 'ndis_screening', label: 'NDIS Worker Screening' },
-  { key: 'wwcc', label: 'Working With Children Check' },
-  { key: 'yellow_card', label: 'Yellow Card (QLD)' },
-  { key: 'police_check', label: 'Police Check' },
-  { key: 'first_aid', label: 'First Aid Certificate' },
-  { key: 'manual_handling', label: 'Manual Handling Certificate' },
-  { key: 'insurance', label: 'Insurance' },
-  { key: 'other', label: 'Other' },
-];
+const DOC_TYPES = WORKER_DOCUMENT_CATALOG;
 const STATUS = {
   not_started: { label: 'Not started', color: Colors.text.muted, icon: '⚪' },
   pending: { label: 'Pending review', color: Colors.status.warning, icon: '🟡' },
@@ -763,10 +755,10 @@ export function WorkerManageScreen({ route, navigation }) {
           documentsSectionY.current = e.nativeEvent.layout.y;
         }}
       >
-        <Section title=" Documents & compliance uploads">
+        <Section title="Documents">
           <ComplianceDocumentsPanel
-            title="Vendor documentation"
-            subtitle="Upload certificates here (PDF or photo). Required items must be submitted for admin verification."
+            title="Documents"
+            subtitle="Upload each certificate (PDF or photo). All items are required before admin verification."
             docTypes={DOC_TYPES}
             documents={worker?.documents || []}
             requiredTypes={REQUIRED_WORKER_COMPLIANCE_DOCS}

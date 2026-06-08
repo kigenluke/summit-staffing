@@ -10,7 +10,7 @@ const backendDirs = ['routes', 'controllers', 'middleware', 'config', 'migration
 module.exports = mergeConfig(defaultConfig, {
   resolver: {
     // `.mjs` NDIS helpers are imported via `utils/*.js` re-exports (Metro must resolve `.mjs`).
-    sourceExts: ['tsx', 'ts', 'jsx', 'js', 'mjs', 'json'],
+    sourceExts: ['tsx', 'ts', 'jsx', 'js', 'mjs', 'cjs', 'json'],
     blockList: backendDirs,
   },
 });

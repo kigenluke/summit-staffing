@@ -15,7 +15,14 @@ BEGIN
   END IF;
 
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'worker_document_type') THEN
-    CREATE TYPE worker_document_type AS ENUM ('ndis_screening', 'wwcc', 'yellow_card', 'police_check', 'first_aid', 'manual_handling', 'insurance', 'other');
+    CREATE TYPE worker_document_type AS ENUM (
+      'aged_care_cert', 'aged_care_transcript', 'assistant_in_nursing', 'wwcc',
+      'covid_vaccine_1', 'covid_vaccine_2', 'covid_vaccine_3', 'cpr_qualification',
+      'disability_care_cert', 'disability_care_transcript', 'drivers_license', 'first_aid',
+      'flu_vaccination', 'ndis_orientation', 'ndis_screening', 'passport', 'police_check',
+      'specialised_support_dementia', 'manual_handling', 'statutory_declaration_aged_care',
+      'vehicle_insurance', 'insurance', 'yellow_card', 'other'
+    );
   END IF;
 
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'worker_document_status') THEN
@@ -49,6 +56,22 @@ END$$;
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'worker_document_type') THEN
+    ALTER TYPE worker_document_type ADD VALUE IF NOT EXISTS 'aged_care_cert';
+    ALTER TYPE worker_document_type ADD VALUE IF NOT EXISTS 'aged_care_transcript';
+    ALTER TYPE worker_document_type ADD VALUE IF NOT EXISTS 'assistant_in_nursing';
+    ALTER TYPE worker_document_type ADD VALUE IF NOT EXISTS 'covid_vaccine_1';
+    ALTER TYPE worker_document_type ADD VALUE IF NOT EXISTS 'covid_vaccine_2';
+    ALTER TYPE worker_document_type ADD VALUE IF NOT EXISTS 'covid_vaccine_3';
+    ALTER TYPE worker_document_type ADD VALUE IF NOT EXISTS 'cpr_qualification';
+    ALTER TYPE worker_document_type ADD VALUE IF NOT EXISTS 'disability_care_cert';
+    ALTER TYPE worker_document_type ADD VALUE IF NOT EXISTS 'disability_care_transcript';
+    ALTER TYPE worker_document_type ADD VALUE IF NOT EXISTS 'drivers_license';
+    ALTER TYPE worker_document_type ADD VALUE IF NOT EXISTS 'flu_vaccination';
+    ALTER TYPE worker_document_type ADD VALUE IF NOT EXISTS 'ndis_orientation';
+    ALTER TYPE worker_document_type ADD VALUE IF NOT EXISTS 'passport';
+    ALTER TYPE worker_document_type ADD VALUE IF NOT EXISTS 'specialised_support_dementia';
+    ALTER TYPE worker_document_type ADD VALUE IF NOT EXISTS 'statutory_declaration_aged_care';
+    ALTER TYPE worker_document_type ADD VALUE IF NOT EXISTS 'vehicle_insurance';
     ALTER TYPE worker_document_type ADD VALUE IF NOT EXISTS 'yellow_card';
     ALTER TYPE worker_document_type ADD VALUE IF NOT EXISTS 'manual_handling';
     ALTER TYPE worker_document_type ADD VALUE IF NOT EXISTS 'other';

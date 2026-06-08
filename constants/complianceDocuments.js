@@ -1,11 +1,8 @@
 /** Required compliance document types before a user can submit for admin verification. */
-const REQUIRED_WORKER_COMPLIANCE_DOCS = [
-  'ndis_screening',
-  'wwcc',
-  'police_check',
-  'first_aid',
-  'insurance',
-];
+const {
+  REQUIRED_WORKER_COMPLIANCE_DOCS,
+  DOC_TYPE_LABELS,
+} = require('../utils/workerDocumentCatalog.cjs');
 
 const REQUIRED_PARTICIPANT_COMPLIANCE_DOCS = [
   'ndis_screening',
@@ -34,6 +31,7 @@ const getComplianceProgress = (documents = [], requiredTypes = []) => {
 module.exports = {
   REQUIRED_WORKER_COMPLIANCE_DOCS,
   REQUIRED_PARTICIPANT_COMPLIANCE_DOCS,
+  DOC_TYPE_LABELS,
   getUploadedTypes,
   getComplianceProgress,
 };

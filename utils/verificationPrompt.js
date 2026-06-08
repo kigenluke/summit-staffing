@@ -58,3 +58,15 @@ export function showVerificationRequiredAlert() {
     Alert.alert(TITLE, MESSAGE);
   }
 }
+
+const EXPIRED_TITLE = 'Documents expired';
+const EXPIRED_MESSAGE =
+  'One or more compliance documents have expired. Go to Profile → Manage Worker Profile to upload renewed copies.';
+
+export function showExpiredDocumentsAlert() {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    window.alert(`${EXPIRED_TITLE}\n\n${EXPIRED_MESSAGE}`);
+  } else {
+    Alert.alert(EXPIRED_TITLE, EXPIRED_MESSAGE);
+  }
+}

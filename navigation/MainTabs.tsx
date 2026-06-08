@@ -16,14 +16,15 @@ import { WorkerManageScreen } from '../screens/WorkerManageScreen.js';
 import { Colors } from '../constants/theme.js';
 import { useAuthStore } from '../store/authStore.js';
 import { useAccountAccess } from '../context/WorkerGateContext.js';
-import { showVerificationRequiredAlert } from '../utils/verificationPrompt.js';
+import { showVerificationRequiredAlert, showExpiredDocumentsAlert } from '../utils/verificationPrompt.js';
+import { DocumentExpiryScreen } from '../screens/DocumentExpiryScreen.js';
 import { api } from '../services/api.js';
 
 const Tab = createBottomTabNavigator();
 
 function HomeHeaderRight() {
   const nav = useNavigation();
-  const { restricted } = useAccountAccess();
+  const { restricted, accessPhase } = useAccountAccess();
   const [unreadCount, setUnreadCount] = React.useState(0);
 
   const loadUnreadCount = React.useCallback(async () => {
@@ -48,7 +49,8 @@ function HomeHeaderRight() {
     <Pressable
       onPress={() => {
         if (restricted) {
-          showVerificationRequiredAlert();
+          if (accessPhase === 'documents_expired') showExpiredDocumentsAlert();
+          else showVerificationRequiredAlert();
           return;
         }
         nav.navigate('Notifications' as never);
@@ -87,12 +89,13 @@ function HomeHeaderRight() {
 
 function MessagesHeaderRight() {
   const nav = useNavigation();
-  const { restricted } = useAccountAccess();
+  const { restricted, accessPhase } = useAccountAccess();
   return (
     <Pressable
       onPress={() => {
         if (restricted) {
-          showVerificationRequiredAlert();
+          if (accessPhase === 'documents_expired') showExpiredDocumentsAlert();
+          else showVerificationRequiredAlert();
           return;
         }
         nav.navigate('SelectMessageRecipient' as never);
@@ -181,10 +184,14 @@ function AvailabilityHeaderLeft() {
 
 export function MainTabs() {
   const { user } = useAuthStore();
-  const { restricted, accessChecking } = useAccountAccess();
+  const { restricted, accessChecking, accessPhase } = useAccountAccess();
   const isWorker = user?.role === 'worker';
   const isCoordinator = user?.role === 'coordinator';
   const isGatedRole = isWorker;
+
+  if (isGatedRole && accessPhase === 'documents_expired') {
+    return <DocumentExpiryScreen />;
+  }
 
   if (isGatedRole && accessChecking) {
     return (
