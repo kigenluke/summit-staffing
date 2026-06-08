@@ -60,11 +60,16 @@ const validateEnv = () => {
     const { isOutboundEmailConfigured } = require('./services/emailService');
     const { getWebClientBaseUrl, getWebClientBaseUrlWarning } = require('./utils/clientAppUrl');
     if (isOutboundEmailConfigured()) {
+      // eslint-disable-next-line no-console
+      console.log('[email] Mailgun configured — welcome & password-reset emails enabled');
       const w = getWebClientBaseUrlWarning();
       if (w) {
         // eslint-disable-next-line no-console
         console.warn(`[email] ${w} Links will use: ${getWebClientBaseUrl()}`);
       }
+    } else {
+      // eslint-disable-next-line no-console
+      console.warn('[email] MAILGUN_API_KEY / MAILGUN_DOMAIN missing — sign-up welcome emails will not send');
     }
   } catch (_) {
     /* ignore optional checks */

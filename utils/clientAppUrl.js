@@ -16,6 +16,7 @@ function getWebClientBaseUrl() {
     process.env.CLIENT_APP_URL,
     process.env.PUBLIC_APP_URL,
     process.env.FRONTEND_URL,
+    process.env.FRONTEND_ORIGIN,
   ];
   for (const c of candidates) {
     const t = trimBase(c);
@@ -33,7 +34,8 @@ function getWebClientBaseUrlWarning() {
     trimBase(process.env.WEB_APP_URL)
     || trimBase(process.env.CLIENT_APP_URL)
     || trimBase(process.env.PUBLIC_APP_URL)
-    || trimBase(process.env.FRONTEND_URL);
+    || trimBase(process.env.FRONTEND_URL)
+    || trimBase(process.env.FRONTEND_ORIGIN);
   if (hasExplicit) return null;
   return 'Set WEB_APP_URL on the server to the public URL where users open the app (not the API URL).';
 }

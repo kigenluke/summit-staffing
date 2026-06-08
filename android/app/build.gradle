@@ -136,6 +136,7 @@ android {
             useLegacyPackaging = false
         }
     }
+
 }
 
 dependencies {
