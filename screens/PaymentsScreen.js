@@ -3,7 +3,7 @@
  */
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  View, Text, FlatList, Pressable, RefreshControl, ActivityIndicator, Alert, Linking, AppState, TextInput,
+  View, Text, FlatList, Pressable, RefreshControl, ActivityIndicator, Alert, Linking, AppState, TextInput, Platform,
 } from 'react-native';
 import { api } from '../services/api.js';
 import { useAuthStore } from '../store/authStore.js';
@@ -11,6 +11,14 @@ import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme
 import { formatDateDMY } from '../utils/dateFormat.js';
 
 const STATUS_COLORS = { pending: Colors.status.warning, succeeded: Colors.status.success, failed: Colors.status.error, refunded: Colors.text.muted };
+
+const formatBsbInput = (raw) => {
+  const digits = String(raw || '').replace(/\D/g, '').slice(0, 6);
+  if (digits.length <= 3) return digits;
+  return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+};
+
+const formatAccountInput = (raw) => String(raw || '').replace(/\D/g, '').slice(0, 9);
 
 export function PaymentsScreen() {
   const { user } = useAuthStore();
@@ -121,6 +129,7 @@ export function PaymentsScreen() {
   };
 
   const hasSavedBank = Boolean(connectStatus?.bank_account?.last4);
+  const hasLinkedAccount = Boolean(connectStatus?.hasAccount);
   const showInAppBankForm = showBankForm || !hasSavedBank;
 
   const saveBankDetails = async () => {
@@ -156,27 +165,38 @@ export function PaymentsScreen() {
     }
   };
 
-  const disconnectStripe = async () => {
-    Alert.alert(
-      'Disconnect Stripe?',
-      'You can reconnect another Stripe account later.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Disconnect',
-          style: 'destructive',
-          onPress: async () => {
-            const { error } = await api.post('/api/payments/connect/disconnect');
-            if (error) {
-              Alert.alert('Error', error.message || 'Failed to disconnect account');
-              return;
-            }
-            await load();
-            Alert.alert('Done', 'Stripe account disconnected.');
-          }
-        }
-      ]
-    );
+  const clearBankForm = () => {
+    setBankHolderName('');
+    setBankBsb('');
+    setBankAccountNumber('');
+    setShowBankForm(false);
+  };
+
+  const runRemovePayoutAccount = async () => {
+    const { data, error } = await api.post('/api/payments/connect/disconnect');
+    if (error) {
+      const detail = error?.response?.error || error.message || 'Failed to remove payout account';
+      if (Platform.OS === 'web' && typeof window !== 'undefined') window.alert(String(detail));
+      else Alert.alert('Error', String(detail));
+      return;
+    }
+    clearBankForm();
+    await load();
+    const msg = data?.message || 'Payout account removed. You can add new bank details anytime.';
+    if (Platform.OS === 'web' && typeof window !== 'undefined') window.alert(msg);
+    else Alert.alert('Done', msg);
+  };
+
+  const disconnectStripe = () => {
+    const message = 'Remove saved payout bank details? You can enter new details anytime.';
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      if (window.confirm(message)) runRemovePayoutAccount();
+      return;
+    }
+    Alert.alert('Remove payout account?', message, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Remove', style: 'destructive', onPress: runRemovePayoutAccount },
+    ]);
   };
 
   return (
@@ -252,7 +272,7 @@ export function PaymentsScreen() {
                     </Text>
                     <TextInput
                       value={bankBsb}
-                      onChangeText={setBankBsb}
+                      onChangeText={(text) => setBankBsb(formatBsbInput(text))}
                       placeholder="000-000"
                       keyboardType="number-pad"
                       maxLength={7}
@@ -271,10 +291,12 @@ export function PaymentsScreen() {
                     </Text>
                     <TextInput
                       value={bankAccountNumber}
-                      onChangeText={setBankAccountNumber}
-                      placeholder="Account number"
+                      onChangeText={(text) => setBankAccountNumber(formatAccountInput(text))}
+                      placeholder="5–9 digits"
                       keyboardType="number-pad"
-                      secureTextEntry
+                      maxLength={9}
+                      autoComplete="off"
+                      textContentType="none"
                       style={{
                         borderWidth: 1,
                         borderColor: Colors.border,
@@ -302,8 +324,15 @@ export function PaymentsScreen() {
                       </Text>
                     </Pressable>
                     {hasSavedBank ? (
-                      <Pressable onPress={() => setShowBankForm(false)} style={({ pressed }) => ({ opacity: pressed ? 0.88 : 1 })}>
+                      <Pressable onPress={() => setShowBankForm(false)} style={({ pressed }) => ({ opacity: pressed ? 0.88 : 1, marginBottom: Spacing.sm })}>
                         <Text style={{ color: Colors.text.secondary, textAlign: 'center' }}>Cancel</Text>
+                      </Pressable>
+                    ) : null}
+                    {hasLinkedAccount ? (
+                      <Pressable onPress={disconnectStripe} style={({ pressed }) => ({ opacity: pressed ? 0.88 : 1, marginTop: Spacing.xs })}>
+                        <Text style={{ color: Colors.status.error, fontWeight: Typography.fontWeight.semibold, textAlign: 'center' }}>
+                          Remove payout account
+                        </Text>
                       </Pressable>
                     ) : null}
                   </>
