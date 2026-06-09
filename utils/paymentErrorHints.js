@@ -49,6 +49,13 @@ function stripeActionHint(err) {
     );
   }
 
+  if (/recipient tos|service_agreement|tos agreement is not supported/i.test(msg)) {
+    return (
+      'This was a server configuration issue for Australian Connect (now fixed: use full ToS, not recipient). ' +
+      'Redeploy the API, then try Save bank account again. You do not need to change Dashboard from Express to Custom.'
+    );
+  }
+
   if (/collecting requirements|responsibilities for collecting/i.test(msg)) {
     return (
       'Stripe platform owner: Dashboard → Settings → Connect → Platform setup (or Platform profile). ' +

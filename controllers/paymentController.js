@@ -7,6 +7,7 @@ const {
   useCustomConnect,
   createCustomWorkerAccount,
   attachAustralianBankAccount,
+  replaceWorkerBankAccount,
   listWorkerBankAccounts,
   createConnectedAccount,
   createAccountLink,
@@ -180,8 +181,8 @@ const getAccountStatus = async (req, res) => {
         hasWorkerProfile: false,
         hasAccount: false,
         onboardingComplete: false,
-        connect_mode: 'express',
-        preferred_setup: 'stripe_express',
+        connect_mode: 'custom',
+        preferred_setup: 'in_app_bank',
         charges_enabled: false,
         payouts_enabled: false,
         details_submitted: false,
@@ -194,8 +195,8 @@ const getAccountStatus = async (req, res) => {
         ok: true,
         hasAccount: false,
         onboardingComplete: false,
-        connect_mode: 'express',
-        preferred_setup: 'stripe_express',
+        connect_mode: 'custom',
+        preferred_setup: 'in_app_bank',
       });
     }
 
@@ -245,7 +246,7 @@ const getAccountStatus = async (req, res) => {
       hasAccount: true,
       accountId,
       connect_mode: isCustom ? 'custom' : 'express',
-      preferred_setup: 'stripe_express',
+      preferred_setup: isCustom ? 'in_app_bank' : 'stripe_express',
       onboardingComplete,
       charges_enabled: account.charges_enabled,
       payouts_enabled: account.payouts_enabled,
@@ -269,10 +270,19 @@ const getAccountStatus = async (req, res) => {
   }
 };
 
-/** Worker: Stripe Express onboarding (hosted) to add/update bank details for payouts. */
+/** Worker: in-app bank (default) or Stripe Express onboarding when STRIPE_CONNECT_MODE=express. */
 const getExpressOnboardingUrlHandler = async (req, res) => {
   try {
     if (!ensureStripeConfigured(res)) return;
+
+    if (useCustomConnect()) {
+      return res.status(200).json({
+        ok: true,
+        connect_mode: 'custom',
+        use_in_app_bank_form: true,
+        message: 'Enter account holder name, BSB, and account number under Payments. Summit Staffing links your bank for payouts — no Stripe signup.',
+      });
+    }
 
     const workerRes = await pool.query(
       `SELECT w.id, w.stripe_account_id, u.email
@@ -380,7 +390,7 @@ const saveWorkerBankDetails = async (req, res) => {
       ]);
     }
 
-    const bank = await attachAustralianBankAccount(accountId, {
+    const bank = await replaceWorkerBankAccount(accountId, {
       accountHolderName: validated.account_holder_name,
       bsb: validated.bsb,
       accountNumber: validated.account_number,
@@ -388,53 +398,18 @@ const saveWorkerBankDetails = async (req, res) => {
 
     return res.status(200).json({
       ok: true,
+      connect_mode: 'custom',
       accountId,
       bank_account: {
         last4: bank.last4,
         bsb_display: formatBsbDisplay(validated.bsb),
         account_holder_name: validated.account_holder_name,
       },
-      message: 'Bank account saved. You can receive payouts when shifts are paid.',
+      message: 'Bank account saved. You will receive 85% of each paid shift (15% platform fee). No Stripe account needed.',
     });
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('saveWorkerBankDetails:', err);
-    const rawMsg = pickErrorMessage(err).toLowerCase();
-    const needsPlatformConnect =
-      /collecting requirements|responsibilities for collecting|custom accounts are not enabled/i.test(rawMsg);
-
-    if (needsPlatformConnect && worker) {
-      try {
-        let fallbackAccountId = worker.stripe_account_id;
-        if (fallbackAccountId) {
-          try {
-            const ex = await stripe.accounts.retrieve(fallbackAccountId);
-            if (ex.type === 'custom') fallbackAccountId = null;
-          } catch (_) {
-            fallbackAccountId = null;
-          }
-        }
-        if (!fallbackAccountId) {
-          const acct = await createConnectedAccount(worker.email);
-          fallbackAccountId = acct.id;
-          await pool.query('UPDATE workers SET stripe_account_id = $2, updated_at = now() WHERE id = $1', [
-            worker.id,
-            fallbackAccountId,
-          ]);
-        }
-        const link = await createAccountLink(fallbackAccountId);
-        return res.status(503).json({
-          ok: false,
-          error:
-            'In-app bank setup needs one more step in Stripe Dashboard (platform collects worker verification). Use Open Stripe below to add your bank for now.',
-          hint: stripeActionHint(err),
-          express_onboarding_url: link.url,
-        });
-      } catch (fallbackErr) {
-        // eslint-disable-next-line no-console
-        console.error('saveWorkerBankDetails express fallback:', fallbackErr);
-      }
-    }
 
     return res.status(500).json({
       ok: false,
@@ -551,6 +526,13 @@ const createPaymentIntentHandler = async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Booking must be confirmed (or completed) before payment' });
     }
 
+    if (!booking.stripe_account_id) {
+      return res.status(400).json({
+        ok: false,
+        error: 'The support worker has not added bank details for payouts yet. Ask them to complete Payments in their profile.',
+      });
+    }
+
     const amount = Number(booking.total_amount || 0);
     if (amount <= 0) {
       return res.status(400).json({ ok: false, error: 'Invalid booking amount' });
@@ -608,8 +590,9 @@ const createCheckoutSessionHandler = async (req, res) => {
     const { bookingId } = req.body;
 
     const bookingRes = await pool.query(
-      `SELECT b.id, b.participant_id, b.worker_id, b.status, b.total_amount
+      `SELECT b.id, b.participant_id, b.worker_id, b.status, b.total_amount, w.stripe_account_id
        FROM bookings b
+       JOIN workers w ON w.id = b.worker_id
        WHERE b.id = $1
        LIMIT 1`,
       [bookingId]
@@ -623,6 +606,12 @@ const createCheckoutSessionHandler = async (req, res) => {
     }
     if (!['confirmed', 'completed'].includes(booking.status)) {
       return res.status(400).json({ ok: false, error: 'Booking must be confirmed (or completed) before payment' });
+    }
+    if (!booking.stripe_account_id) {
+      return res.status(400).json({
+        ok: false,
+        error: 'The support worker has not added bank details for payouts yet. Ask them to complete Payments in their profile.',
+      });
     }
 
     const existingPaid = await pool.query(
@@ -774,6 +763,16 @@ const handleWebhook = async (req, res) => {
     const event = verifyWebhookSignature(req.body, signature);
 
     switch (event.type) {
+      case 'payment_intent.processing': {
+        const pi = event.data.object;
+        if (pi.metadata?.payment_kind === 'authorization_hold') break;
+        await ensurePaymentRecordForIntent(pi.id, pi);
+        await pool.query(
+          "UPDATE payments SET status = 'pending' WHERE stripe_payment_intent_id = $1",
+          [pi.id]
+        );
+        break;
+      }
       case 'payment_intent.succeeded': {
         const pi = event.data.object;
         if (pi.metadata?.payment_kind === 'authorization_hold' && pi.capture_method === 'manual') {
@@ -788,7 +787,8 @@ const handleWebhook = async (req, res) => {
         try {
           await createTransferForPaymentIntent(pi.id);
         } catch (err) {
-          // ignore
+          // eslint-disable-next-line no-console
+          console.error('transfer after payment_intent.succeeded:', err.message);
         }
         break;
       }
@@ -1024,7 +1024,7 @@ const createCustomerSetupSession = async (req, res) => {
     const session = await stripe.checkout.sessions.create({
       mode: 'setup',
       customer: customerId,
-      payment_method_types: ['card'],
+      payment_method_types: ['card', 'au_becs_debit'],
       success_url: `${appUrl}/stripe/return?type=setup`,
       cancel_url: `${appUrl}/stripe/return?type=setup&cancelled=1`,
     });

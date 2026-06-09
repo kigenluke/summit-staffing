@@ -27,7 +27,6 @@ export function PaymentsScreen() {
   const [bankAccountNumber, setBankAccountNumber] = useState('');
   const [savingBank, setSavingBank] = useState(false);
   const [showBankForm, setShowBankForm] = useState(false);
-  const [startingExpressOnboarding, setStartingExpressOnboarding] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -64,43 +63,10 @@ export function PaymentsScreen() {
     return () => sub.remove();
   }, [load]);
 
-  const setupStripe = () => {
-    Alert.alert(
-      'Use the form below',
-      'Enter your account holder name, BSB, and account number, then tap Save bank account. You do not need to sign up for Stripe.',
-    );
+  const setupBankForm = () => {
     setShowBankForm(true);
-  };
-
-  const openStripeDashboard = async () => {
-    const { data, error } = await api.post('/api/payments/connect/login-link');
-    if (error) {
-      Alert.alert('Error', error.message || 'Failed to open Stripe dashboard');
-      return;
-    }
-    if (data?.loginUrl) {
-      await Linking.openURL(data.loginUrl);
-    }
-  };
-
-  const openStripeExpressOnboarding = async () => {
-    try {
-      setStartingExpressOnboarding(true);
-      const { data, error } = await api.post('/api/payments/connect/express/onboarding');
-      if (error) {
-        Alert.alert('Error', error.message || 'Failed to start Stripe onboarding');
-        return;
-      }
-      const url = data?.express_onboarding_url;
-      if (!url) {
-        Alert.alert('Error', 'Stripe did not return an onboarding URL.');
-        return;
-      }
-      await Linking.openURL(url);
-    } catch (_) {
-      Alert.alert('Error', 'Could not open Stripe onboarding.');
-    } finally {
-      setStartingExpressOnboarding(false);
+    if (!bankHolderName && connectStatus?.bank_account?.account_holder_name) {
+      setBankHolderName(connectStatus.bank_account.account_holder_name);
     }
   };
 
@@ -154,9 +120,8 @@ export function PaymentsScreen() {
     );
   };
 
-  const isLegacyExpressAccount = connectStatus?.account?.type === 'express';
   const hasSavedBank = Boolean(connectStatus?.bank_account?.last4);
-  const showInAppBankForm = showBankForm || !isLegacyExpressAccount || !hasSavedBank;
+  const showInAppBankForm = showBankForm || !hasSavedBank;
 
   const saveBankDetails = async () => {
     const holder = bankHolderName.trim();
@@ -177,27 +142,6 @@ export function PaymentsScreen() {
         const res = error?.response;
         const detail = typeof res?.error === 'string' ? res.error : error.message;
         const hint = typeof res?.hint === 'string' ? res.hint : '';
-        const expressUrl = res?.express_onboarding_url;
-        if (expressUrl) {
-          Alert.alert(
-            'Complete setup in Stripe',
-            [detail, hint].filter(Boolean).join('\n\n') || 'Open Stripe to add your bank account for payouts.',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Open Stripe',
-                onPress: async () => {
-                  try {
-                    await Linking.openURL(expressUrl);
-                  } catch (_) {
-                    Alert.alert('Error', 'Could not open Stripe.');
-                  }
-                },
-              },
-            ],
-          );
-          return;
-        }
         Alert.alert('Could not save bank details', [detail, hint].filter(Boolean).join('\n\n'));
         return;
       }
@@ -243,20 +187,20 @@ export function PaymentsScreen() {
           <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.sm }}>
             <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.sm }}>Payout bank account</Text>
             <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, lineHeight: 20, marginBottom: Spacing.md }}>
-              Add your bank details using Stripe’s hosted Express flow. This is the same screen you see on Stripe for Express onboarding.
+              Enter your Australian bank details below. Summit Staffing pays you 85% of each shift (15% platform fee). You do not need to create a Stripe account.
             </Text>
 
             {connectStatus?.hasWorkerProfile === false ? (
               <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm }}>
-                Complete your worker profile first (Profile → Manage Worker Profile), then add your bank details using Stripe.
+                Complete your worker profile first (Profile → Manage Worker Profile), then add your bank details here.
               </Text>
             ) : (
               <>
-                {hasSavedBank ? (
+                {hasSavedBank && !showInAppBankForm ? (
                   <>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm }}>
                       <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.status.success }} />
-                      <Text style={{ color: Colors.status.success, fontWeight: Typography.fontWeight.semibold }}>Bank account connected</Text>
+                      <Text style={{ color: Colors.status.success, fontWeight: Typography.fontWeight.semibold }}>Bank account saved for payouts</Text>
                     </View>
                     <View style={{ backgroundColor: Colors.surfaceSecondary, borderWidth: 1, borderColor: Colors.borderLight, borderRadius: Radius.md, padding: Spacing.sm, marginBottom: Spacing.md }}>
                       <Text style={{ color: Colors.text.primary, fontWeight: Typography.fontWeight.medium }}>
@@ -267,42 +211,102 @@ export function PaymentsScreen() {
                       </Text>
                     </View>
                     <Pressable
-                      onPress={openStripeExpressOnboarding}
-                      disabled={startingExpressOnboarding}
+                      onPress={setupBankForm}
                       style={({ pressed }) => ({
                         backgroundColor: Colors.primary,
                         paddingVertical: Spacing.sm + 1,
                         borderRadius: Radius.md,
                         alignItems: 'center',
-                        opacity: pressed || startingExpressOnboarding ? 0.85 : 1,
+                        opacity: pressed ? 0.85 : 1,
                         marginBottom: Spacing.sm,
                       })}
                     >
-                      <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>
-                        {startingExpressOnboarding ? 'Opening…' : 'Update bank details'}
-                      </Text>
+                      <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Update bank details</Text>
                     </Pressable>
                     <Pressable onPress={disconnectStripe} style={({ pressed }) => ({ opacity: pressed ? 0.88 : 1 })}>
                       <Text style={{ color: Colors.status.error, fontWeight: Typography.fontWeight.semibold, textAlign: 'center' }}>Remove payout account</Text>
                     </Pressable>
                   </>
                 ) : (
-                  <Pressable
-                    onPress={openStripeExpressOnboarding}
-                    disabled={startingExpressOnboarding}
-                    style={({ pressed }) => ({
-                      backgroundColor: Colors.primary,
-                      paddingVertical: Spacing.sm + 1,
-                      borderRadius: Radius.md,
-                      alignItems: 'center',
-                      opacity: pressed || startingExpressOnboarding ? 0.85 : 1,
-                      marginBottom: Spacing.sm,
-                    })}
-                  >
-                    <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>
-                      {startingExpressOnboarding ? 'Opening…' : 'Add bank details (Stripe Express)'}
+                  <>
+                    <Text style={{ fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.semibold, color: Colors.text.primary, marginBottom: 6 }}>
+                      Account holder name
                     </Text>
-                  </Pressable>
+                    <TextInput
+                      value={bankHolderName}
+                      onChangeText={setBankHolderName}
+                      placeholder="Name on bank account"
+                      autoCapitalize="words"
+                      style={{
+                        borderWidth: 1,
+                        borderColor: Colors.border,
+                        borderRadius: Radius.md,
+                        padding: Spacing.sm,
+                        marginBottom: Spacing.md,
+                        backgroundColor: Colors.surface,
+                        color: Colors.text.primary,
+                      }}
+                    />
+                    <Text style={{ fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.semibold, color: Colors.text.primary, marginBottom: 6 }}>
+                      BSB
+                    </Text>
+                    <TextInput
+                      value={bankBsb}
+                      onChangeText={setBankBsb}
+                      placeholder="000-000"
+                      keyboardType="number-pad"
+                      maxLength={7}
+                      style={{
+                        borderWidth: 1,
+                        borderColor: Colors.border,
+                        borderRadius: Radius.md,
+                        padding: Spacing.sm,
+                        marginBottom: Spacing.md,
+                        backgroundColor: Colors.surface,
+                        color: Colors.text.primary,
+                      }}
+                    />
+                    <Text style={{ fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.semibold, color: Colors.text.primary, marginBottom: 6 }}>
+                      Account number
+                    </Text>
+                    <TextInput
+                      value={bankAccountNumber}
+                      onChangeText={setBankAccountNumber}
+                      placeholder="Account number"
+                      keyboardType="number-pad"
+                      secureTextEntry
+                      style={{
+                        borderWidth: 1,
+                        borderColor: Colors.border,
+                        borderRadius: Radius.md,
+                        padding: Spacing.sm,
+                        marginBottom: Spacing.md,
+                        backgroundColor: Colors.surface,
+                        color: Colors.text.primary,
+                      }}
+                    />
+                    <Pressable
+                      onPress={saveBankDetails}
+                      disabled={savingBank}
+                      style={({ pressed }) => ({
+                        backgroundColor: Colors.primary,
+                        paddingVertical: Spacing.sm + 1,
+                        borderRadius: Radius.md,
+                        alignItems: 'center',
+                        opacity: pressed || savingBank ? 0.85 : 1,
+                        marginBottom: Spacing.sm,
+                      })}
+                    >
+                      <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>
+                        {savingBank ? 'Saving…' : 'Save bank account'}
+                      </Text>
+                    </Pressable>
+                    {hasSavedBank ? (
+                      <Pressable onPress={() => setShowBankForm(false)} style={({ pressed }) => ({ opacity: pressed ? 0.88 : 1 })}>
+                        <Text style={{ color: Colors.text.secondary, textAlign: 'center' }}>Cancel</Text>
+                      </Pressable>
+                    ) : null}
+                  </>
                 )}
               </>
             )}
@@ -316,7 +320,7 @@ export function PaymentsScreen() {
               Saved cards
             </Text>
             <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, lineHeight: 20, marginBottom: Spacing.md }}>
-              Save a card once with Stripe to make booking payments faster. Each booking still requires you to confirm payment from Bookings.
+              Save a card or bank account (BECS Direct Debit) with Stripe for faster booking payments. When you pay from Bookings you can also choose card or Australian bank debit at checkout.
             </Text>
 
             {savedCards.length === 0 ? (

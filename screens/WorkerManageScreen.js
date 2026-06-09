@@ -251,9 +251,9 @@ export function WorkerManageScreen({ route, navigation }) {
         items: [
           {
             key: 'bank',
-            label: 'Bank account for payouts (Stripe)',
+            label: 'Bank account for payouts',
             status: bankStatus,
-            actionLabel: hasBankOnFile ? 'View bank details' : 'Setup with Stripe',
+            actionLabel: hasBankOnFile ? 'View bank details' : 'Add bank details',
             action: () => navigation.navigate('Payments'),
           },
         ],

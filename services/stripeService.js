@@ -20,8 +20,8 @@ const resolveAppBaseUrl = () => {
   return 'http://localhost:3000';
 };
 
-/** Express Connect is the default for worker payouts; set STRIPE_CONNECT_MODE=custom only for legacy in-app BSB. */
-const useCustomConnect = () => String(process.env.STRIPE_CONNECT_MODE || 'express').toLowerCase() === 'custom';
+/** Custom Connect (in-app BSB) is default — worker never signs up for Stripe. Set STRIPE_CONNECT_MODE=express for hosted onboarding. */
+const useCustomConnect = () => String(process.env.STRIPE_CONNECT_MODE || 'custom').toLowerCase() !== 'express';
 
 const buildCustomWorkerAccountBase = ({ email, firstName, lastName, tosAcceptanceIp }) => ({
   country: 'AU',
@@ -35,10 +35,11 @@ const buildCustomWorkerAccountBase = ({ email, firstName, lastName, tosAcceptanc
     last_name: String(lastName || '').trim() || 'User',
     email: String(email || '').trim(),
   },
+  // AU platform + AU connected accounts must use `full`, not `recipient` (recipient is cross-border only).
   tos_acceptance: {
     date: Math.floor(Date.now() / 1000),
     ip: tosAcceptanceIp || '127.0.0.1',
-    service_agreement: 'recipient',
+    service_agreement: 'full',
   },
   settings: {
     payouts: {
@@ -104,6 +105,15 @@ const attachAustralianBankAccount = async (accountId, { accountHolderName, bsb, 
   }
 };
 
+/** Replace any existing payout bank on the connected account. */
+const replaceWorkerBankAccount = async (accountId, details) => {
+  const banks = await listWorkerBankAccounts(accountId);
+  for (const bank of banks) {
+    await stripe.accounts.deleteExternalAccount(accountId, bank.id);
+  }
+  return attachAustralianBankAccount(accountId, details);
+};
+
 const listWorkerBankAccounts = async (accountId) => {
   const list = await stripe.accounts.listExternalAccounts(accountId, {
     object: 'bank_account',
@@ -165,15 +175,18 @@ const createAccountLoginLink = async (accountId) => {
   return stripe.accounts.createLoginLink(accountId);
 };
 
+const PLATFORM_FEE_RATE = 0.15;
+
 const createPaymentIntent = async ({ amountCents, currency = 'aud', bookingId, metadata = {} }) => {
   return stripe.paymentIntents.create({
     amount: amountCents,
     currency,
-    automatic_payment_methods: { enabled: true },
+    payment_method_types: ['card', 'au_becs_debit'],
     metadata: {
-      bookingId,
-      ...metadata
-    }
+      bookingId: String(bookingId),
+      platform_fee_rate: String(PLATFORM_FEE_RATE),
+      ...metadata,
+    },
   });
 };
 
@@ -236,7 +249,7 @@ const createCheckoutSession = async ({
     mode: 'payment',
     success_url: successUrl,
     cancel_url: cancelUrl,
-    payment_method_types: ['card'],
+    payment_method_types: ['card', 'au_becs_debit'],
     line_items: [
       {
         quantity: 1,
@@ -268,8 +281,10 @@ module.exports = {
   stripe,
   resolveAppBaseUrl,
   useCustomConnect,
+  PLATFORM_FEE_RATE,
   createCustomWorkerAccount,
   attachAustralianBankAccount,
+  replaceWorkerBankAccount,
   listWorkerBankAccounts,
   createConnectedAccount,
   createAccountLink,

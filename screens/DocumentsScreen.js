@@ -23,7 +23,7 @@ export function DocumentsScreen({ navigation }) {
   const isWorker = user?.role === 'worker';
   const isParticipant = user?.role === 'participant';
   const openComplianceUpload = () => navigation.navigate('WorkerManage', { focusDocument: 'ndis_screening' });
-  const secondaryLabel = isParticipant ? 'Saved cards' : 'Payouts (Stripe)';
+  const secondaryLabel = isParticipant ? 'Saved cards' : 'Payout bank account';
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
