@@ -6,13 +6,13 @@ import {
   View, Text, FlatList, Pressable, RefreshControl, Alert, Modal,
   TextInput, ScrollView, ActivityIndicator, Platform, Image, Switch,
 } from 'react-native';
-import * as PlacesPkg from 'react-native-google-places-autocomplete';
 import NativeDatePicker from '../components/NativeDatePicker.js';
+import { LocationAutocompleteField } from '../components/LocationAutocompleteField.js';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuthStore } from '../store/authStore.js';
 import { useWorkerGate } from '../context/WorkerGateContext.js';
 import { showVerificationRequiredAlert } from '../utils/verificationPrompt.js';
-import { api, ApiConfig } from '../services/api.js';
+import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { SERVICE_TYPES } from '../constants/serviceTypes.js';
 import { NavChevron } from '../components/NavChevron.js';
@@ -61,19 +61,6 @@ const getServiceColor = (type) => {
   };
   return map[type] || Colors.primary;
 };
-
-function getGooglePlacesBrowserKey() {
-  if (typeof process !== 'undefined' && process.env) {
-    return (
-      process.env.GOOGLE_MAPS_BROWSER_KEY ||
-      process.env.GOOGLE_MAPS_API_KEY ||
-      process.env.EXPO_PUBLIC_GOOGLE_MAPS_BROWSER_KEY ||
-      process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
-      ''
-    );
-  }
-  return '';
-}
 
 // ── Mini Calendar Component ────────────────────────────────────────────────────
 function MiniCalendar({ selectedDate, onSelect }) {
@@ -233,7 +220,6 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo }) {
   const [location, setLocation] = useState('');
   const [locationLat, setLocationLat] = useState(null);
   const [locationLng, setLocationLng] = useState(null);
-  const [locationFocused, setLocationFocused] = useState(false);
   const [description, setDescription] = useState('');
   const [saving, setSaving] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
@@ -266,23 +252,19 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo }) {
   const [includeSleepover, setIncludeSleepover] = useState(false);
   const [travelKmInput, setTravelKmInput] = useState('');
 
-  const placesRef = useRef(null);
-  const PlacesAutocompleteComponent = (
-    PlacesPkg?.GooglePlacesAutocomplete ||
-    PlacesPkg?.default?.GooglePlacesAutocomplete ||
-    PlacesPkg?.default ||
-    null
-  );
-  const googleKey = getGooglePlacesBrowserKey();
-  const isWeb = Platform.OS === 'web';
-  const placesProxyBaseUrl = isWeb
-    ? (typeof window !== 'undefined' ? window.location.origin : '')
-    : String(ApiConfig?.baseURL || 'https://athletic-heart-backend-production.up.railway.app').replace(/\/$/, '');
-  const canUsePlacesAutocomplete = !!PlacesAutocompleteComponent && !!placesProxyBaseUrl;
-  const placesQueryKey = googleKey || 'places-proxy-key';
-  const placesRequestUrl = canUsePlacesAutocomplete
-    ? { url: `${placesProxyBaseUrl}/__places-proxy`, useOnPlatform: 'all' }
-    : undefined;
+  const locationFieldRef = useRef(null);
+
+  const handleLocationTextChange = useCallback((text) => {
+    setLocation(text);
+    setLocationLat(null);
+    setLocationLng(null);
+  }, []);
+
+  const handlePlaceSelected = useCallback(({ address, lat, lng }) => {
+    setLocation(address);
+    setLocationLat(lat);
+    setLocationLng(lng);
+  }, []);
 
   useEffect(() => {
     if (!visible) return;
@@ -315,6 +297,7 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo }) {
     setHighIntensitySupport(false);
     setIncludeSleepover(false);
     setTravelKmInput('');
+    locationFieldRef.current?.clear?.();
   };
 
   const parseTimeToMinutes = (timeStr) => {
@@ -980,112 +963,25 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo }) {
       {showCalendar && <MiniCalendar selectedDate={date} onSelect={(d) => { setDate(d); setShowCalendar(false); }} />}
 
       <Text style={labelStyle}>Location *</Text>
-      {!canUsePlacesAutocomplete ? (
-        <TextInput style={inputStyle} value={location} onChangeText={setLocation} />
-      ) : (
-        <View
-          style={[
-            inputStyle,
-            {
-              paddingVertical: 0,
-              paddingHorizontal: 0,
-              overflow: 'visible',
-              zIndex: 4000,
-              ...(Platform.OS === 'web' ? { position: 'relative', marginBottom: locationFocused ? 8 : 0 } : null),
-            },
-          ]}
-        >
-          <PlacesAutocompleteComponent
-            ref={placesRef}
-            placeholder="Start typing address in Australia"
-            fetchDetails={false}
-            minLength={3}
-            debounce={450}
-            onPress={async (data, details) => {
-              const desc = data?.description || data?.formatted_address || '';
-              setLocation(desc);
-              let lat = details?.geometry?.location?.lat;
-              let lng = details?.geometry?.location?.lng;
-
-              if ((typeof lat !== 'number' || typeof lng !== 'number') && data?.place_id) {
-                try {
-                  const detailsPath = `/api/places/details?place_id=${encodeURIComponent(
-                    data.place_id
-                  )}&language=en`;
-                  const { data: detailsRes } = await api.get(detailsPath);
-                  lat = detailsRes?.result?.geometry?.location?.lat;
-                  lng = detailsRes?.result?.geometry?.location?.lng;
-                } catch (_) {}
-              }
-
-              if (typeof lat === 'number' && typeof lng === 'number') {
-                setLocationLat(lat);
-                setLocationLng(lng);
-              } else {
-                setLocationLat(null);
-                setLocationLng(null);
-              }
-              if (placesRef.current?.blur) placesRef.current.blur();
-            }}
-            query={{
-              key: placesQueryKey,
-              language: 'en',
-              components: 'country:au',
-            }}
-            requestUrl={placesRequestUrl}
-            styles={{
-              container: { flex: 1 },
-              textInput: {
-                backgroundColor: 'transparent',
-                borderWidth: 0,
-                paddingVertical: Spacing.sm,
-                paddingHorizontal: Spacing.md,
-                fontSize: Typography.fontSize.base,
-                color: Colors.text.primary,
-                marginBottom: 0,
-              },
-              listView: {
-                ...(Platform.OS === 'web'
-                  ? { position: 'relative', top: 0, left: 0, right: 0, marginTop: 0 }
-                  : { position: 'absolute', top: 44, left: 0, right: 0 }),
-                backgroundColor: '#FFFFFF',
-                borderWidth: 1,
-                borderColor: Colors.border,
-                borderRadius: Radius.md,
-                maxHeight: 220,
-                overflow: 'auto',
-                zIndex: 3000,
-                ...Shadows.sm,
-              },
-              row: {
-                padding: Spacing.md,
-                backgroundColor: '#FFFFFF',
-              },
-              description: { color: Colors.text.primary, fontSize: Typography.fontSize.sm },
-              separator: { height: 1, backgroundColor: Colors.borderLight },
-            }}
-            listViewDisplayed={locationFocused ? 'auto' : false}
-            keyboardShouldPersistTaps="handled"
-            isRowScrollable
-            enablePoweredByContainer={false}
-            textInputProps={{
-              value: location,
-              onFocus: () => setLocationFocused(true),
-              onBlur: () => {
-                // Delay so click/tap on a suggestion still works.
-                setTimeout(() => setLocationFocused(false), 120);
-              },
-              onChangeText: (t) => {
-                setLocation(t);
-                setLocationLat(null);
-                setLocationLng(null);
-                if (!locationFocused) setLocationFocused(true);
-              },
-              placeholderTextColor: Colors.text.muted,
-            }}
-          />
-        </View>
-      )}
+      <View
+        style={[
+          inputStyle,
+          {
+            paddingVertical: 0,
+            paddingHorizontal: 0,
+            overflow: 'visible',
+            zIndex: 4000,
+            ...(Platform.OS === 'web' ? { position: 'relative' } : null),
+          },
+        ]}
+      >
+        <LocationAutocompleteField
+          ref={locationFieldRef}
+          onAddressChange={handleLocationTextChange}
+          onPlaceSelected={handlePlaceSelected}
+          fallbackInputStyle={inputStyle}
+        />
+      </View>
 
       <Text style={labelStyle}>Task note / description</Text>
       <TextInput

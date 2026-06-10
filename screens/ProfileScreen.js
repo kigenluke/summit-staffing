@@ -301,7 +301,7 @@ export function ProfileScreen({ navigation }) {
                   : accessPhase === 'ready_to_submit'
                     ? 'Submit documents for verification'
                     : 'Awaiting verification')
-                : 'Awaiting verification'}
+                : ''}
           </Text>
         )}
       </View>
