@@ -17,6 +17,7 @@ import { useLoading } from '../../hooks/useLoading.js';
 import { useErrorHandler } from '../../hooks/useErrorHandler.js';
 import { api } from '../../services/api.js';
 import { LoadingScreen } from '../../components/LoadingScreen.js';
+import { PasswordInput } from '../../components/PasswordInput.js';
 import { Colors, Spacing, Typography, Radius } from '../../constants/theme.js';
 
 const inputStyle = {
@@ -96,13 +97,10 @@ export function LoginScreen({ navigation }) {
         <Text style={{ fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.medium, color: Colors.text.primary, marginBottom: Spacing.sm }}>
           Password
         </Text>
-        <TextInput
-          style={[inputStyle, { marginBottom: Spacing.lg }]}
-          placeholder="••••••••"
-          placeholderTextColor={Colors.text.muted}
+        <PasswordInput
+          containerStyle={{ marginBottom: Spacing.lg }}
           value={password}
           onChangeText={setPassword}
-          secureTextEntry
           editable={!isLoading}
         />
 

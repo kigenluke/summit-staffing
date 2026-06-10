@@ -17,6 +17,7 @@ import { useLoading } from '../../hooks/useLoading.js';
 import { useErrorHandler } from '../../hooks/useErrorHandler.js';
 import { api } from '../../services/api.js';
 import { LoadingScreen } from '../../components/LoadingScreen.js';
+import { PasswordInput } from '../../components/PasswordInput.js';
 import { Colors, Spacing, Typography, Radius } from '../../constants/theme.js';
 import { VENDOR_CATEGORIES } from '../../constants/vendorCategories.js';
 import { isValidPhone } from '../../utils/phoneValidation.js';
@@ -55,7 +56,6 @@ export function RegisterScreen({ navigation, route }) {
   const [workAs, setWorkAs] = useState('individual');
   const [email, setEmail] = useState(emailFromRoute ? String(emailFromRoute).trim().toLowerCase() : '');
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [abn, setAbn] = useState('');
@@ -329,33 +329,12 @@ export function RegisterScreen({ navigation, route }) {
         <TextInput style={[inputStyle, { marginBottom: Spacing.md }]} placeholder="you@example.com" placeholderTextColor={Colors.text.muted} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" editable={!isLoading} />
 
         <Text style={labelStyle}>Password (min 8 characters)</Text>
-        <View style={{ position: 'relative', marginBottom: Spacing.md }}>
-          <TextInput
-            style={[inputStyle, { paddingRight: 52, marginBottom: 0 }]}
-            placeholder="••••••••"
-            placeholderTextColor={Colors.text.muted}
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry={!showPassword}
-            editable={!isLoading}
-          />
-          <Pressable
-            onPress={() => setShowPassword((prev) => !prev)}
-            style={({ pressed }) => ({
-              position: 'absolute',
-              right: 12,
-              top: 0,
-              bottom: 0,
-              justifyContent: 'center',
-              opacity: pressed ? 0.7 : 1,
-            })}
-            hitSlop={8}
-          >
-            <Text style={{ color: Colors.primary, fontWeight: Typography.fontWeight.semibold, fontSize: Typography.fontSize.sm }}>
-              {showPassword ? 'Hide' : 'Show'}
-            </Text>
-          </Pressable>
-        </View>
+        <PasswordInput
+          containerStyle={{ marginBottom: Spacing.md }}
+          value={password}
+          onChangeText={setPassword}
+          editable={!isLoading}
+        />
 
         <Text style={labelStyle}>First name</Text>
         <TextInput style={[inputStyle, { marginBottom: Spacing.md }]} placeholder="First name" placeholderTextColor={Colors.text.muted} value={firstName} onChangeText={setFirstName} editable={!isLoading} />

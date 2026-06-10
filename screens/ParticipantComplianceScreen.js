@@ -1,5 +1,5 @@
 /**
- * Participant compliance document upload (required before posting shifts).
+ * Optional participant compliance document upload.
  */
 import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, ScrollView, Pressable, Alert, ActivityIndicator, Platform } from 'react-native';
@@ -106,7 +106,7 @@ export function ParticipantComplianceScreen() {
     <ScrollView style={{ flex: 1, backgroundColor: Colors.background }} contentContainerStyle={{ padding: Spacing.lg, paddingBottom: Spacing.xxl }}>
       <ComplianceDocumentsPanel
         title="Compliance documents"
-        subtitle={`Upload required documents before posting shifts. Account status: ${statusLabel}.`}
+        subtitle={`Optional compliance documents. Account status: ${statusLabel}.`}
         docTypes={DOC_TYPES}
         documents={documents}
         requiredTypes={REQUIRED_PARTICIPANT_COMPLIANCE_DOCS}

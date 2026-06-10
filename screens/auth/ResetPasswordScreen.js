@@ -9,6 +9,7 @@ import { useErrorHandler } from '../../hooks/useErrorHandler.js';
 import { api } from '../../services/api.js';
 import { showSuccess } from '../../utils/errorHandler.js';
 import { LoadingScreen } from '../../components/LoadingScreen.js';
+import { PasswordInput } from '../../components/PasswordInput.js';
 import { Colors, Spacing, Typography, Radius } from '../../constants/theme.js';
 
 const inputStyle = {
@@ -130,27 +131,27 @@ export function ResetPasswordScreen({ route, navigation }) {
             <Text style={{ fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.medium, color: Colors.text.primary, marginBottom: Spacing.sm }}>
               New password
             </Text>
-            <TextInput
-              style={[inputStyle, { marginBottom: Spacing.md }]}
+            <PasswordInput
+              containerStyle={{ marginBottom: Spacing.md }}
               placeholder="At least 8 characters"
-              placeholderTextColor={Colors.text.muted}
               value={password}
               onChangeText={setPassword}
-              secureTextEntry
               editable={!isLoading}
+              textContentType="newPassword"
+              autoComplete="new-password"
             />
 
             <Text style={{ fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.medium, color: Colors.text.primary, marginBottom: Spacing.sm }}>
               Confirm password
             </Text>
-            <TextInput
-              style={[inputStyle, { marginBottom: Spacing.lg }]}
+            <PasswordInput
+              containerStyle={{ marginBottom: Spacing.lg }}
               placeholder="Repeat new password"
-              placeholderTextColor={Colors.text.muted}
               value={confirm}
               onChangeText={setConfirm}
-              secureTextEntry
               editable={!isLoading}
+              textContentType="newPassword"
+              autoComplete="new-password"
             />
 
             {error ? (

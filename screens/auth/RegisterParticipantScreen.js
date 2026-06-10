@@ -17,6 +17,7 @@ import { useLoading } from '../../hooks/useLoading.js';
 import { useErrorHandler } from '../../hooks/useErrorHandler.js';
 import { api } from '../../services/api.js';
 import { LoadingScreen } from '../../components/LoadingScreen.js';
+import { PasswordInput } from '../../components/PasswordInput.js';
 import { Colors, Spacing, Typography, Radius } from '../../constants/theme.js';
 import { isValidPhone } from '../../utils/phoneValidation.js';
 
@@ -120,7 +121,12 @@ export function RegisterParticipantScreen({ navigation }) {
         <TextInput style={[inputStyle, { marginBottom: Spacing.md }]} placeholder="you@example.com" placeholderTextColor={Colors.text.muted} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" editable={!isLoading} />
 
         <Text style={labelStyle}>Password (min 8 characters)</Text>
-        <TextInput style={[inputStyle, { marginBottom: Spacing.md }]} placeholder="••••••••" placeholderTextColor={Colors.text.muted} value={password} onChangeText={setPassword} secureTextEntry editable={!isLoading} />
+        <PasswordInput
+          containerStyle={{ marginBottom: Spacing.md }}
+          value={password}
+          onChangeText={setPassword}
+          editable={!isLoading}
+        />
 
         <Text style={labelStyle}>First name</Text>
         <TextInput style={[inputStyle, { marginBottom: Spacing.md }]} placeholder="First name" placeholderTextColor={Colors.text.muted} value={firstName} onChangeText={setFirstName} editable={!isLoading} />
