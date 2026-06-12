@@ -1,15 +1,14 @@
 const crypto = require('crypto');
 const pool = require('../config/database');
-const { getWebClientBaseUrl } = require('../utils/clientAppUrl');
 const { getPlayStoreUrl, getAppStoreUrl } = require('../utils/storeUrls.cjs');
 const { sendReferralInviteEmail } = require('../services/emailService');
 
 const VALID_ROLES = new Set(['worker', 'participant']);
+/** Referral share links always use the public website — never localhost or CORS origin lists. */
+const REFERRAL_WEB_BASE = 'https://summitstaffing.com.au';
 
-const buildReferralLink = (token, role) => {
-  const base = getWebClientBaseUrl().replace(/\/$/, '');
-  return `${base}/refer?token=${encodeURIComponent(token)}&role=${encodeURIComponent(role)}`;
-};
+const buildReferralLink = (token, role) =>
+  `${REFERRAL_WEB_BASE}/refer?token=${encodeURIComponent(token)}&role=${encodeURIComponent(role)}`;
 
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
 

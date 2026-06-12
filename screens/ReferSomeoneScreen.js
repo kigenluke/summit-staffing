@@ -21,21 +21,16 @@ const inputStyle = {
 
 const PUBLIC_REFERRAL_BASE = 'https://summitstaffing.com.au';
 
-/** Referral links must always use the live site, never localhost from dev API. */
+/** Always rebuild as https://summitstaffing.com.au/refer?token=…&role=… */
 function normalizeReferralLink(url) {
-  if (!url || typeof url !== 'string') return url || '';
-  try {
-    const parsed = new URL(url);
-    if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
-      const prod = new URL(PUBLIC_REFERRAL_BASE);
-      parsed.protocol = prod.protocol;
-      parsed.host = prod.host;
-      return parsed.toString();
-    }
-  } catch (_) {
-    if (/localhost|127\.0\.0\.1/i.test(url)) {
-      return url.replace(/^https?:\/\/[^/]+/i, PUBLIC_REFERRAL_BASE);
-    }
+  if (!url || typeof url !== 'string') return '';
+  const referMatch = url.match(/refer\?([^#\s]+)/i);
+  const qs = referMatch?.[1] || (url.includes('?') ? url.split('?').pop() : '');
+  const params = new URLSearchParams(qs);
+  const token = params.get('token');
+  const role = params.get('role');
+  if (token && role) {
+    return `${PUBLIC_REFERRAL_BASE}/refer?token=${encodeURIComponent(token)}&role=${encodeURIComponent(role)}`;
   }
   return url;
 }

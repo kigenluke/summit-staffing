@@ -27,7 +27,15 @@ function getWebClientBaseUrl() {
   ];
   for (const c of candidates) {
     const t = trimBase(c);
-    if (t && !isLocalDevUrl(t)) return t;
+    if (!t || isLocalDevUrl(t) || t.includes(',')) continue;
+    try {
+      const parsed = new URL(t);
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        return trimBase(parsed.origin);
+      }
+    } catch (_) {
+      /* skip invalid */
+    }
   }
   return PRODUCTION_WEB_URL;
 }
