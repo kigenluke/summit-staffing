@@ -30,11 +30,12 @@ const AccountAccessContext = createContext({
 });
 
 function derivePhase({ progress, verified, submitted, expiredDocuments }) {
+  // Admin-verified workers unlock the app (matches Profile "Verified account" badge).
+  if (verified) return 'verified';
   if (expiredDocuments?.length > 0) return 'documents_expired';
   if (!progress?.allUploaded) return 'needs_documents';
   if (!submitted) return 'ready_to_submit';
-  if (!verified) return 'pending_verification';
-  return 'verified';
+  return 'pending_verification';
 }
 
 export function WorkerGateProvider({ children }) {

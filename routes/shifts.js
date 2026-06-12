@@ -9,7 +9,7 @@ const shiftController = require('../controllers/shiftController');
 const gate = [requireAccountVerified];
 
 // Create shift (participants only) - must be defined before GET routes
-router.post('/', auth, checkParticipant, ...gate, shiftController.createShift);
+router.post('/', auth, checkParticipant, shiftController.createShift);
 
 // My shifts (participant's own posted shifts)
 router.get('/mine', auth, shiftController.getMyShifts);
@@ -24,7 +24,7 @@ router.get('/:id', auth, shiftController.getShiftById);
 router.post('/:id/apply', auth, checkWorker, ...gate, shiftController.applyForShift);
 
 // Accept an application (participant who created the shift)
-router.put('/:id/applications/:applicationId/accept', auth, ...gate, shiftController.acceptApplication);
+router.put('/:id/applications/:applicationId/accept', auth, shiftController.acceptApplication);
 
 // Cancel a shift
 router.put('/:id/cancel', auth, shiftController.cancelShift);

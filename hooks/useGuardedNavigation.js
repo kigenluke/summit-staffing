@@ -13,6 +13,7 @@ export const ALLOWED_ROUTES_WHILE_RESTRICTED = new Set([
   'ParticipantCompliance',
   'Documents',
   'Notifications',
+  'ReferSomeone',
 ]);
 
 /**

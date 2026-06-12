@@ -11,6 +11,7 @@ import { ParticipantSignUpStack } from './ParticipantSignUpStack';
 import { ForgotPasswordScreen } from '../screens/auth/ForgotPasswordScreen.js';
 import { ResetPasswordScreen } from '../screens/auth/ResetPasswordScreen.js';
 import { VerificationScreen } from '../screens/auth/VerificationScreen.js';
+import { ReferInviteScreen } from '../screens/auth/ReferInviteScreen.js';
 
 const headerStyle = {
   headerStyle: { backgroundColor: '#06B6D4' },
@@ -27,8 +28,10 @@ export type AuthStackParamList = {
   Register: {
     role?: 'worker' | 'participant' | 'coordinator';
     coordinatorInviteToken?: string;
+    referralToken?: string;
     email?: string;
   } | undefined;
+  ReferInvite: { token?: string; role?: string } | undefined;
   ParticipantSignUp: undefined;
   ForgotPassword: undefined;
   ResetPassword: { token?: string } | undefined;
@@ -66,6 +69,7 @@ export const AuthStack = () => {
       <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} options={{ title: 'Reset Password' }} />
       <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} options={{ title: 'New password' }} />
       <Stack.Screen name="Verification" component={VerificationScreen} options={{ title: 'Verify Email' }} />
+      <Stack.Screen name="ReferInvite" component={ReferInviteScreen} options={{ title: 'Invitation' }} />
     </Stack.Navigator>
   );
 };

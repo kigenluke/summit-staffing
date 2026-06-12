@@ -141,6 +141,26 @@ const sendWelcomeEmail = async (email, { firstName, role } = {}) => {
   return sendEmail(to, subject, html, [], text);
 };
 
+const sendReferralInviteEmail = async ({ toEmail, referrerName, role, inviteUrl }) => {
+  const roleLabel = role === 'worker' ? 'support worker' : 'participant';
+  const subject = `You're invited to join Summit Staffing as a ${roleLabel}`;
+  const safeReferrer = String(referrerName || 'Someone').replace(/</g, '&lt;');
+  const html = `
+    <p>Hello,</p>
+    <p><strong>${safeReferrer}</strong> has invited you to join <strong>Summit Staffing</strong> as a <strong>${roleLabel}</strong>.</p>
+    <p>Download the app and create your account using this link (valid for 30 days):</p>
+    <p><a href="${inviteUrl}">${inviteUrl}</a></p>
+    <p>The link will take you to the Google Play Store or Apple App Store to install Summit Staffing.</p>
+    <p>If you did not expect this email, you can ignore it.</p>
+    <p>— Summit Staffing</p>
+  `;
+  const text =
+    `${safeReferrer} invited you to join Summit Staffing as a ${roleLabel}.\n\n`
+    + `Open this link to download the app and sign up:\n${inviteUrl}\n\n`
+    + `— Summit Staffing`;
+  return sendEmail(toEmail, subject, html, [], text);
+};
+
 const sendCoordinatorInviteEmail = async (toEmail, participantDisplayName, signupUrl) => {
   const subject = 'Invitation: coordinate on Summit Staffing';
   const safeName = String(participantDisplayName || 'A participant').replace(/</g, '&lt;');
@@ -179,6 +199,7 @@ module.exports = {
   sendPasswordResetEmail,
   sendVerificationEmail,
   sendWelcomeEmail,
+  sendReferralInviteEmail,
   sendCoordinatorInviteEmail,
   sendInvoiceEmail,
   isOutboundEmailConfigured,

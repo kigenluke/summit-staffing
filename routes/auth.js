@@ -60,7 +60,12 @@ router.post(
       .optional({ nullable: true })
       .isString()
       .isLength({ min: 10, max: 128 })
-      .withMessage('Invalid invitation token')
+      .withMessage('Invalid invitation token'),
+    body('referral_token')
+      .optional({ nullable: true })
+      .isString()
+      .isLength({ min: 10, max: 128 })
+      .withMessage('Invalid referral token'),
   ],
   (req, res, next) => {
     // Enforce required worker fields

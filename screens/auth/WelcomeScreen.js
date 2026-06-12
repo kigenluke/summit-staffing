@@ -17,6 +17,16 @@ export function WelcomeScreen({ navigation }) {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
     try {
       const usp = new URLSearchParams(window.location.search);
+      const referToken = usp.get('token');
+      const referRole = usp.get('role') || undefined;
+      const onReferPath = (window.location.pathname || '').replace(/\/$/, '').endsWith('/refer');
+      if (referToken && (onReferPath || referRole)) {
+        navigation.replace('ReferInvite', {
+          token: referToken.trim(),
+          role: referRole,
+        });
+        return;
+      }
       const token = usp.get('coordinatorInvite');
       if (!token) return;
       const em = usp.get('email') || undefined;

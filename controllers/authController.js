@@ -187,6 +187,32 @@ const register = async (req, res) => {
         }
       }
 
+      const referralTokenRaw = typeof req.body.referral_token === 'string'
+        ? req.body.referral_token.trim()
+        : '';
+      if (referralTokenRaw && (role === 'worker' || role === 'participant')) {
+        try {
+          const refRes = await client.query(
+            `SELECT id, role, invited_email
+             FROM referral_invites
+             WHERE token = $1 AND consumed_at IS NULL AND expires_at > now()
+             LIMIT 1`,
+            [referralTokenRaw]
+          );
+          if (refRes.rowCount > 0) {
+            const ref = refRes.rows[0];
+            const emailOk = !ref.invited_email || String(ref.invited_email).toLowerCase() === normalizedEmail;
+            const roleOk = ref.role === role;
+            if (emailOk && roleOk) {
+              await client.query('UPDATE referral_invites SET consumed_at = now() WHERE id = $1', [ref.id]);
+            }
+          }
+        } catch (refErr) {
+          // eslint-disable-next-line no-console
+          console.error('Referral invite link failed (non-fatal):', refErr?.message || refErr);
+        }
+      }
+
       const verificationToken = crypto.randomBytes(TOKEN_BYTES).toString('hex');
       const verificationTokenHash = sha256(verificationToken);
       const verificationExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);

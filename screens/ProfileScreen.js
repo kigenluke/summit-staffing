@@ -342,6 +342,12 @@ export function ProfileScreen({ navigation }) {
         </MenuSection>
       )}
 
+      {(isWorker || isParticipant || isCoordinator) && (
+        <MenuSection>
+          <MenuItem label="Refer someone" disabled={false} onPress={() => safeNavigate('ReferSomeone')} />
+        </MenuSection>
+      )}
+
       <MenuSection>
         <MenuItem label="Edit Profile" disabled={false} onPress={() => safeNavigate('EditProfile')} />
         {isWorker ? (

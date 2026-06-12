@@ -44,6 +44,7 @@ const buttonStyle = (pressed) => ({
 export function RegisterScreen({ navigation, route }) {
   const roleFromRoute = route.params?.role;
   const inviteTokenFromRoute = route.params?.coordinatorInviteToken;
+  const referralTokenFromRoute = route.params?.referralToken;
   const emailFromRoute = route.params?.email;
   const isProvideSupportFlow = roleFromRoute === 'worker';
   const isCoordinatorFlow = roleFromRoute === 'coordinator';
@@ -66,6 +67,9 @@ export function RegisterScreen({ navigation, route }) {
   const [phone, setPhone] = useState('');
   const [coordinatorInviteToken, setCoordinatorInviteToken] = useState(
     inviteTokenFromRoute ? String(inviteTokenFromRoute).trim() : ''
+  );
+  const [referralToken, setReferralToken] = useState(
+    referralTokenFromRoute ? String(referralTokenFromRoute).trim() : ''
   );
   const [showVendorCategoryDropdown, setShowVendorCategoryDropdown] = useState(false);
   const [vendorCategories, setVendorCategories] = useState([]);
@@ -135,6 +139,9 @@ export function RegisterScreen({ navigation, route }) {
     }
     if (role === 'coordinator' && coordinatorInviteToken) {
       body.coordinator_invite_token = coordinatorInviteToken;
+    }
+    if (referralToken) {
+      body.referral_token = referralToken;
     }
 
     const { data, error: err } = await api.post('/api/auth/register', body);

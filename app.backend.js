@@ -25,6 +25,7 @@ const placesRoutes = require('./routes/places');
 const incidentsRoutes = require('./routes/incidents');
 const complaintsRoutes = require('./routes/complaints');
 const coordinatorRoutes = require('./routes/coordinator');
+const referralRoutes = require('./routes/referrals');
 
 const allowedOrigins = [
   'http://localhost:3000',
@@ -131,6 +132,7 @@ app.use('/__places-proxy', placesRoutes);
 app.use('/api/incidents', incidentsRoutes);
 app.use('/api/complaints', complaintsRoutes);
 app.use('/api/coordinator', coordinatorRoutes);
+app.use('/api/referrals', referralRoutes);
 
 // Explicit preflight handler for CORS
 app.options('*', cors());
