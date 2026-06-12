@@ -2,6 +2,8 @@ const { validationResult } = require('express-validator');
 
 const pool = require('../config/database');
 const { sendEmail } = require('../services/emailService');
+const { uploadFile } = require('../services/s3Service');
+const { replaceStaleComplianceUpload } = require('../utils/complianceDocumentDb');
 
 const respondValidation = (req, res) => {
   const errors = validationResult(req);
@@ -477,9 +479,13 @@ const getUserComplianceStatus = async (req, res) => {
       [worker.worker_id]
     );
 
+    const { buildDocumentCatalogKeyMap, resolveDocumentCatalogKey } = require('../utils/workerDocumentResolver.cjs');
+    const keyMap = buildDocumentCatalogKeyMap(docsRes.rows);
     const latestByType = {};
     for (const d of docsRes.rows) {
-      if (!latestByType[d.document_type]) latestByType[d.document_type] = d;
+      const catalogKey = resolveDocumentCatalogKey(d, keyMap);
+      if (!catalogKey) continue;
+      if (!latestByType[catalogKey]) latestByType[catalogKey] = d;
     }
 
     const items = Object.entries(COMPLIANCE_DOC_MAP).map(([key, def]) => {
@@ -576,6 +582,56 @@ const updateUserComplianceItem = async (req, res) => {
   }
 };
 
+const uploadUserComplianceDocument = async (req, res) => {
+  try {
+    if (respondValidation(req, res)) return;
+    const userId = req.params.id;
+    const itemKey = req.params.itemKey;
+    const mapping = COMPLIANCE_DOC_MAP[itemKey];
+    if (!mapping) {
+      return res.status(400).json({ ok: false, error: 'Unsupported compliance item' });
+    }
+    if (!req.file) {
+      return res.status(400).json({ ok: false, error: 'File is required' });
+    }
+    const { issue_date, expiry_date } = req.body || {};
+    if (!issue_date || !expiry_date) {
+      return res.status(400).json({ ok: false, error: 'Start date and end date are required' });
+    }
+    if (new Date(expiry_date) < new Date(issue_date)) {
+      return res.status(400).json({ ok: false, error: 'End date must be on or after start date' });
+    }
+
+    const workerRes = await pool.query('SELECT id FROM workers WHERE user_id = $1 LIMIT 1', [userId]);
+    if (workerRes.rowCount === 0) {
+      return res.status(404).json({ ok: false, error: 'Worker profile not found for this user' });
+    }
+    const workerId = workerRes.rows[0].id;
+
+    await replaceStaleComplianceUpload(pool, {
+      table: 'worker',
+      subjectId: workerId,
+      documentType: mapping.documentType,
+    });
+
+    const folder = `documents/${workerId}/${mapping.documentType}`;
+    const fileUrl = await uploadFile(req.file, folder);
+
+    const insertRes = await pool.query(
+      `INSERT INTO worker_documents (worker_id, document_type, compliance_item_key, file_url, issue_date, expiry_date, status)
+       VALUES ($1, $2, $3, $4, $5, $6, 'approved')
+       RETURNING *`,
+      [workerId, mapping.documentType, itemKey, fileUrl, issue_date, expiry_date]
+    );
+
+    await recomputeWorkerVerification(workerId);
+
+    return res.status(201).json({ ok: true, document: insertRes.rows[0] });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: 'Failed to upload compliance document' });
+  }
+};
+
 module.exports = {
   getDashboardStats,
   getPendingDocuments,
@@ -584,6 +640,7 @@ module.exports = {
   getUserList,
   getUserComplianceStatus,
   updateUserComplianceItem,
+  uploadUserComplianceDocument,
   suspendUser,
   getRevenueReport,
   getBookingMetrics

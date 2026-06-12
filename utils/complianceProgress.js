@@ -1,3 +1,11 @@
+import {
+  buildDocumentCatalogKeyMap,
+  resolveDocumentCatalogKey,
+  isImmunisationHistoryDocument,
+} from './workerDocumentResolver.js';
+
+const IMMUNISATION_DOC_TYPES = ['flu_vaccination', 'covid_vaccine_1', 'covid_vaccine_2', 'covid_vaccine_3'];
+
 export {
   WORKER_DOCUMENT_CATALOG,
   REQUIRED_WORKER_COMPLIANCE_DOCS,
@@ -19,8 +27,14 @@ function startOfDay(value) {
 }
 
 export function getLatestDocumentForType(documents = [], documentType) {
+  const keyMap = buildDocumentCatalogKeyMap(documents);
   return (documents || [])
-    .filter((d) => d.document_type === documentType)
+    .filter((d) => {
+      const key = resolveDocumentCatalogKey(d, keyMap);
+      if (key === documentType) return true;
+      if (IMMUNISATION_DOC_TYPES.includes(documentType) && isImmunisationHistoryDocument(d)) return true;
+      return false;
+    })
     .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))[0] || null;
 }
 

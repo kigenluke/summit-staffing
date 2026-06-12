@@ -9,7 +9,7 @@ import { useAuthStore } from '../store/authStore.js';
 import { useAccountAccess } from '../context/WorkerGateContext.js';
 import { ComplianceDocumentsPanel } from '../components/ComplianceDocumentsPanel.js';
 import { WorkerSkillsPanel } from '../components/WorkerSkillsPanel.js';
-import { REQUIRED_WORKER_COMPLIANCE_DOCS } from '../utils/complianceProgress.js';
+import { REQUIRED_WORKER_COMPLIANCE_DOCS, getLatestDocumentForType } from '../utils/complianceProgress.js';
 import { WORKER_DOCUMENT_CATALOG } from '../utils/workerDocumentCatalog.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { formatDateDMY } from '../utils/dateFormat.js';
@@ -210,12 +210,11 @@ export function WorkerManageScreen({ route, navigation }) {
     }
 
     const docs = worker.documents || [];
-    const byType = Object.fromEntries(docs.map((d) => [d.document_type, d]));
     const skillNames = (worker.skills || []).map((s) => (s.skill_name || '').toLowerCase());
     const hasCoreVendorSkill = skillNames.some((s) => CORE_VENDOR_OPTIONS.map((x) => x.toLowerCase()).includes(s));
 
     const docStatus = (type) => {
-      const doc = byType[type];
+      const doc = getLatestDocumentForType(docs, type);
       if (!doc) return 'not_started';
       const st = (doc.status || '').toLowerCase();
       if (st === 'approved') return 'verified';

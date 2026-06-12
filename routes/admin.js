@@ -4,6 +4,7 @@ const { body, query, param } = require('express-validator');
 const auth = require('../middleware/auth');
 const checkAdmin = require('../middleware/checkAdmin');
 const adminController = require('../controllers/adminController');
+const { complianceUpload } = require('../middleware/complianceMulter');
 
 const router = express.Router();
 
@@ -54,6 +55,20 @@ router.put(
     body('reason').optional().isString().isLength({ max: 500 })
   ],
   adminController.updateUserComplianceItem
+);
+
+router.post(
+  '/users/:id/compliance/:itemKey/upload',
+  [
+    auth,
+    checkAdmin,
+    param('id').isUUID(),
+    param('itemKey').isString().isLength({ min: 2, max: 80 }),
+    complianceUpload.single('file'),
+    body('issue_date').notEmpty().isISO8601().toDate(),
+    body('expiry_date').notEmpty().isISO8601().toDate(),
+  ],
+  adminController.uploadUserComplianceDocument
 );
 
 router.put(
