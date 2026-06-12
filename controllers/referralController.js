@@ -7,7 +7,7 @@ const { sendReferralInviteEmail } = require('../services/emailService');
 const VALID_ROLES = new Set(['worker', 'participant']);
 
 const buildReferralLink = (token, role) => {
-  const base = getWebClientBaseUrl();
+  const base = getWebClientBaseUrl().replace(/\/$/, '');
   return `${base}/refer?token=${encodeURIComponent(token)}&role=${encodeURIComponent(role)}`;
 };
 

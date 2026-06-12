@@ -3,12 +3,19 @@
  * Do NOT use APP_URL here — that is the public API origin (Stripe, etc.), not the React app.
  */
 
+const PRODUCTION_WEB_URL = 'https://summitstaffing.com.au';
+
 function trimBase(u) {
   return String(u || '').trim().replace(/\/$/, '');
 }
 
+function isLocalDevUrl(url) {
+  return /localhost|127\.0\.0\.1/i.test(String(url || ''));
+}
+
 /**
- * @returns {string} e.g. https://app.example.com or http://localhost:5173
+ * Public site URL for emails, referral links, and share URLs.
+ * Never returns localhost — always the live summitstaffing.com.au site.
  */
 function getWebClientBaseUrl() {
   const candidates = [
@@ -20,9 +27,9 @@ function getWebClientBaseUrl() {
   ];
   for (const c of candidates) {
     const t = trimBase(c);
-    if (t) return t;
+    if (t && !isLocalDevUrl(t)) return t;
   }
-  return 'http://localhost:5173';
+  return PRODUCTION_WEB_URL;
 }
 
 /**

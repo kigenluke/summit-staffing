@@ -19,6 +19,27 @@ const inputStyle = {
   color: Colors.text.primary,
 };
 
+const PUBLIC_REFERRAL_BASE = 'https://summitstaffing.com.au';
+
+/** Referral links must always use the live site, never localhost from dev API. */
+function normalizeReferralLink(url) {
+  if (!url || typeof url !== 'string') return url || '';
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
+      const prod = new URL(PUBLIC_REFERRAL_BASE);
+      parsed.protocol = prod.protocol;
+      parsed.host = prod.host;
+      return parsed.toString();
+    }
+  } catch (_) {
+    if (/localhost|127\.0\.0\.1/i.test(url)) {
+      return url.replace(/^https?:\/\/[^/]+/i, PUBLIC_REFERRAL_BASE);
+    }
+  }
+  return url;
+}
+
 function notify(title, message) {
   if (Platform.OS === 'web' && typeof window !== 'undefined') window.alert(`${title}\n\n${message}`);
   else Alert.alert(title, message);
@@ -40,7 +61,7 @@ export function ReferSomeoneScreen({ route }) {
       notify('Error', error?.message || data?.error || 'Could not generate referral link');
       return;
     }
-    setLink(data.link || '');
+    setLink(normalizeReferralLink(data.link || ''));
   }, []);
 
   useEffect(() => {
@@ -75,12 +96,12 @@ export function ReferSomeoneScreen({ route }) {
     setSending(false);
     if (error || !data?.ok) {
       notify('Could not send', error?.message || data?.error || 'Invitation failed');
-      if (data?.link) setLink(data.link);
+      if (data?.link) setLink(normalizeReferralLink(data.link));
       return;
     }
     notify('Invitation sent', data.message || `Referral email sent to ${trimmed}.`);
     setEmail('');
-    if (data.link) setLink(data.link);
+    if (data.link) setLink(normalizeReferralLink(data.link));
   };
 
   const roleLabel = role === 'worker' ? 'support worker' : 'participant';
