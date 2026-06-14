@@ -5,6 +5,7 @@
 import React, { useEffect, useMemo } from 'react';
 import { View, Text, Pressable, ImageBackground, StatusBar, useWindowDimensions, Platform } from 'react-native';
 import { Colors, Spacing, Typography, Radius } from '../../constants/theme.js';
+import { AppLogo } from '../../components/AppLogo.js';
 
 import welcomeLandscape from '../../welcome.jpg';
 import welcomePortrait from '../../welcome-hero.jpg';
@@ -66,20 +67,7 @@ export function WelcomeScreen({ navigation }) {
       >
         <View style={{ flex: 1, width: '100%', backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-end' }}>
           <View style={{ position: 'absolute', top: 56, left: 0, right: 0, alignItems: 'center', paddingHorizontal: Spacing.md }}>
-            <Text
-              style={{
-                fontSize: 32,
-                fontWeight: Typography.fontWeight.bold,
-                color: '#FFFFFF',
-                textShadowColor: 'rgba(0,0,0,0.75)',
-                textShadowOffset: { width: 0, height: 2 },
-                textShadowRadius: 8,
-                letterSpacing: 1,
-                textAlign: 'center',
-              }}
-            >
-              Summit Staffing
-            </Text>
+            <AppLogo width={260} height={140} />
             <Text
               style={{
                 marginTop: Spacing.sm,

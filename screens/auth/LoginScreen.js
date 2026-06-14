@@ -18,6 +18,7 @@ import { useErrorHandler } from '../../hooks/useErrorHandler.js';
 import { api } from '../../services/api.js';
 import { LoadingScreen } from '../../components/LoadingScreen.js';
 import { PasswordInput } from '../../components/PasswordInput.js';
+import { AppLogo } from '../../components/AppLogo.js';
 import { Colors, Spacing, Typography, Radius } from '../../constants/theme.js';
 
 const inputStyle = {
@@ -75,6 +76,9 @@ export function LoginScreen({ navigation }) {
         contentContainerStyle={{ flexGrow: 1, padding: Spacing.lg, paddingTop: Spacing.xxl, justifyContent: 'center' }}
         keyboardShouldPersistTaps="handled"
       >
+        <View style={{ alignItems: 'center', marginBottom: Spacing.lg }}>
+          <AppLogo width={200} height={108} />
+        </View>
         <Text style={{ fontSize: Typography.fontSize.xxl, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.xl }}>
           Sign in
         </Text>

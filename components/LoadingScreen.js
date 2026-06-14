@@ -1,7 +1,8 @@
 import React, {useEffect, useMemo, useRef} from 'react';
-import {ActivityIndicator, Animated, SafeAreaView, Text, View} from 'react-native';
+import {ActivityIndicator, Animated, SafeAreaView, Text} from 'react-native';
 
 import { Colors, Spacing, Typography } from '../constants/theme.js';
+import { AppLogo } from './AppLogo.js';
 
 export const LoadingScreen = ({message, transparent}) => {
   const opacity = useRef(new Animated.Value(0)).current;
@@ -32,19 +33,7 @@ export const LoadingScreen = ({message, transparent}) => {
       }}>
       <Animated.View style={{opacity, alignItems: 'center', justifyContent: 'center', gap: 12}}>
         <Animated.View style={{transform: [{scale}]}}>
-          <View
-            style={{
-              width: 96,
-              height: 96,
-              borderRadius: 48,
-              backgroundColor: Colors.surface,
-              borderWidth: 1,
-              borderColor: Colors.border,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}>
-            <Text style={{fontSize: 26, fontWeight: '900', color: Colors.primary}}>S</Text>
-          </View>
+          <AppLogo width={120} height={64} />
         </Animated.View>
 
         <ActivityIndicator size="large" color={Colors.primary} />
