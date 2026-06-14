@@ -16,6 +16,25 @@ const respondValidation = (req, res) => {
   return false;
 };
 
+/** Unassigned posted shifts appear in Bookings as pending (participant view). */
+const mapOpenShiftToPendingBooking = (shift) => ({
+  id: shift.id,
+  service_type: shift.service_type,
+  title: shift.title,
+  start_time: shift.start_time,
+  end_time: shift.end_time,
+  status: 'pending',
+  is_open_shift: true,
+  worker_id: null,
+  worker_first_name: '',
+  worker_last_name: '',
+  application_count: shift.application_count || 0,
+  location_address: shift.location,
+  hourly_rate: shift.hourly_rate,
+  created_at: shift.created_at,
+  updated_at: shift.updated_at,
+});
+
 const updateTimesheetNotes = async (req, res) => {
   try {
     if (respondValidation(req, res)) return;
@@ -280,7 +299,9 @@ const getBookings = async (req, res) => {
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-    const countRes = await pool.query(`SELECT COUNT(*)::int AS total FROM bookings b ${whereSql}`, params);
+    const includeOpenShifts =
+      req.user.role === 'participant'
+      && (!status || status === 'pending');
 
     const dataRes = await pool.query(
       `SELECT b.*,
@@ -292,17 +313,36 @@ const getBookings = async (req, res) => {
        JOIN participants p ON p.id = b.participant_id
        JOIN workers w ON w.id = b.worker_id
        ${whereSql}
-       ORDER BY b.created_at DESC
-       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
-      [...params, limit, offset]
+       ORDER BY b.start_time DESC`,
+      params
     );
+
+    let bookings = dataRes.rows;
+
+    if (includeOpenShifts) {
+      const openShiftsRes = await pool.query(
+        `SELECT s.*,
+                (SELECT COUNT(*)::int FROM shift_applications sa WHERE sa.shift_id = s.id) AS application_count
+         FROM shifts s
+         WHERE s.participant_id = $1 AND s.status = 'open'
+         ORDER BY s.start_time DESC`,
+        [req.user.userId]
+      );
+      bookings = [
+        ...bookings,
+        ...openShiftsRes.rows.map(mapOpenShiftToPendingBooking),
+      ].sort((a, b) => new Date(b.start_time) - new Date(a.start_time));
+    }
+
+    const total = bookings.length;
+    bookings = bookings.slice(offset, offset + limit);
 
     return res.status(200).json({
       ok: true,
-      total: countRes.rows[0]?.total || 0,
+      total,
       limit,
       offset,
-      bookings: dataRes.rows
+      bookings,
     });
   } catch (err) {
     return res.status(500).json({ ok: false, error: 'Failed to fetch bookings' });

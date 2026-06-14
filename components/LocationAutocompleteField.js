@@ -79,6 +79,7 @@ const INLINE_STYLES = {
 export const LocationAutocompleteField = React.memo(
   forwardRef(function LocationAutocompleteField(
     {
+      initialAddress = '',
       onAddressChange,
       onPlaceSelected,
       placeholder = 'Start typing address in Australia',
@@ -89,15 +90,34 @@ export const LocationAutocompleteField = React.memo(
   ) {
     const placesRef = useRef(null);
     const lastSelectedRef = useRef('');
+    const syncedAddressRef = useRef('');
     const [focused, setFocused] = useState(false);
+
+    const applyAddressToInput = useCallback((text) => {
+      const addr = String(text || '');
+      lastSelectedRef.current = addr;
+      syncedAddressRef.current = addr;
+      if (placesRef.current?.setAddressText) {
+        placesRef.current.setAddressText(addr);
+      } else if (placesRef.current?.clear && !addr) {
+        placesRef.current.clear();
+      }
+    }, []);
 
     useImperativeHandle(ref, () => ({
       clear() {
-        lastSelectedRef.current = '';
-        if (placesRef.current?.setAddressText) placesRef.current.setAddressText('');
-        else if (placesRef.current?.clear) placesRef.current.clear();
+        applyAddressToInput('');
+      },
+      setAddressText(text) {
+        applyAddressToInput(text);
       },
     }));
+
+    React.useEffect(() => {
+      const addr = String(initialAddress || '');
+      if (addr === syncedAddressRef.current) return;
+      applyAddressToInput(addr);
+    }, [initialAddress, applyAddressToInput]);
 
     const handleTextChange = useCallback(
       (text) => {
@@ -151,6 +171,7 @@ export const LocationAutocompleteField = React.memo(
       return (
         <TextInput
           style={fallbackInputStyle}
+          value={initialAddress}
           placeholder={placeholder}
           placeholderTextColor={Colors.text.muted}
           onChangeText={(text) => onAddressChange?.(text, { fromSelection: false })}

@@ -3,49 +3,18 @@
  * Uses base URL from ApiConfig; supports auth token and consistent error handling.
  */
 
-import { Platform } from 'react-native';
 import { getState, logout } from '../store/authStore.js';
-
-function readViteEnv(key) {
-  try {
-    // Keep import.meta access inside Function string so Metro/Hermes parsing does not fail.
-    const getter = new Function('k', 'try { return import.meta?.env?.[k]; } catch (_) { return undefined; }');
-    return getter(key);
-  } catch (_) {
-    return undefined;
-  }
-}
-
-function resolveBaseURL() {
-  // Web dev: prefer same-origin /api so Vite proxy handles CORS.
-  // Avoid eval() because some environments block it.
-  if (Platform.OS === 'web') {
-    try {
-      const host = typeof window !== 'undefined' ? window.location.hostname : '';
-      if (host === 'localhost' || host === '127.0.0.1') return '';
-    } catch (_) {}
-  }
-
-  // Vite web builds
-  const viteApiUrl = readViteEnv('VITE_API_URL');
-  if (viteApiUrl) return String(viteApiUrl);
-
-  // Expo / React Native env
-  if (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_API_URL) {
-    return process.env.EXPO_PUBLIC_API_URL;
-  }
-
-  // Mobile builds
-  if (Platform.OS === 'android' || Platform.OS === 'ios') {
-    return 'https://athletic-heart-backend-production.up.railway.app';
-  }
-
-  return 'https://athletic-heart-backend-production.up.railway.app';
-}
-const defaultBaseURL = resolveBaseURL();
+import {
+  resolveApiBaseUrl,
+  getNetworkErrorMessage,
+  getRouteNotFoundMessage,
+  sanitizeUserFacingMessage,
+} from '../constants/apiPublic.js';
 
 export const ApiConfig = {
-  baseURL: defaultBaseURL,
+  get baseURL() {
+    return resolveApiBaseUrl();
+  },
   timeout: 30000,
 };
 
@@ -89,7 +58,8 @@ function coerceBodyErrorMessage(value) {
  * Does not throw; parse response and surface errors for callers.
  */
 export async function request(method, path, body = null, options = {}) {
-  const url = path.startsWith('http') ? path : `${ApiConfig.baseURL.replace(/\/$/, '')}${path}`;
+  const baseURL = resolveApiBaseUrl();
+  const url = path.startsWith('http') ? path : `${baseURL.replace(/\/$/, '')}${path}`;
   const controller = new AbortController();
   const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
   const timeoutMs = isFormData ? Math.max(ApiConfig.timeout, 120000) : ApiConfig.timeout;
@@ -159,9 +129,9 @@ export async function request(method, path, body = null, options = {}) {
         errorMsg = `${errorMsg}\n\n${data.hint.trim()}`;
       }
       if (res.status === 404 && /route not found/i.test(String(errorMsg))) {
-        errorMsg =
-          'API route not found. Run the local API with `npm run dev` (port 3000) and ensure VITE_PROXY_TARGET is not pointing at old Railway code.';
+        errorMsg = getRouteNotFoundMessage();
       }
+      errorMsg = sanitizeUserFacingMessage(errorMsg);
       const error = new Error(errorMsg);
       error.status = res.status;
       error.response = data;
@@ -177,12 +147,13 @@ export async function request(method, path, body = null, options = {}) {
       ? Object.assign(new Error('Request timed out'), { status: 408 })
       : isNetwork
         ? Object.assign(
-            new Error(
-              'Cannot reach the API server. Run npm run dev (port 3000) if testing on localhost:5173.',
-            ),
+            new Error(sanitizeUserFacingMessage(getNetworkErrorMessage())),
             { status: 0 },
           )
-        : Object.assign(err, { status: err.status || 0 });
+        : Object.assign(
+            err,
+            { message: sanitizeUserFacingMessage(err.message), status: err.status || 0 },
+          );
     return { data: null, error, status: error.status };
   } finally {
     clearTimeout(timeoutId);

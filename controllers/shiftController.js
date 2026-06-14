@@ -586,6 +586,140 @@ const acceptApplication = async (req, res) => {
   }
 };
 
+// ── PUT /api/shifts/:id  (participant owner — open shifts only) ──
+const updateShift = async (req, res) => {
+  try {
+    const {
+      validateParticipantOfferedHourlyRate,
+      validateTravelDistanceKm,
+      validateSleepoverFlatAmount,
+      TRAVEL_NON_LABOUR_PER_KM,
+    } = await import('../utils/ndisParticipantRates.mjs');
+    const { id } = req.params;
+    const userId = req.user.userId;
+
+    const existingRes = await pool.query('SELECT * FROM shifts WHERE id = $1', [id]);
+    if (existingRes.rowCount === 0) {
+      return res.status(404).json({ ok: false, error: 'Shift not found' });
+    }
+    const existing = existingRes.rows[0];
+
+    if (existing.participant_id !== userId) {
+      return res.status(403).json({ ok: false, error: 'Only the shift creator can edit it' });
+    }
+    if (existing.status !== 'open') {
+      return res.status(400).json({ ok: false, error: 'Only open shifts can be edited' });
+    }
+
+    const {
+      title,
+      description,
+      service_type,
+      start_time,
+      end_time,
+      hourly_rate,
+      location,
+      required_skills,
+      high_intensity_support,
+      travel_distance_km,
+      sleepover_flat_amount,
+    } = req.body;
+
+    if (!title || !service_type || !start_time || !end_time || hourly_rate == null || !location) {
+      return res.status(400).json({ ok: false, error: 'Missing required fields: title, service_type, start_time, end_time, hourly_rate, location' });
+    }
+
+    const start = new Date(start_time);
+    const end = new Date(end_time);
+    if (isNaN(start.getTime()) || isNaN(end.getTime()) || end <= start) {
+      return res.status(400).json({ ok: false, error: 'Invalid time range' });
+    }
+
+    const hr = parseFloat(hourly_rate);
+    if (Number.isNaN(hr) || hr < 0) {
+      return res.status(400).json({ ok: false, error: 'Hourly rate must be non-negative' });
+    }
+
+    const highIntensity = Boolean(high_intensity_support);
+    let travelKm = travel_distance_km == null || travel_distance_km === '' ? null : Number(travel_distance_km);
+    if (travelKm != null && Number.isNaN(travelKm)) travelKm = null;
+    const tv = validateTravelDistanceKm(travelKm == null ? '' : travelKm);
+    if (!tv.ok) {
+      return res.status(400).json({ ok: false, error: tv.error });
+    }
+
+    let sleepoverFlat = sleepover_flat_amount == null || sleepover_flat_amount === '' ? null : Number(sleepover_flat_amount);
+    if (sleepoverFlat != null && (Number.isNaN(sleepoverFlat) || sleepoverFlat === 0)) sleepoverFlat = null;
+    const sv = validateSleepoverFlatAmount(sleepoverFlat);
+    if (!sv.ok) {
+      return res.status(400).json({ ok: false, error: sv.error });
+    }
+
+    if (hr <= 0 && !(sleepoverFlat > 0)) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Enter an hourly labour rate and/or include the NDIS sleepover flat fee for this shift.',
+      });
+    }
+
+    if (hr > 0) {
+      const rateCheck = validateParticipantOfferedHourlyRate(service_type, start_time, hr, {
+        highIntensity,
+        endTimeIso: end_time,
+      });
+      if (!rateCheck.ok) {
+        return res.status(400).json({
+          ok: false,
+          error: rateCheck.error,
+          minimum_hourly_rate: rateCheck.minimum,
+          maximum_hourly_rate: rateCheck.maximum,
+        });
+      }
+    }
+
+    const skills = Array.isArray(required_skills) ? required_skills : [];
+
+    const { rows } = await pool.query(
+      `UPDATE shifts SET
+         title = $2,
+         description = $3,
+         service_type = $4,
+         start_time = $5,
+         end_time = $6,
+         hourly_rate = $7,
+         location = $8,
+         required_skills = $9,
+         high_intensity = $10,
+         travel_distance_km = $11,
+         sleepover_flat_amount = $12,
+         travel_rate_per_km = $13,
+         updated_at = now()
+       WHERE id = $1
+       RETURNING *`,
+      [
+        id,
+        title,
+        description || null,
+        service_type,
+        start_time,
+        end_time,
+        hr,
+        location,
+        skills,
+        highIntensity,
+        travelKm,
+        sleepoverFlat,
+        TRAVEL_NON_LABOUR_PER_KM,
+      ]
+    );
+
+    return res.json({ ok: true, shift: rows[0] });
+  } catch (err) {
+    console.error('updateShift error:', err);
+    return res.status(500).json({ ok: false, error: 'Failed to update shift' });
+  }
+};
+
 // ── PUT /api/shifts/:id/cancel ───────────────────────────────────
 const cancelShift = async (req, res) => {
   try {
@@ -632,6 +766,7 @@ module.exports = {
   getMyShifts,
   getShiftById,
   createShift,
+  updateShift,
   applyForShift,
   acceptApplication,
   cancelShift,

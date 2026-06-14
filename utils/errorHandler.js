@@ -1,5 +1,6 @@
 import {useAuthStore} from '../store/authStore.js';
 import {showToast} from '../components/Toast';
+import {getNetworkErrorMessage, sanitizeUserFacingMessage} from '../constants/apiPublic.js';
 
 const normalize = (err) => {
   if (!err) return {type: 'generic', title: 'Error', message: 'Something went wrong'};
@@ -12,7 +13,7 @@ const normalize = (err) => {
     || responseData?.error
     || responseData?.message;
   const hint = responseData?.hint;
-  const raw = [msg, hint].filter(Boolean).join('\n\n') || String(err || '');
+  const raw = sanitizeUserFacingMessage([msg, hint].filter(Boolean).join('\n\n') || String(err || ''));
 
   if (raw.toLowerCase().includes('network') || raw.toLowerCase().includes('internet') || raw.toLowerCase().includes('offline')) {
     return {type: 'network', title: 'No internet connection', message: 'Check your internet connection and try again.'};
@@ -49,9 +50,8 @@ const normalize = (err) => {
   if (status === 0 || !status) {
     return {
       type: 'network',
-      title: 'Cannot reach API',
-      message:
-        'Could not connect to the API server. For local dev: run npm run dev (port 3000) in another terminal, keep VITE_PROXY_TARGET=http://localhost:3000, then restart npm run web.',
+      title: 'Connection problem',
+      message: getNetworkErrorMessage(),
     };
   }
 

@@ -21,7 +21,7 @@ import * as shiftBreakMetaMod from '../utils/shiftBreakMeta.js';
 import * as ndisParticipantRatesMod from '../utils/ndisParticipantRates.js';
 
 const shiftBreakMeta = shiftBreakMetaMod.default ?? shiftBreakMetaMod;
-const { getShiftPayEstimate } = shiftBreakMeta;
+const { getShiftPayEstimate, parseBreakFromShiftDescription } = shiftBreakMeta;
 const ndisParticipantRates = ndisParticipantRatesMod.default ?? ndisParticipantRatesMod;
 const {
   validateParticipantOfferedHourlyRate,
@@ -35,6 +35,31 @@ const {
 function nativeAlertOnly(title, message = '') {
   const body = typeof message === 'string' && message.trim() ? message.trim() : '';
   Alert.alert(title, body || undefined);
+}
+
+function isoToAmPm(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  let h = d.getHours();
+  const m = String(d.getMinutes()).padStart(2, '0');
+  const period = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  return `${h}:${m} ${period}`;
+}
+
+function isoToYmd(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${mo}-${day}`;
+}
+
+function stripBreakMetaFromDescription(description) {
+  return String(description || '')
+    .replace(/\n?Break:\s*\d+\s*min\s*\|\s*Paid break:.*$/im, '')
+    .trim();
 }
 
 const SERVICE_ICONS = {
@@ -200,7 +225,8 @@ const NDIS_PERSONAL_CARE_RATE_HINTS = [
 ];
 
 // ── Create Shift Modal ────────────────────────────────────────────────────────
-function CreateShiftModal({ visible, onClose, onCreated, onAppInfo }) {
+function CreateShiftModal({ visible, onClose, onCreated, onAppInfo, editShift = null }) {
+  const isEditMode = Boolean(editShift?.id);
   const say = typeof onAppInfo === 'function' ? onAppInfo : nativeAlertOnly;
   const MAX_SHIFT_HOURS = 24;
   const SHIFT_TIME_PRESETS = [
@@ -268,14 +294,39 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo }) {
 
   useEffect(() => {
     if (!visible) return;
-    // Load participant profile id so we can store lat/lng (needed for worker distance filter).
+    if (isEditMode && editShift) {
+      const breakMeta = parseBreakFromShiftDescription(editShift.description);
+      setTitle(editShift.title || '');
+      setServiceType(editShift.service_type || '');
+      setHourlyRate(editShift.hourly_rate != null ? String(editShift.hourly_rate) : '');
+      setDate(isoToYmd(editShift.start_time));
+      setStartTime(isoToAmPm(editShift.start_time));
+      setEndTime(isoToAmPm(editShift.end_time));
+      setCommonShiftPreset(getShiftPresetFromStartTime(isoToAmPm(editShift.start_time)));
+      setLocation(editShift.location || '');
+      setDescription(stripBreakMetaFromDescription(editShift.description));
+      setHighIntensitySupport(Boolean(editShift.high_intensity));
+      setIncludeSleepover(Number(editShift.sleepover_flat_amount) > 0);
+      setTravelKmInput(editShift.travel_distance_km != null && Number(editShift.travel_distance_km) > 0
+        ? String(editShift.travel_distance_km)
+        : '');
+      setAddBreak(breakMeta.breakMinutes > 0);
+      setBreakMinutes(breakMeta.breakMinutes > 0 ? String(breakMeta.breakMinutes) : '');
+      setPaidBreak(breakMeta.breakIsPaid);
+      setBreakPay(breakMeta.breakPay > 0 ? String(breakMeta.breakPay) : '');
+      setWorkersCount('1');
+      setSameShift(true);
+      setStep('details');
+    } else if (!isEditMode) {
+      reset();
+    }
     (async () => {
       try {
         const { data } = await api.get('/api/participants/me');
         if (data?.ok && data?.participant?.id) setParticipantProfileId(data.participant.id);
       } catch (_) {}
     })();
-  }, [visible]);
+  }, [visible, isEditMode, editShift?.id]);
 
   const reset = () => {
     setTitle(''); setServiceType(''); setHourlyRate(''); setDate('');
@@ -637,41 +688,54 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo }) {
           });
         } catch (_) {}
       }
-      const { error } = await api.post('/api/shifts', {
-        title,
-        service_type: serviceType,
-        hourly_rate: offered,
-        start_time,
-        end_time,
-        location,
-        description: fullDescription,
-        high_intensity_support: highIntensitySupport,
-        travel_distance_km: travelDistanceKm,
-        sleepover_flat_amount: sleepoverFlat,
-        workers_count: count,
-        same_shift: count >= 2 ? sameShift : true,
-        has_break: addBreak,
-        break_minutes: addBreak ? parseInt(breakMinutes, 10) : 0,
-        paid_break: addBreak ? paidBreak : false,
-        break_pay: addBreak && paidBreak ? parseFloat(breakPay || 0) : 0,
-        worker_shifts: count >= 2 && !sameShift
-          ? workerShifts.map((shift, idx) => ({
-            worker_number: idx + 1,
-            start_time: toApiTime(shift.start),
-            end_time: toApiTime(shift.end),
-          }))
-          : [],
-      });
+      const { error } = isEditMode
+        ? await api.put(`/api/shifts/${editShift.id}`, {
+          title,
+          service_type: serviceType,
+          hourly_rate: offered,
+          start_time,
+          end_time,
+          location,
+          description: fullDescription,
+          high_intensity_support: highIntensitySupport,
+          travel_distance_km: travelDistanceKm,
+          sleepover_flat_amount: sleepoverFlat,
+        })
+        : await api.post('/api/shifts', {
+          title,
+          service_type: serviceType,
+          hourly_rate: offered,
+          start_time,
+          end_time,
+          location,
+          description: fullDescription,
+          high_intensity_support: highIntensitySupport,
+          travel_distance_km: travelDistanceKm,
+          sleepover_flat_amount: sleepoverFlat,
+          workers_count: count,
+          same_shift: count >= 2 ? sameShift : true,
+          has_break: addBreak,
+          break_minutes: addBreak ? parseInt(breakMinutes, 10) : 0,
+          paid_break: addBreak ? paidBreak : false,
+          break_pay: addBreak && paidBreak ? parseFloat(breakPay || 0) : 0,
+          worker_shifts: count >= 2 && !sameShift
+            ? workerShifts.map((shift, idx) => ({
+              worker_number: idx + 1,
+              start_time: toApiTime(shift.start),
+              end_time: toApiTime(shift.end),
+            }))
+            : [],
+        });
       if (error) {
-        say('Error', error.message || 'Failed to create shift');
+        say('Error', error.message || (isEditMode ? 'Failed to update shift' : 'Failed to create shift'));
       } else {
-        say('Success', 'Shift posted successfully!');
+        say('Success', isEditMode ? 'Shift updated successfully!' : 'Shift posted successfully!');
         reset();
         onClose();
         onCreated?.();
       }
     } catch (e) {
-      say('Error', e?.message || 'Failed to create shift');
+      say('Error', e?.message || (isEditMode ? 'Failed to update shift' : 'Failed to create shift'));
     }
     setSaving(false);
   };
@@ -977,6 +1041,7 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo }) {
       >
         <LocationAutocompleteField
           ref={locationFieldRef}
+          initialAddress={location}
           onAddressChange={handleLocationTextChange}
           onPlaceSelected={handlePlaceSelected}
           fallbackInputStyle={inputStyle}
@@ -1073,14 +1138,14 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo }) {
             {/* Header */}
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.lg }}>
               <Text style={{ fontSize: Typography.fontSize.xl, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>
-                Post a New Shift
+                {isEditMode ? 'Edit Shift' : 'Post a New Shift'}
               </Text>
               <Pressable onPress={() => { reset(); onClose(); }}>
                 <Text style={{ fontSize: 24, color: Colors.text.muted }}>✕</Text>
               </Pressable>
             </View>
 
-            {step === 'workers' && (
+            {!isEditMode && step === 'workers' && (
               <View style={workersSectionCard}>
                 <Text style={sectionHintText}>How many workers do you want to hire?</Text>
                 <View style={stepperWrap}>
@@ -1098,7 +1163,7 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo }) {
               </View>
             )}
 
-            {step === 'mode' && (
+            {!isEditMode && step === 'mode' && (
               <View style={workersSectionCard}>
                 <Text style={sectionHintText}>Will workers work on same shift?</Text>
                 <View style={{ flexDirection: 'row', gap: Spacing.sm, marginTop: 4 }}>
@@ -1120,7 +1185,7 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo }) {
               </View>
             )}
 
-            {step === 'workerDetails' && (
+            {!isEditMode && step === 'workerDetails' && (
               <View style={workersSectionCard}>
                 <Text style={sectionHintText}>Worker {activeWorkerIndex + 1} Details</Text>
                 <Text style={helperText}>Set shift start and end time (up to 24 hours, overnight allowed).</Text>
@@ -1268,15 +1333,19 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo }) {
                 {renderCommonDetailsFields()}
 
                 <View style={stepActions}>
-                  <Pressable style={ghostBtn} onPress={() => setStep(workerCountNumber >= 2 ? (sameShift ? 'mode' : 'workerDetails') : 'workers')}>
-                    <Text style={ghostBtnText}>Back</Text>
-                  </Pressable>
+                  {!isEditMode && (
+                    <Pressable style={ghostBtn} onPress={() => setStep(workerCountNumber >= 2 ? (sameShift ? 'mode' : 'workerDetails') : 'workers')}>
+                      <Text style={ghostBtnText}>Back</Text>
+                    </Pressable>
+                  )}
                   <Pressable
                     onPress={handleCreate}
                     disabled={saving}
-                    style={({ pressed }) => [nextBtn, { opacity: pressed ? 0.8 : 1, backgroundColor: saving ? Colors.text.muted : Colors.primary }]}
+                    style={({ pressed }) => [nextBtn, { flex: isEditMode ? 1 : undefined, opacity: pressed ? 0.8 : 1, backgroundColor: saving ? Colors.text.muted : Colors.primary }]}
                   >
-                    <Text style={nextBtnText}>{saving ? 'Posting...' : 'Post Shift'}</Text>
+                    <Text style={nextBtnText}>
+                      {saving ? (isEditMode ? 'Saving…' : 'Posting...') : (isEditMode ? 'Save Changes' : 'Post Shift')}
+                    </Text>
                   </Pressable>
                 </View>
               </>
@@ -1593,7 +1662,7 @@ function AssignedWorkerSummary({ shift, variant = 'card' }) {
 }
 
 // ── Shift Card ────────────────────────────────────────────────────────────────
-function ShiftCard({ shift, onApply, isWorker, isParticipant, onOpenApplications }) {
+function ShiftCard({ shift, onApply, isWorker, isParticipant, onOpenApplications, onEditShift }) {
   const startDate = new Date(shift.start_time);
   const endDate = new Date(shift.end_time);
   const isShiftExpired = startDate.getTime() <= Date.now();
@@ -1705,34 +1774,50 @@ function ShiftCard({ shift, onApply, isWorker, isParticipant, onOpenApplications
         </View>
       )}
       {isParticipant && (
-        <Pressable
-          onPress={() => onOpenApplications(shift)}
-          style={({ pressed }) => ({
-            backgroundColor: shift.status === 'open' ? Colors.primary : Colors.surfaceSecondary,
-            paddingVertical: Spacing.sm,
-            borderRadius: Radius.md,
-            alignItems: 'center',
-            opacity: pressed ? 0.85 : 1,
-          })}
-        >
-          <Text style={{ color: shift.status === 'open' ? Colors.text.white : Colors.text.secondary, fontWeight: Typography.fontWeight.semibold }}>
-            {shift.status === 'open' ? 'View Applicants' : 'View Shift Details'}
-          </Text>
-        </Pressable>
+        <View style={{ flexDirection: 'row', gap: Spacing.sm }}>
+          {shift.status === 'open' && typeof onEditShift === 'function' && (
+            <Pressable
+              onPress={() => onEditShift(shift)}
+              style={({ pressed }) => ({
+                flex: 1,
+                backgroundColor: Colors.surface,
+                borderWidth: 1.5,
+                borderColor: Colors.primary,
+                paddingVertical: Spacing.sm,
+                borderRadius: Radius.md,
+                alignItems: 'center',
+                opacity: pressed ? 0.85 : 1,
+              })}
+            >
+              <Text style={{ color: Colors.primary, fontWeight: Typography.fontWeight.semibold }}>Edit Shift</Text>
+            </Pressable>
+          )}
+          <Pressable
+            onPress={() => onOpenApplications(shift)}
+            style={({ pressed }) => ({
+              flex: 1,
+              backgroundColor: shift.status === 'open' ? Colors.primary : Colors.surfaceSecondary,
+              paddingVertical: Spacing.sm,
+              borderRadius: Radius.md,
+              alignItems: 'center',
+              opacity: pressed ? 0.85 : 1,
+            })}
+          >
+            <Text style={{ color: shift.status === 'open' ? Colors.text.white : Colors.text.secondary, fontWeight: Typography.fontWeight.semibold }}>
+              {shift.status === 'open' ? 'View Applicants' : 'View Shift Details'}
+            </Text>
+          </Pressable>
+        </View>
       )}
     </View>
   );
 
   if (!isParticipant) return cardContent;
-  return (
-    <Pressable onPress={() => onOpenApplications(shift)} style={({ pressed }) => ({ opacity: pressed ? 0.97 : 1 })}>
-      {cardContent}
-    </Pressable>
-  );
+  return cardContent;
 }
 
 // ── Main Screen ───────────────────────────────────────────────────────────────
-export function AvailableShiftsScreen({ navigation }) {
+export function AvailableShiftsScreen({ navigation, route }) {
   const { user } = useAuthStore();
   const { restricted } = useWorkerGate();
   const isWorker = user?.role === 'worker';
@@ -1752,6 +1837,7 @@ export function AvailableShiftsScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editShift, setEditShift] = useState(null);
   const [earningsTotal, setEarningsTotal] = useState(0);
   const [earningsPending, setEarningsPending] = useState(0);
   const [showApplicantsModal, setShowApplicantsModal] = useState(false);
@@ -1769,6 +1855,7 @@ export function AvailableShiftsScreen({ navigation }) {
   });
   const [infoModal, setInfoModal] = useState({ visible: false, title: '', message: '' });
   const confirmActionRef = useRef(null);
+  const focusShiftHandled = useRef(null);
 
   const openInfo = useCallback((title, message = '') => {
     const body = typeof message === 'string' && message.trim() ? message.trim() : '';
@@ -1824,7 +1911,7 @@ export function AvailableShiftsScreen({ navigation }) {
       headerRight: isParticipant
         ? () => (
           <Pressable
-            onPress={() => setShowCreateModal(true)}
+            onPress={() => { setEditShift(null); setShowCreateModal(true); }}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             style={{ paddingRight: 4, paddingVertical: 8, justifyContent: 'center', alignItems: 'center', minWidth: 44 }}
           >
@@ -1944,6 +2031,19 @@ export function AvailableShiftsScreen({ navigation }) {
     setApplicationsLoading(false);
   };
 
+  useEffect(() => {
+    const focusId = route?.params?.focusShiftId;
+    if (!focusId || !isParticipant || loading) return;
+    const shift = shifts.find((s) => s.id === focusId);
+    if (!shift) return;
+    if (focusShiftHandled.current === focusId) return;
+    focusShiftHandled.current = focusId;
+    openApplicants(shift);
+    if (typeof navigation.setParams === 'function') {
+      navigation.setParams({ focusShiftId: undefined });
+    }
+  }, [route?.params?.focusShiftId, shifts, loading, isParticipant, navigation]);
+
   const acceptApplicant = async (application) => {
     if (!selectedShift?.id || acceptingApplicationId) return;
     const doAccept = async () => {
@@ -1992,13 +2092,14 @@ export function AvailableShiftsScreen({ navigation }) {
             isWorker={isWorker}
             isParticipant={isParticipant}
             onOpenApplications={openApplicants}
+            onEditShift={(shift) => { setEditShift(shift); setShowCreateModal(true); }}
           />
         )}
         ListHeaderComponent={
           <View style={{ marginBottom: Spacing.md }}>
             {isParticipant && (
               <Pressable
-                onPress={() => setShowCreateModal(true)}
+                onPress={() => { setEditShift(null); setShowCreateModal(true); }}
                 style={({ pressed }) => ({
                   backgroundColor: Colors.primary,
                   borderRadius: Radius.lg,
@@ -2126,7 +2227,8 @@ export function AvailableShiftsScreen({ navigation }) {
 
       <CreateShiftModal
         visible={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
+        editShift={editShift}
+        onClose={() => { setShowCreateModal(false); setEditShift(null); }}
         onCreated={loadShifts}
         onAppInfo={openInfo}
       />

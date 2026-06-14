@@ -4,6 +4,9 @@ const {
   getComplianceProgress,
 } = require('../constants/complianceDocuments');
 
+const WORKER_DOC_SELECT =
+  'SELECT id, document_type, file_url, compliance_item_key, created_at FROM worker_documents WHERE worker_id = $1';
+
 /**
  * Blocks workers until required documents are submitted and admin has verified them.
  * Participants are not gated by compliance uploads (workers only).
@@ -27,10 +30,13 @@ const requireAccountVerified = async (req, res, next) => {
         return res.status(403).json({ ok: false, error: 'Worker profile not found', code: 'PROFILE_NOT_FOUND' });
       }
       const row = resW.rows[0];
-      const docsRes = await pool.query(
-        'SELECT document_type FROM worker_documents WHERE worker_id = $1',
-        [row.id]
-      );
+
+      // Admin-verified workers are fully cleared (matches app Profile + WorkerGateContext).
+      if (row.verification_status === 'verified') {
+        return next();
+      }
+
+      const docsRes = await pool.query(WORKER_DOC_SELECT, [row.id]);
       const progress = getComplianceProgress(docsRes.rows, REQUIRED_WORKER_COMPLIANCE_DOCS);
       if (!progress.allUploaded) {
         return res.status(403).json({

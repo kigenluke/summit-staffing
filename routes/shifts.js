@@ -26,6 +26,9 @@ router.post('/:id/apply', auth, checkWorker, ...gate, shiftController.applyForSh
 // Accept an application (participant who created the shift)
 router.put('/:id/applications/:applicationId/accept', auth, shiftController.acceptApplication);
 
+// Update shift (participant owner, open shifts only)
+router.put('/:id', auth, checkParticipant, shiftController.updateShift);
+
 // Cancel a shift
 router.put('/:id/cancel', auth, shiftController.cancelShift);
 

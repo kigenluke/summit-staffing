@@ -29,6 +29,7 @@ export function BookingsScreen() {
   const [activeTab, setActiveTab] = useState('all');
   const [deleteConfirmBookingId, setDeleteConfirmBookingId] = useState(null);
   const isWorker = user?.role === 'worker';
+  const isParticipant = user?.role === 'participant';
 
   const loadBookings = useCallback(async () => {
     try {
@@ -68,24 +69,39 @@ export function BookingsScreen() {
   }, []);
 
   const renderBooking = ({ item: b }) => {
-    const isPastPendingOrConfirmed = (b.status === 'pending' || b.status === 'confirmed')
+    const isOpenShift = Boolean(b.is_open_shift);
+    const isPastPendingOrConfirmed = !isOpenShift
+      && (b.status === 'pending' || b.status === 'confirmed')
       && b.end_time
       && (new Date(b.end_time).getTime() < Date.now());
 
+    const displayTitle = isOpenShift ? (b.title || b.service_type) : b.service_type;
+
     return (
       <Pressable
-        onPress={() => navigation.navigate('BookingDetail', { bookingId: b.id })}
+        onPress={() => {
+          if (isOpenShift) {
+            navigation.navigate('AvailableShifts', { focusShiftId: b.id });
+            return;
+          }
+          navigation.navigate('BookingDetail', { bookingId: b.id });
+        }}
         style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.sm, ...Shadows.md }}
       >
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
         <View style={{ flex: 1 }}>
           <Text style={{ fontSize: Typography.fontSize.base, fontWeight: Typography.fontWeight.semibold, color: Colors.text.primary }}>
-            {b.service_type}
+            {displayTitle}
           </Text>
           <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: 4 }}>
             {formatDateDMY(b.start_time)} • {formatTime12h(b.start_time)}
           </Text>
-          {isWorker && (b.status === 'confirmed' || b.status === 'in_progress') && (b.participant_first_name || b.participant_last_name) ? (
+          {isOpenShift && isParticipant && (
+            <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.status.warning, marginTop: 4, fontWeight: Typography.fontWeight.medium }}>
+              {b.application_count || 0} applicant(s) — awaiting worker
+            </Text>
+          )}
+          {isWorker && !isOpenShift && (b.status === 'confirmed' || b.status === 'in_progress') && (b.participant_first_name || b.participant_last_name) ? (
             <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.primary, marginTop: 4, fontWeight: Typography.fontWeight.medium }}>
               Client: {[b.participant_first_name, b.participant_last_name].filter(Boolean).join(' ')}
             </Text>
@@ -178,7 +194,11 @@ export function BookingsScreen() {
                 No bookings
               </Text>
               <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: Spacing.xs, textAlign: 'center' }}>
-                {isWorker ? 'Bookings from participants will appear here.' : 'Book a worker to get started!'}
+                {isWorker
+                  ? 'Bookings from participants will appear here.'
+                  : activeTab === 'pending'
+                    ? 'Posted shifts waiting for a worker will appear here.'
+                    : 'Book a worker or post a shift to get started!'}
               </Text>
             </View>
           }

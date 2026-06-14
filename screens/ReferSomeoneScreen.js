@@ -6,6 +6,7 @@ import {
   View, Text, TextInput, Pressable, ScrollView, ActivityIndicator, Platform, Alert,
 } from 'react-native';
 import { api } from '../services/api.js';
+import { PUBLIC_WEB_BASE } from '../constants/apiPublic.js';
 import { Colors, Spacing, Typography, Radius } from '../constants/theme.js';
 
 const inputStyle = {
@@ -19,18 +20,22 @@ const inputStyle = {
   color: Colors.text.primary,
 };
 
-const PUBLIC_REFERRAL_BASE = 'https://summitstaffing.com.au';
-
 /** Always rebuild as https://summitstaffing.com.au/refer?token=…&role=… */
-function normalizeReferralLink(url) {
+function buildReferralDisplayLink(data) {
+  const role = data?.role === 'participant' ? 'participant' : 'worker';
+  const token = data?.token;
+  if (token) {
+    return `${PUBLIC_WEB_BASE}/refer?token=${encodeURIComponent(token)}&role=${encodeURIComponent(role)}`;
+  }
+  const url = data?.link;
   if (!url || typeof url !== 'string') return '';
   const referMatch = url.match(/refer\?([^#\s]+)/i);
   const qs = referMatch?.[1] || (url.includes('?') ? url.split('?').pop() : '');
   const params = new URLSearchParams(qs);
-  const token = params.get('token');
-  const role = params.get('role');
-  if (token && role) {
-    return `${PUBLIC_REFERRAL_BASE}/refer?token=${encodeURIComponent(token)}&role=${encodeURIComponent(role)}`;
+  const fromUrlToken = params.get('token');
+  const fromUrlRole = params.get('role');
+  if (fromUrlToken && fromUrlRole) {
+    return `${PUBLIC_WEB_BASE}/refer?token=${encodeURIComponent(fromUrlToken)}&role=${encodeURIComponent(fromUrlRole)}`;
   }
   return url;
 }
@@ -56,7 +61,7 @@ export function ReferSomeoneScreen({ route }) {
       notify('Error', error?.message || data?.error || 'Could not generate referral link');
       return;
     }
-    setLink(normalizeReferralLink(data.link || ''));
+    setLink(buildReferralDisplayLink(data));
   }, []);
 
   useEffect(() => {
@@ -91,12 +96,12 @@ export function ReferSomeoneScreen({ route }) {
     setSending(false);
     if (error || !data?.ok) {
       notify('Could not send', error?.message || data?.error || 'Invitation failed');
-      if (data?.link) setLink(normalizeReferralLink(data.link));
+      if (data?.token || data?.link) setLink(buildReferralDisplayLink(data));
       return;
     }
     notify('Invitation sent', data.message || `Referral email sent to ${trimmed}.`);
     setEmail('');
-    if (data.link) setLink(normalizeReferralLink(data.link));
+    if (data.token || data.link) setLink(buildReferralDisplayLink(data));
   };
 
   const roleLabel = role === 'worker' ? 'support worker' : 'participant';

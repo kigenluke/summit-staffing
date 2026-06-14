@@ -7,7 +7,7 @@ const {
 
 const loadWorkerDocuments = async (workerId) => {
   const res = await pool.query(
-    'SELECT document_type, status FROM worker_documents WHERE worker_id = $1',
+    'SELECT id, document_type, file_url, compliance_item_key, created_at FROM worker_documents WHERE worker_id = $1',
     [workerId]
   );
   return res.rows;
