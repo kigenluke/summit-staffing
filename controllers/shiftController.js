@@ -1,5 +1,7 @@
 const pool = require('../config/database');
 const { sendPushNotification } = require('../services/notificationService');
+const { geocodeAddress } = require('../utils/geocodeAddress');
+const { resolveWorkLocationCoords } = require('../utils/bookingLocation');
 
 // ── Helper: insert an in-app notification ────────────────────────
 const createNotification = async (userId, title, body, type = 'general', data = {}) => {
@@ -290,6 +292,8 @@ const createShift = async (req, res) => {
       end_time,
       hourly_rate,
       location,
+      location_lat,
+      location_lng,
       required_skills,
       high_intensity_support,
       travel_distance_km,
@@ -350,13 +354,16 @@ const createShift = async (req, res) => {
     }
 
     const skills = Array.isArray(required_skills) ? required_skills : [];
+    const shiftLat = location_lat != null && location_lat !== '' ? Number(location_lat) : null;
+    const shiftLng = location_lng != null && location_lng !== '' ? Number(location_lng) : null;
 
     const { rows } = await pool.query(
       `INSERT INTO shifts (
-         participant_id, title, description, service_type, start_time, end_time, hourly_rate, location, required_skills,
+         participant_id, title, description, service_type, start_time, end_time, hourly_rate, location,
+         location_lat, location_lng, required_skills,
          high_intensity, travel_distance_km, sleepover_flat_amount, travel_rate_per_km
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
        RETURNING *`,
       [
         userId,
@@ -367,6 +374,8 @@ const createShift = async (req, res) => {
         end_time,
         hr,
         location,
+        Number.isNaN(shiftLat) ? null : shiftLat,
+        Number.isNaN(shiftLng) ? null : shiftLng,
         skills,
         highIntensity,
         travelKm,
@@ -506,9 +515,14 @@ const acceptApplication = async (req, res) => {
 
     if (participantRes.rowCount > 0 && workerRes.rowCount > 0) {
       const participant = participantRes.rows[0];
-      const bookingLat = participant.latitude != null ? Number(participant.latitude) : null;
-      const bookingLng = participant.longitude != null ? Number(participant.longitude) : null;
       const bookingAddress = shift.location || participant.address || null;
+      const coords = await resolveWorkLocationCoords({
+        location_lat: shift.location_lat,
+        location_lng: shift.location_lng,
+        location_address: bookingAddress,
+        participantLat: participant.latitude,
+        participantLng: participant.longitude,
+      });
       await pool.query(
         `INSERT INTO bookings (
            participant_id,
@@ -535,8 +549,8 @@ const acceptApplication = async (req, res) => {
           shift.start_time,
           shift.end_time,
           bookingAddress,
-          bookingLat,
-          bookingLng,
+          coords.lat,
+          coords.lng,
           totalAmount,
           shift.hourly_rate,
           Boolean(shift.high_intensity),
@@ -617,6 +631,8 @@ const updateShift = async (req, res) => {
       end_time,
       hourly_rate,
       location,
+      location_lat,
+      location_lng,
       required_skills,
       high_intensity_support,
       travel_distance_km,
@@ -676,6 +692,8 @@ const updateShift = async (req, res) => {
     }
 
     const skills = Array.isArray(required_skills) ? required_skills : [];
+    const shiftLat = location_lat != null && location_lat !== '' ? Number(location_lat) : null;
+    const shiftLng = location_lng != null && location_lng !== '' ? Number(location_lng) : null;
 
     const { rows } = await pool.query(
       `UPDATE shifts SET
@@ -686,11 +704,13 @@ const updateShift = async (req, res) => {
          end_time = $6,
          hourly_rate = $7,
          location = $8,
-         required_skills = $9,
-         high_intensity = $10,
-         travel_distance_km = $11,
-         sleepover_flat_amount = $12,
-         travel_rate_per_km = $13,
+         location_lat = $9,
+         location_lng = $10,
+         required_skills = $11,
+         high_intensity = $12,
+         travel_distance_km = $13,
+         sleepover_flat_amount = $14,
+         travel_rate_per_km = $15,
          updated_at = now()
        WHERE id = $1
        RETURNING *`,
@@ -703,6 +723,8 @@ const updateShift = async (req, res) => {
         end_time,
         hr,
         location,
+        Number.isNaN(shiftLat) ? null : shiftLat,
+        Number.isNaN(shiftLng) ? null : shiftLng,
         skills,
         highIntensity,
         travelKm,

@@ -9,6 +9,7 @@ import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { formatDateDMY, formatTime12h } from '../utils/dateFormat.js';
+import { workerPayoutFromTotal } from '../utils/platformFee.js';
 import { VerificationBanner } from '../components/VerificationBanner.js';
 import { CoordinatorReturnBanner } from '../components/CoordinatorReturnBanner.js';
 import { NavChevron } from '../components/NavChevron.js';
@@ -408,7 +409,10 @@ export function DashboardScreen() {
                   {nextShift.service_type || 'Shift'} • {((new Date(nextShift.end_time) - new Date(nextShift.start_time)) / (1000 * 60 * 60)).toFixed(1)} hours
                 </Text>
                 <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.status.success, marginTop: Spacing.sm, fontWeight: Typography.fontWeight.semibold }}>
-                  You'll earn: ${Number(nextShift.total_amount || 0).toFixed(2)}
+                  You'll earn: ${workerPayoutFromTotal(nextShift.total_amount).toFixed(2)}
+                </Text>
+                <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: 2 }}>
+                  After 15% Summit Staffing platform fee (shift total ${Number(nextShift.total_amount || 0).toFixed(2)})
                 </Text>
                 <Pressable
                   onPress={() => openDirections(nextShift)}

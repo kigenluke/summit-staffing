@@ -7,6 +7,8 @@ const { sendSMS } = require('../services/smsService');
 const { getPaymentPipeline, isFundedAccount } = require('../utils/fundingPipeline');
 const { createBookingAuthorization, cancelBookingAuthorization } = require('../services/paymentPipelineService');
 const { submitTimesheetForReview } = require('../services/timesheetApprovalService');
+const { resolveWorkLocationCoords } = require('../utils/bookingLocation');
+const { computePlatformFeeBreakdown } = require('../utils/platformFee.cjs');
 const respondValidation = (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -194,7 +196,7 @@ const createBooking = async (req, res) => {
       travelRatePerKm: TRAVEL_NON_LABOUR_PER_KM,
     });
     const totalAmount = Number(payEst.estimatedTotal.toFixed(2));
-    const commissionAmount = Number((totalAmount * 0.15).toFixed(2));
+    const { commission: commissionAmount } = computePlatformFeeBreakdown(totalAmount);
 
     const bookingRes = await pool.query(
       `INSERT INTO bookings (
@@ -375,6 +377,22 @@ const getBookingById = async (req, res) => {
     }
 
     const booking = bookingRes.rows[0];
+
+    if ((booking.location_lat == null || booking.location_lng == null) && booking.location_address) {
+      const coords = await resolveWorkLocationCoords({
+        location_address: booking.location_address,
+        participantLat: null,
+        participantLng: null,
+      });
+      if (coords.lat != null && coords.lng != null) {
+        await pool.query(
+          'UPDATE bookings SET location_lat = $2, location_lng = $3, updated_at = now() WHERE id = $1',
+          [id, coords.lat, coords.lng]
+        );
+        booking.location_lat = coords.lat;
+        booking.location_lng = coords.lng;
+      }
+    }
 
     if (req.user.role !== 'admin') {
       const canView = req.user.userId === booking.participant_user_id || req.user.userId === booking.worker_user_id;
@@ -642,7 +660,14 @@ const clockIn = async (req, res) => {
       }
 
       const startAt = booking.start_time ? new Date(booking.start_time) : null;
+      const endAt = booking.end_time ? new Date(booking.end_time) : null;
       const now = new Date();
+
+      if (endAt && now > endAt) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ ok: false, error: 'Shift window has ended. Clock-in is no longer available.' });
+      }
+
       // Guard rail: if an early clock-in request comes in, cap recorded time at shift start.
       const effectiveClockInTime = (startAt && now < startAt) ? startAt : now;
 
@@ -779,7 +804,7 @@ const clockOut = async (req, res) => {
 
       const rate = Number(booking.hourly_rate ?? booking.worker_hourly_rate ?? 0);
       const totalAmount = Number((rate * actualHours).toFixed(2));
-      const commissionAmount = Number((totalAmount * 0.15).toFixed(2));
+      const { commission: commissionAmount } = computePlatformFeeBreakdown(totalAmount);
 
       const updatedBooking = await client.query(
         'UPDATE bookings SET total_amount = $2, commission_amount = $3, updated_at = now() WHERE id = $1 RETURNING *',

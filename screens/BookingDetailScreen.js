@@ -7,17 +7,155 @@ import { View, Text, ScrollView, Pressable, Alert, TextInput, ActivityIndicator,
 import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
-import { formatDateDMY } from '../utils/dateFormat.js';
+import { formatDateDMY, formatTime12h } from '../utils/dateFormat.js';
+import { workerPayoutFromTotal } from '../utils/platformFee.js';
+import { getDeviceLocation, requestLocationPermission, promptOpenLocationSettings } from '../utils/deviceGeolocation';
 import { StripePayBookingButton } from '../components/StripePayBookingButton';
 
-const STATUS_COLORS = {
-  pending: Colors.status.warning,
-  confirmed: Colors.status.success,
-  in_progress: Colors.primary,
-  completed: Colors.primaryDark,
-  cancelled: Colors.status.error,
+const STATUS_THEME = {
+  pending: { bg: '#FFFBEB', text: '#B45309', border: '#FDE68A', dot: Colors.status.warning },
+  confirmed: { bg: '#ECFDF5', text: '#047857', border: '#A7F3D0', dot: Colors.status.success },
+  in_progress: { bg: '#ECFEFF', text: '#0E7490', border: '#A5F3FC', dot: Colors.primary },
+  completed: { bg: '#EFF6FF', text: '#1D4ED8', border: '#BFDBFE', dot: Colors.primaryDark },
+  cancelled: { bg: '#FEF2F2', text: '#B91C1C', border: '#FECACA', dot: Colors.status.error },
 };
 
+const formatStatusLabel = (status) =>
+  (status || '')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+
+const formatWorkerDistance = (meters) => {
+  if (meters == null || !Number.isFinite(meters)) return null;
+  if (meters > 500000) {
+    return {
+      short: 'Location not detected',
+      detail: 'Enable GPS on this device — distance cannot be calculated accurately.',
+      withinRange: false,
+      unreliable: true,
+    };
+  }
+  const withinRange = meters <= 100;
+  if (meters >= 1000) {
+    return {
+      short: `${(meters / 1000).toFixed(1)} km from site`,
+      detail: withinRange ? 'Within clock-in range' : 'Move within 100 m to clock in',
+      withinRange,
+      unreliable: false,
+    };
+  }
+  return {
+    short: `${Math.round(meters)} m from site`,
+    detail: withinRange ? 'Within clock-in range' : 'Move within 100 m to clock in',
+    withinRange,
+    unreliable: false,
+  };
+};
+
+const StatusBadge = ({ status }) => {
+  const theme = STATUS_THEME[status] || {
+    bg: Colors.surfaceSecondary,
+    text: Colors.text.secondary,
+    border: Colors.border,
+    dot: Colors.text.muted,
+  };
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        alignSelf: 'flex-start',
+        backgroundColor: theme.bg,
+        borderWidth: 1,
+        borderColor: theme.border,
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: Radius.full,
+        gap: 6,
+      }}
+    >
+      <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: theme.dot }} />
+      <Text style={{
+        color: theme.text,
+        fontWeight: Typography.fontWeight.semibold,
+        fontSize: Typography.fontSize.xs,
+        letterSpacing: 0.3,
+      }}>
+        {formatStatusLabel(status)}
+      </Text>
+    </View>
+  );
+};
+
+const DetailRow = ({ label, value, highlight, last }) => (
+  <View style={{
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: Spacing.md,
+    paddingVertical: 11,
+    borderBottomWidth: last ? 0 : 1,
+    borderBottomColor: Colors.borderLight,
+  }}>
+    <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, flex: 0.9 }}>{label}</Text>
+    <Text style={{
+      fontSize: Typography.fontSize.sm,
+      color: highlight ? Colors.primaryDark : Colors.text.primary,
+      flex: 1.1,
+      textAlign: 'right',
+      fontWeight: highlight ? Typography.fontWeight.semibold : Typography.fontWeight.normal,
+      lineHeight: 20,
+    }}>
+      {value || '—'}
+    </Text>
+  </View>
+);
+
+const AlertBanner = ({ tone = 'info', title, message }) => {
+  const tones = {
+    info: { bg: '#EFF6FF', border: '#BFDBFE', title: '#1E40AF', body: '#1D4ED8' },
+    warning: { bg: '#FFFBEB', border: '#FDE68A', title: '#92400E', body: '#B45309' },
+    success: { bg: '#ECFDF5', border: '#A7F3D0', title: '#065F46', body: '#047857' },
+    error: { bg: '#FEF2F2', border: '#FECACA', title: '#991B1B', body: '#B91C1C' },
+  };
+  const t = tones[tone] || tones.info;
+  return (
+    <View style={{
+      backgroundColor: t.bg,
+      borderRadius: Radius.md,
+      padding: Spacing.md,
+      marginBottom: Spacing.md,
+      borderWidth: 1,
+      borderColor: t.border,
+    }}>
+      {!!title && (
+        <Text style={{ color: t.title, fontWeight: Typography.fontWeight.semibold, fontSize: Typography.fontSize.sm, marginBottom: 4 }}>
+          {title}
+        </Text>
+      )}
+      {!!message && (
+        <Text style={{ color: t.body, fontSize: Typography.fontSize.sm, lineHeight: 20 }}>
+          {message}
+        </Text>
+      )}
+    </View>
+  );
+};
+
+const Section = ({ title, children, style, subtitle }) => (
+  <View style={[{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.md, ...Shadows.sm, borderWidth: 1, borderColor: Colors.borderLight }, style]}>
+    <Text style={{ fontSize: Typography.fontSize.base, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>
+      {title}
+    </Text>
+    {!!subtitle && (
+      <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: 2, marginBottom: Spacing.sm }}>
+        {subtitle}
+      </Text>
+    )}
+    {!subtitle && <View style={{ height: Spacing.sm }} />}
+    {children}
+  </View>
+);
 const distanceMeters = (lat1, lon1, lat2, lon2) => {
   const toRad = (deg) => (Number(deg) * Math.PI) / 180;
   const R = 6371000;
@@ -28,22 +166,6 @@ const distanceMeters = (lat1, lon1, lat2, lon2) => {
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 };
-
-const InfoRow = ({ label, value, icon }) => (
-  <View style={{ flexDirection: 'row', marginBottom: Spacing.sm }}>
-    <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.muted, width: 120 }}>{icon} {label}</Text>
-    <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.primary, flex: 1 }}>{value || '—'}</Text>
-  </View>
-);
-
-const Section = ({ title, children, style }) => (
-  <View style={[{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.md, ...Shadows.sm }, style]}>
-    <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.md }}>
-      {title}
-    </Text>
-    {children}
-  </View>
-);
 
 export function BookingDetailScreen({ route, navigation }) {
   const { bookingId } = route.params;
@@ -63,6 +185,7 @@ export function BookingDetailScreen({ route, navigation }) {
   const [showReview, setShowReview] = useState(false);
   const [geoStatus, setGeoStatus] = useState('');
   const [currentGps, setCurrentGps] = useState(null);
+  const [locationBusy, setLocationBusy] = useState(false);
 
   const autoClockOutIntervalRef = useRef(null);
   const clockInBusyRef = useRef(false);
@@ -121,42 +244,32 @@ export function BookingDetailScreen({ route, navigation }) {
     ]);
   };
 
-  const getCurrentGps = useCallback(async () => {
-    if (typeof navigator === 'undefined' || !navigator.geolocation?.getCurrentPosition) {
-      throw new Error('Geolocation is not available. Please enable location permissions.');
+  const refreshWorkerGps = useCallback(async () => {
+    setLocationBusy(true);
+    try {
+      const gps = await getDeviceLocation({ requestPermission: true });
+      setCurrentGps(gps);
+      setGeoStatus('');
+      return gps;
+    } catch (e) {
+      setCurrentGps(null);
+      setGeoStatus(e?.message || 'Could not read your location.');
+      return null;
+    } finally {
+      setLocationBusy(false);
     }
-
-    return await new Promise((resolve, reject) => {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const lat = pos?.coords?.latitude;
-          const lng = pos?.coords?.longitude;
-          if (typeof lat !== 'number' || typeof lng !== 'number') {
-            reject(new Error('Could not read GPS coordinates.'));
-            return;
-          }
-          resolve({ lat, lng });
-        },
-        (err) => reject(err || new Error('Could not fetch GPS location.')),
-        {
-          enableHighAccuracy: true,
-          timeout: 15000,
-          maximumAge: 8000,
-        },
-      );
-    });
   }, []);
 
   const tryClockIn = useCallback(
     async (mode) => {
       if (clockInBusyRef.current) return;
       if (!bookingId) return;
-      if (clockInBusyRef.current) return;
 
       clockInBusyRef.current = true;
       try {
-        const { lat, lng } = await getCurrentGps();
-        const { error } = await api.post(`/api/bookings/${bookingId}/clock-in`, { lat, lng });
+        const gps = await getDeviceLocation({ requestPermission: true });
+        setCurrentGps(gps);
+        const { error } = await api.post(`/api/bookings/${bookingId}/clock-in`, { lat: gps.lat, lng: gps.lng });
         if (error) {
           if (mode !== 'auto') Alert.alert('Error', error.message);
           else setGeoStatus(error.message);
@@ -173,7 +286,7 @@ export function BookingDetailScreen({ route, navigation }) {
         clockInBusyRef.current = false;
       }
     },
-    [bookingId, getCurrentGps, loadBooking],
+    [bookingId, loadBooking],
   );
 
   const tryClockOut = useCallback(
@@ -183,11 +296,12 @@ export function BookingDetailScreen({ route, navigation }) {
 
       clockOutBusyRef.current = true;
       try {
-        const { lat, lng } = await getCurrentGps();
+        const gps = await getDeviceLocation({ requestPermission: true });
+        setCurrentGps(gps);
         const useScheduledEndTime = mode === 'auto';
         const { error } = await api.post(`/api/bookings/${bookingId}/clock-out`, {
-          lat,
-          lng,
+          lat: gps.lat,
+          lng: gps.lng,
           useScheduledEndTime,
           mode,
         });
@@ -208,8 +322,17 @@ export function BookingDetailScreen({ route, navigation }) {
         clockOutBusyRef.current = false;
       }
     },
-    [bookingId, getCurrentGps, loadBooking],
+    [bookingId, loadBooking],
   );
+
+  const handleEnableLocation = async () => {
+    const ok = await requestLocationPermission();
+    if (!ok && Platform.OS === 'android') {
+      promptOpenLocationSettings();
+      return;
+    }
+    await refreshWorkerGps();
+  };
 
   const handleClockIn = () => {
     if (!canManualClockIn) {
@@ -242,27 +365,35 @@ export function BookingDetailScreen({ route, navigation }) {
   // Keep refreshing worker GPS while booking is confirmed to decide whether Clock In can be enabled.
   useEffect(() => {
     if (!isWorker) return;
-    const shouldTrack = booking?.status === 'confirmed' && !booking?.timesheet?.clock_in_time;
+    const shouldTrack = booking?.status === 'confirmed'
+      && !booking?.timesheet?.clock_in_time
+      && (!booking?.end_time || Date.now() < new Date(booking.end_time).getTime());
     if (!shouldTrack) return;
 
     let alive = true;
     let timer = null;
     const tick = async () => {
       try {
-        const gps = await getCurrentGps();
-        if (alive) setCurrentGps(gps);
+        const gps = await getDeviceLocation({ requestPermission: false });
+        if (alive) {
+          setCurrentGps(gps);
+          setGeoStatus('');
+        }
       } catch (_) {
         if (alive) setCurrentGps(null);
       }
     };
-    tick();
+    (async () => {
+      await requestLocationPermission();
+      tick();
+    })();
     timer = setInterval(tick, 15000);
 
     return () => {
       alive = false;
       if (timer) clearInterval(timer);
     };
-  }, [isWorker, booking?.status, booking?.timesheet?.clock_in_time, getCurrentGps]);
+  }, [isWorker, booking?.status, booking?.timesheet?.clock_in_time]);
 
   // Auto clock-out: when end_time is reached, clock out automatically (GPS validated on server).
   useEffect(() => {
@@ -416,8 +547,11 @@ export function BookingDetailScreen({ route, navigation }) {
   const isPendingAcceptance = isWorker && (b.status === 'pending' || b.status === 'confirmed');
   const bookingHasGps = b.location_lat != null && b.location_lng != null;
   const startMs = b.start_time ? new Date(b.start_time).getTime() : null;
+  const endMs = b.end_time ? new Date(b.end_time).getTime() : null;
   const nowMs = Date.now();
   const isStartTimeReached = startMs != null ? nowMs >= startMs : false;
+  const isShiftWindowOpen = endMs == null ? true : nowMs < endMs;
+  const isShiftExpired = endMs != null && nowMs >= endMs;
   const workerDistanceM = bookingHasGps && currentGps
     ? distanceMeters(currentGps.lat, currentGps.lng, b.location_lat, b.location_lng)
     : null;
@@ -425,18 +559,22 @@ export function BookingDetailScreen({ route, navigation }) {
   const canManualClockIn = isWorker
     && b.status === 'confirmed'
     && isStartTimeReached
+    && isShiftWindowOpen
     && bookingHasGps
     && isWithinClockInRadius;
 
   const clockInDisabledReason = (() => {
     if (!(isWorker && b.status === 'confirmed')) return '';
+    if (isShiftExpired) return 'Shift window has ended. Clock-in is no longer available.';
     if (!bookingHasGps) return 'Booking location is not set.';
     if (!isStartTimeReached) {
       return `Clock-in will be enabled at ${new Date(b.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`;
     }
-    if (workerDistanceM == null) return 'Enable location access to clock in.';
+    if (workerDistanceM == null) return 'Enable location below to share GPS for clock-in.';
     if (!isWithinClockInRadius) {
-      return `You must be within 100m of the shift location (using this device's GPS). Current: ${Math.round(workerDistanceM)}m.`;
+      const dist = formatWorkerDistance(workerDistanceM);
+      if (dist?.unreliable) return 'GPS signal unavailable. Enable location on this device to clock in.';
+      return `${dist?.short || 'Too far from site'}. Move within 100 m to clock in.`;
     }
     return '';
   })();
@@ -464,142 +602,243 @@ export function BookingDetailScreen({ route, navigation }) {
   const needsCardAuthorization =
     isParticipant && isPrivatePayPipeline && b.authorization_status === 'required' && b.status === 'confirmed';
 
+  const distanceInfo = workerDistanceM != null ? formatWorkerDistance(workerDistanceM) : null;
+  const shiftDurationH = b.start_time && b.end_time
+    ? ((new Date(b.end_time) - new Date(b.start_time)) / (1000 * 60 * 60)).toFixed(1)
+    : null;
+  const payoutLabel = isWorker ? workerPayoutFromTotal(b.total_amount) : Number(b.total_amount || 0);
+
+  const alertTone = isShiftExpired && isWorker && b.status === 'confirmed'
+    ? 'warning'
+    : distanceInfo && !distanceInfo.withinRange && isWorker && b.status === 'confirmed' && !isShiftExpired
+      ? 'warning'
+      : distanceInfo?.withinRange
+        ? 'success'
+        : 'info';
+
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: Colors.background }} contentContainerStyle={{ padding: Spacing.lg, paddingBottom: Spacing.xxl }}>
-      {/* Status Badge */}
-      <View style={{ alignItems: 'center', marginBottom: Spacing.lg }}>
-        <View style={{ backgroundColor: STATUS_COLORS[b.status] || Colors.text.muted, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm, borderRadius: Radius.full }}>
-          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold, fontSize: Typography.fontSize.lg }}>
-            {(b.status || '').replace('_', ' ').toUpperCase()}
-          </Text>
+    <ScrollView style={{ flex: 1, backgroundColor: Colors.background }} contentContainerStyle={{ padding: Spacing.md, paddingBottom: Spacing.xxl }}>
+      {/* Hero summary */}
+      <View style={{
+        backgroundColor: Colors.surface,
+        borderRadius: Radius.lg,
+        padding: Spacing.lg,
+        marginBottom: Spacing.md,
+        ...Shadows.sm,
+        borderWidth: 1,
+        borderColor: Colors.borderLight,
+      }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: Spacing.sm }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, lineHeight: 26 }}>
+              {b.service_type || 'Shift'}
+            </Text>
+            <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: 4 }}>
+              {formatDateDMY(b.start_time)}
+              {b.start_time && b.end_time ? ` · ${formatTime12h(b.start_time)} – ${formatTime12h(b.end_time)}` : ''}
+            </Text>
+            {shiftDurationH && (
+              <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: 2 }}>
+                {shiftDurationH} hr shift
+              </Text>
+            )}
+          </View>
+          <StatusBadge status={b.status} />
+        </View>
+
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginTop: Spacing.md }}>
+          <View style={{ backgroundColor: Colors.surfaceSecondary, borderRadius: Radius.md, paddingHorizontal: 12, paddingVertical: 8, flex: 1, minWidth: '45%' }}>
+            <Text style={{ fontSize: 11, color: Colors.text.muted, textTransform: 'uppercase', letterSpacing: 0.4 }}>Rate</Text>
+            <Text style={{ fontSize: Typography.fontSize.base, fontWeight: Typography.fontWeight.semibold, color: Colors.text.primary, marginTop: 2 }}>
+              {b.hourly_rate != null ? `$${Number(b.hourly_rate).toFixed(2)}/hr` : '—'}
+            </Text>
+          </View>
+          <View style={{ backgroundColor: Colors.surfaceSecondary, borderRadius: Radius.md, paddingHorizontal: 12, paddingVertical: 8, flex: 1, minWidth: '45%' }}>
+            <Text style={{ fontSize: 11, color: Colors.text.muted, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+              {isWorker ? 'Your payout' : 'Total'}
+            </Text>
+            <Text style={{ fontSize: Typography.fontSize.base, fontWeight: Typography.fontWeight.semibold, color: Colors.status.success, marginTop: 2 }}>
+              {b.total_amount ? `$${Number(payoutLabel).toFixed(2)}` : '—'}
+            </Text>
+          </View>
         </View>
       </View>
 
       {!!statusMessage && (
-        <View style={{ marginBottom: Spacing.md, paddingHorizontal: Spacing.lg }}>
-          <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.medium }}>
-            {statusMessage}
-          </Text>
-        </View>
+        <AlertBanner
+          tone={alertTone}
+          title={
+            isShiftExpired && isWorker && b.status === 'confirmed'
+              ? 'Shift expired'
+              : distanceInfo && !distanceInfo.withinRange && isWorker
+                ? 'Clock-in location'
+                : undefined
+          }
+          message={statusMessage}
+        />
       )}
 
       {/* Booking Details */}
-      <Section title=" Booking Details">
-        <InfoRow icon="" label="Service" value={b.service_type} />
-        <InfoRow icon="" label="Date" value={formatDateDMY(b.start_time)} />
-        <InfoRow icon="" label="Time" value={`${new Date(b.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} – ${new Date(b.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`} />
-        <InfoRow
-          icon=""
-          label={isWorker && b.status === 'pending' ? "Participant's budget" : "Agreed rate"}
+      <Section title="Booking details" subtitle="Schedule, location and payment">
+        <DetailRow label="Date" value={formatDateDMY(b.start_time)} />
+        <DetailRow
+          label="Time"
+          value={b.start_time && b.end_time ? `${formatTime12h(b.start_time)} – ${formatTime12h(b.end_time)}` : '—'}
+        />
+        <DetailRow
+          label={isWorker && b.status === 'pending' ? "Participant's budget" : 'Agreed rate'}
           value={b.hourly_rate != null ? `$${Number(b.hourly_rate).toFixed(2)}/hr` : '—'}
         />
-        {b.high_intensity ? <InfoRow icon="" label="High intensity" value="Yes" /> : null}
+        {b.high_intensity ? <DetailRow label="High intensity" value="Yes" /> : null}
         {Number(b.travel_distance_km) > 0 ? (
-          <InfoRow
-            icon=""
-            label="Travel (non-labour)"
+          <DetailRow
+            label="Travel"
             value={`${Number(b.travel_distance_km).toFixed(1)} km @ $${Number(b.travel_rate_per_km || 0.99).toFixed(2)}/km`}
           />
         ) : null}
         {Number(b.sleepover_flat_amount) > 0 ? (
-          <InfoRow icon="" label="Sleepover (flat)" value={`$${Number(b.sleepover_flat_amount).toFixed(2)}`} />
+          <DetailRow label="Sleepover" value={`$${Number(b.sleepover_flat_amount).toFixed(2)}`} />
         ) : null}
-        <InfoRow icon="" label="Location" value={b.location_address} />
-        <InfoRow icon="" label="Total (est.)" value={b.total_amount ? `$${Number(b.total_amount).toFixed(2)}` : '—'} />
-        {!isPendingAcceptance && b.special_instructions && <InfoRow icon="" label="Notes" value={b.special_instructions} />}
-        {b.status === 'cancelled' && b.decline_reason && <InfoRow icon="" label="Decline reason" value={b.decline_reason} />}
+        <DetailRow label="Location" value={b.location_address} />
+        {isWorker && distanceInfo && b.status === 'confirmed' && !ts?.clock_in_time && (
+          <DetailRow
+            label="Your distance"
+            highlight={distanceInfo.withinRange}
+            value={distanceInfo.unreliable ? distanceInfo.short : `${distanceInfo.short}${distanceInfo.withinRange ? ' ✓' : ''}`}
+          />
+        )}
+        <DetailRow
+          label={isWorker ? 'Platform fee' : 'Total (est.)'}
+          value={
+            isWorker && b.total_amount
+              ? '15% (Summit Staffing)'
+              : b.total_amount
+                ? `$${Number(b.total_amount).toFixed(2)}`
+                : '—'
+          }
+        />
+        {isWorker && b.total_amount ? (
+          <DetailRow
+            label="Your payout (est.)"
+            highlight
+            last={!(!isPendingAcceptance && b.special_instructions) && !(b.status === 'cancelled' && b.decline_reason)}
+            value={`$${workerPayoutFromTotal(b.total_amount).toFixed(2)}`}
+          />
+        ) : null}
+        {!isPendingAcceptance && b.special_instructions ? (
+          <DetailRow label="Notes" value={b.special_instructions} last={!(b.status === 'cancelled' && b.decline_reason)} />
+        ) : null}
+        {b.status === 'cancelled' && b.decline_reason ? (
+          <DetailRow
+            label={String(b.decline_reason).toLowerCase().includes('no-show') ? 'No-show reason' : 'Decline reason'}
+            value={b.decline_reason}
+            last
+          />
+        ) : null}
       </Section>
 
+      {isWorker && b.status === 'confirmed' && !isShiftExpired && !ts?.clock_in_time && workerDistanceM == null && (
+        <Pressable
+          onPress={handleEnableLocation}
+          disabled={locationBusy}
+          style={({ pressed }) => ({
+            marginBottom: Spacing.md,
+            backgroundColor: Colors.primary,
+            paddingVertical: Spacing.sm,
+            borderRadius: Radius.md,
+            alignItems: 'center',
+            opacity: locationBusy || pressed ? 0.85 : 1,
+          })}
+        >
+          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>
+            {locationBusy ? 'Getting location…' : 'Enable location for clock-in'}
+          </Text>
+        </Pressable>
+      )}
+
       {isWorker && b.participant_about && (
-        <Section title="Participant About">
-          <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.primary, lineHeight: 20 }}>
+        <Section title="Participant about" subtitle="Support plan and preferences">
+          <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.primary, lineHeight: 22 }}>
             {b.participant_about}
           </Text>
         </Section>
       )}
 
-      {/* Timesheet */}
       {ts && (
-        <Section title="⏱ Timesheet">
-          <InfoRow icon="" label="Clock In" value={ts.clock_in_time ? new Date(ts.clock_in_time).toLocaleString() : 'Not clocked in'} />
-          <InfoRow icon="" label="Clock Out" value={ts.clock_out_time ? new Date(ts.clock_out_time).toLocaleString() : 'Not clocked out'} />
-          <InfoRow icon="⏰" label="Hours" value={ts.actual_hours ? `${Number(ts.actual_hours).toFixed(1)} hrs` : '—'} />
-          {ts.notes && <InfoRow icon="" label="Notes" value={ts.notes} />}
+        <Section title="Timesheet" subtitle="Clock-in, clock-out and hours worked">
+          <DetailRow label="Clock in" value={ts.clock_in_time ? new Date(ts.clock_in_time).toLocaleString() : 'Not clocked in'} />
+          <DetailRow label="Clock out" value={ts.clock_out_time ? new Date(ts.clock_out_time).toLocaleString() : 'Not clocked out'} />
+          <DetailRow label="Hours" value={ts.actual_hours ? `${Number(ts.actual_hours).toFixed(1)} hrs` : '—'} highlight={!!ts.actual_hours} />
+          {ts.notes ? <DetailRow label="Notes" value={ts.notes} last /> : null}
         </Section>
       )}
 
-      {/* Worker Actions */}
-      {isWorker && b.status === 'pending' && (
-        <View style={{ flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.md }}>
-          <Pressable onPress={() => handleAction('accept')} style={({ pressed }) => ({ flex: 1, backgroundColor: Colors.status.success, paddingVertical: Spacing.md, borderRadius: Radius.md, alignItems: 'center', opacity: pressed ? 0.8 : 1 })}>
-            <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}> Accept</Text>
-          </Pressable>
-          <Pressable onPress={() => handleAction('decline')} style={({ pressed }) => ({ flex: 1, backgroundColor: Colors.status.error, paddingVertical: Spacing.md, borderRadius: Radius.md, alignItems: 'center', opacity: pressed ? 0.8 : 1 })}>
-            <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}> Decline</Text>
-          </Pressable>
-        </View>
-      )}
-
-      {isWorker && b.status === 'confirmed' && (
-        <>
-          <Pressable
-            onPress={handleClockIn}
-            disabled={!canManualClockIn}
-            style={({ pressed }) => ({
-              backgroundColor: canManualClockIn ? Colors.status.success : Colors.text.muted,
-              paddingVertical: Spacing.md,
-              borderRadius: Radius.md,
-              alignItems: 'center',
-              marginBottom: Spacing.xs,
-              opacity: pressed ? 0.8 : 1,
-            })}
-          >
-            <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold, fontSize: Typography.fontSize.lg }}> Clock In</Text>
-          </Pressable>
-          {workerDistanceM != null && (
-            <View style={{ marginBottom: Spacing.md }}>
-              <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs, textAlign: 'center' }}>
-                From this device's GPS to shift pin: {Math.round(workerDistanceM)}m
-              </Text>
-              <Text style={{ color: Colors.text.muted, fontSize: 10, textAlign: 'center', marginTop: 4 }}>
-                Not from your saved profile address — clock-in uses your phone or browser location now.
-              </Text>
+      {(isWorker && (b.status === 'pending' || b.status === 'confirmed' || b.status === 'in_progress' || canMarkComplete || canWorkerCancelPast)) && (
+        <Section title="Actions" subtitle="Shift controls">
+          {b.status === 'pending' && (
+            <View style={{ flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.sm }}>
+              <Pressable onPress={() => handleAction('accept')} style={({ pressed }) => ({ flex: 1, backgroundColor: Colors.status.success, paddingVertical: 12, borderRadius: Radius.md, alignItems: 'center', opacity: pressed ? 0.85 : 1 })}>
+                <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Accept</Text>
+              </Pressable>
+              <Pressable onPress={() => handleAction('decline')} style={({ pressed }) => ({ flex: 1, backgroundColor: Colors.status.error, paddingVertical: 12, borderRadius: Radius.md, alignItems: 'center', opacity: pressed ? 0.85 : 1 })}>
+                <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Decline</Text>
+              </Pressable>
             </View>
           )}
-        </>
-      )}
 
-      {isWorker && b.status === 'in_progress' && (
-        <Pressable onPress={handleClockOut} style={({ pressed }) => ({ backgroundColor: Colors.status.error, paddingVertical: Spacing.md, borderRadius: Radius.md, alignItems: 'center', marginBottom: Spacing.md, opacity: pressed ? 0.8 : 1 })}>
-          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold, fontSize: Typography.fontSize.lg }}> Clock Out</Text>
-        </Pressable>
-      )}
+          {b.status === 'confirmed' && !isShiftExpired && (
+            <Pressable
+              onPress={handleClockIn}
+              disabled={!canManualClockIn}
+              style={({ pressed }) => ({
+                backgroundColor: canManualClockIn ? Colors.status.success : Colors.text.muted,
+                paddingVertical: 14,
+                borderRadius: Radius.md,
+                alignItems: 'center',
+                marginBottom: Spacing.sm,
+                opacity: pressed ? 0.85 : 1,
+              })}
+            >
+              <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold, fontSize: Typography.fontSize.base }}>
+                Clock in
+              </Text>
+            </Pressable>
+          )}
 
-      {canMarkComplete && (
-        <Pressable onPress={() => handleAction('complete')} style={({ pressed }) => ({ backgroundColor: Colors.primary, paddingVertical: Spacing.md, borderRadius: Radius.md, alignItems: 'center', marginBottom: Spacing.md, opacity: pressed ? 0.8 : 1 })}>
-          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}> Mark Complete</Text>
-        </Pressable>
+          {b.status === 'in_progress' && (
+            <Pressable onPress={handleClockOut} style={({ pressed }) => ({ backgroundColor: Colors.status.error, paddingVertical: 14, borderRadius: Radius.md, alignItems: 'center', marginBottom: Spacing.sm, opacity: pressed ? 0.85 : 1 })}>
+              <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold, fontSize: Typography.fontSize.base }}>Clock out</Text>
+            </Pressable>
+          )}
+
+          {canMarkComplete && (
+            <Pressable onPress={() => handleAction('complete')} style={({ pressed }) => ({ backgroundColor: Colors.primary, paddingVertical: 12, borderRadius: Radius.md, alignItems: 'center', marginBottom: Spacing.sm, opacity: pressed ? 0.85 : 1 })}>
+              <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Mark complete</Text>
+            </Pressable>
+          )}
+
+          {canWorkerCancelPast && (
+            <Pressable
+              onPress={() => handleAction('cancel')}
+              style={({ pressed }) => ({
+                backgroundColor: Colors.surfaceSecondary,
+                borderWidth: 1,
+                borderColor: Colors.status.error,
+                paddingVertical: 12,
+                borderRadius: Radius.md,
+                alignItems: 'center',
+                opacity: pressed ? 0.85 : 1,
+              })}
+            >
+              <Text style={{ color: Colors.status.error, fontWeight: Typography.fontWeight.semibold }}>Delete old shift</Text>
+            </Pressable>
+          )}
+        </Section>
       )}
 
       {canParticipantCancelPast && (
-        <Pressable onPress={() => handleAction('cancel')} style={({ pressed }) => ({ backgroundColor: Colors.status.error, paddingVertical: Spacing.md, borderRadius: Radius.md, alignItems: 'center', marginBottom: Spacing.md, opacity: pressed ? 0.8 : 1 })}>
-          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Delete Old Shift</Text>
-        </Pressable>
-      )}
-
-      {canWorkerCancelPast && (
-        <Pressable
-          onPress={() => handleAction('cancel')}
-          style={({ pressed }) => ({
-            backgroundColor: Colors.status.error,
-            paddingVertical: Spacing.md,
-            borderRadius: Radius.md,
-            alignItems: 'center',
-            marginBottom: Spacing.md,
-            opacity: pressed ? 0.8 : 1,
-          })}
-        >
-          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Delete Old Shift</Text>
+        <Pressable onPress={() => handleAction('cancel')} style={({ pressed }) => ({ backgroundColor: Colors.status.error, paddingVertical: Spacing.md, borderRadius: Radius.md, alignItems: 'center', marginBottom: Spacing.md, opacity: pressed ? 0.85 : 1 })}>
+          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Delete old shift</Text>
         </Pressable>
       )}
 

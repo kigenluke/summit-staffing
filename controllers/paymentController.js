@@ -78,12 +78,7 @@ const pickErrorMessage = (err) => {
   return '';
 };
 
-const computeCommissionBreakdown = (amount) => {
-  const total = Number(amount || 0);
-  const commission = Number((total * 0.15).toFixed(2));
-  const workerPayout = Number((total - commission).toFixed(2));
-  return { total, commission, workerPayout };
-};
+const { computePlatformFeeBreakdown } = require('../utils/platformFee.cjs');
 
 const ensurePaymentRecordForIntent = async (paymentIntentId, paymentIntent, options = {}) => {
   const existing = await pool.query(
@@ -107,7 +102,7 @@ const ensurePaymentRecordForIntent = async (paymentIntentId, paymentIntent, opti
     throw new Error('Booking not found for PaymentIntent');
   }
 
-  const { total, commission, workerPayout } = computeCommissionBreakdown(bookingRes.rows[0].total_amount);
+  const { total, commission, workerPayout } = computePlatformFeeBreakdown(bookingRes.rows[0].total_amount);
   await pool.query(
     `INSERT INTO payments (booking_id, stripe_payment_intent_id, amount, commission, worker_payout, status, payment_date)
      VALUES ($1, $2, $3, $4, $5, 'pending', NULL)
@@ -549,8 +544,7 @@ const createPaymentIntentHandler = async (req, res) => {
       }
     });
 
-    const commission = Number((amount * 0.15).toFixed(2));
-    const workerPayout = Number((amount - commission).toFixed(2));
+      const { commission, workerPayout } = computePlatformFeeBreakdown(amount);
 
     await pool.query(
       `INSERT INTO payments (booking_id, stripe_payment_intent_id, amount, commission, worker_payout, status, payment_date)
@@ -622,7 +616,7 @@ const createCheckoutSessionHandler = async (req, res) => {
       return res.status(409).json({ ok: false, error: 'This booking is already paid' });
     }
 
-    const { total } = computeCommissionBreakdown(booking.total_amount);
+    const { total } = computePlatformFeeBreakdown(booking.total_amount);
     if (total <= 0) {
       return res.status(400).json({ ok: false, error: 'Invalid booking amount' });
     }

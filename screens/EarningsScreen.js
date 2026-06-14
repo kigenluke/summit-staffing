@@ -8,6 +8,7 @@ import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { formatDateDMY } from '../utils/dateFormat.js';
+import { workerPayoutFromTotal } from '../utils/platformFee.js';
 
 export function EarningsScreen({ navigation }) {
   const { user } = useAuthStore();
@@ -51,15 +52,17 @@ export function EarningsScreen({ navigation }) {
       const succeeded = payments.filter(p => p.status === 'succeeded');
       const pending = payments.filter(p => p.status === 'pending');
 
-      const total = succeeded.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-      const pend = pending.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+      const paymentAmount = (p) => (isWorker ? Number(p.worker_payout ?? workerPayoutFromTotal(p.amount)) : Number(p.amount || 0));
+
+      const total = succeeded.reduce((sum, p) => sum + paymentAmount(p), 0);
+      const pend = pending.reduce((sum, p) => sum + paymentAmount(p), 0);
 
       setTotalEarnings(total);
       setPendingAmount(pend);
       setPaymentCount(succeeded.length);
     } catch (e) {}
     setLoading(false);
-  }, []);
+  }, [isWorker]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -93,7 +96,7 @@ export function EarningsScreen({ navigation }) {
         </Text>
         {pendingAmount > 0 && (
           <Text style={{ fontSize: Typography.fontSize.sm, color: 'rgba(255,255,255,0.7)', marginTop: 4 }}>
-            ${pendingAmount.toFixed(2)} pending
+            ${pendingAmount.toFixed(2)} pending{isWorker ? ' (after 15% platform fee)' : ''}
           </Text>
         )}
       </View>
@@ -139,7 +142,7 @@ export function EarningsScreen({ navigation }) {
                     </Text>
                   </View>
                   <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.status.success }}>
-                    ${parseFloat(b.total_amount || 0).toFixed(2)}
+                    ${(isWorker ? workerPayoutFromTotal(b.total_amount) : parseFloat(b.total_amount || 0)).toFixed(2)}
                   </Text>
                 </View>
               </View>

@@ -32,6 +32,8 @@ const {
   SLEEPOVER_FLAT_NIGHTLY,
 } = ndisParticipantRates;
 
+import { workerPayoutFromTotal } from '../utils/platformFee.js';
+
 function nativeAlertOnly(title, message = '') {
   const body = typeof message === 'string' && message.trim() ? message.trim() : '';
   Alert.alert(title, body || undefined);
@@ -50,9 +52,10 @@ function buildApplyConfirmBody(shift) {
   const endDate = parseApiDate(shift.end_time);
   const pay = getShiftPayEstimate(shift.start_time, shift.end_time, shift.hourly_rate, shift.description, buildShiftPayOptions(shift));
   const unpaidDed = pay.breakMinutes > 0 && !pay.breakIsPaid && pay.paidHoursAtRate < pay.shiftHours - 1e-6;
+  const workerNet = workerPayoutFromTotal(pay.estimatedTotal);
   const payLine = unpaidDed
-    ? `\nOn site: ${pay.shiftDurationLabel} • Paid time: ${pay.paidDurationLabel}\nApprox. total: ~$${pay.estimatedTotal.toFixed(2)} (hourly rate × paid time only)`
-    : `\nApprox. total: ~$${pay.estimatedTotal.toFixed(2)}`;
+    ? `\nOn site: ${pay.shiftDurationLabel} • Paid time: ${pay.paidDurationLabel}\nYour payout: ~$${workerNet.toFixed(2)} (85% after 15% platform fee)`
+    : `\nYour payout: ~$${workerNet.toFixed(2)} (85% after 15% platform fee)`;
   const dateStr = startDate ? formatDateDMY(startDate) : '—';
   const timeStr = startDate && endDate
     ? `${formatTime12h(startDate)} – ${formatTime12h(endDate)} (${pay.shiftDurationLabel})`
@@ -741,6 +744,8 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo, editShift = 
           start_time,
           end_time,
           location,
+          location_lat: locationLat,
+          location_lng: locationLng,
           description: fullDescription,
           high_intensity_support: highIntensitySupport,
           travel_distance_km: travelDistanceKm,
@@ -753,6 +758,8 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo, editShift = 
           start_time,
           end_time,
           location,
+          location_lat: locationLat,
+          location_lng: locationLng,
           description: fullDescription,
           high_intensity_support: highIntensitySupport,
           travel_distance_km: travelDistanceKm,
@@ -1773,8 +1780,9 @@ const ShiftCard = React.memo(function ShiftCard({ shift, onApply, isWorker, isPa
       </Text>
 
       <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>
-        💰 ${Number(shift.hourly_rate || 0).toFixed(2)}/hr • ~${payEst.estimatedTotal.toFixed(2)} total
+        💰 ${Number(shift.hourly_rate || 0).toFixed(2)}/hr • ~${workerPayoutFromTotal(payEst.estimatedTotal).toFixed(2)} your payout
         {payEst.breakIsPaid && payEst.breakPay > 0 ? ' (includes break pay)' : ''}
+        {isWorker ? ' • 15% platform fee deducted' : ''}
       </Text>
 
       {payEst.breakMinutes > 0 && (

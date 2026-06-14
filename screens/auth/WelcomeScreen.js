@@ -5,7 +5,7 @@
 import React, { useEffect, useMemo } from 'react';
 import { View, Text, Pressable, ImageBackground, StatusBar, useWindowDimensions, Platform } from 'react-native';
 import { Colors, Spacing, Typography, Radius } from '../../constants/theme.js';
-import { AppLogo } from '../../components/AppLogo.js';
+import { AppLogo } from '../../components/AppLogo';
 
 import welcomeLandscape from '../../welcome.jpg';
 import welcomePortrait from '../../welcome-hero.jpg';

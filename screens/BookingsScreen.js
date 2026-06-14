@@ -70,10 +70,13 @@ export function BookingsScreen() {
 
   const renderBooking = ({ item: b }) => {
     const isOpenShift = Boolean(b.is_open_shift);
+    const endMs = b.end_time ? new Date(b.end_time).getTime() : null;
+    const isPastEnd = endMs != null && endMs < Date.now();
+    const isNoShow = b.status === 'cancelled' && String(b.decline_reason || '').toLowerCase().includes('no-show');
     const isPastPendingOrConfirmed = !isOpenShift
       && (b.status === 'pending' || b.status === 'confirmed')
-      && b.end_time
-      && (new Date(b.end_time).getTime() < Date.now());
+      && isPastEnd;
+    const isExpiredConfirmed = !isOpenShift && b.status === 'confirmed' && isPastEnd && !b.timesheet?.clock_in_time;
 
     const displayTitle = isOpenShift ? (b.title || b.service_type) : b.service_type;
 
@@ -106,6 +109,16 @@ export function BookingsScreen() {
               Client: {[b.participant_first_name, b.participant_last_name].filter(Boolean).join(' ')}
             </Text>
           ) : null}
+          {isExpiredConfirmed && (
+            <Text style={{ fontSize: Typography.fontSize.sm, color: '#92400E', marginTop: 4, fontWeight: Typography.fontWeight.medium }}>
+              Shift expired — clock-in no longer available
+            </Text>
+          )}
+          {isNoShow && (
+            <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.status.error, marginTop: 4, fontWeight: Typography.fontWeight.medium }}>
+              No-show — worker did not clock in
+            </Text>
+          )}
         </View>
         <View style={{
           backgroundColor: STATUS_COLORS[b.status] || Colors.text.muted,

@@ -12,12 +12,7 @@ const { processFundedPipelineOnApproval } = require('./invoicePipelineService');
 
 const toCents = (amount) => Math.round(Number(amount || 0) * 100);
 
-const computeCommissionBreakdown = (amount) => {
-  const total = Number(amount || 0);
-  const commission = Number((total * 0.15).toFixed(2));
-  const workerPayout = Number((total - commission).toFixed(2));
-  return { total, commission, workerPayout };
-};
+const { computePlatformFeeBreakdown } = require('../utils/platformFee.cjs');
 
 const lookupUserDisplayName = async (userId, role) => {
   try {
@@ -158,7 +153,7 @@ const createBookingAuthorization = async (bookingId) => {
     [bookingId, pi.id, amount]
   );
 
-  const { commission, workerPayout } = computeCommissionBreakdown(amount);
+  const { commission, workerPayout } = computePlatformFeeBreakdown(amount);
   await pool.query(
     `INSERT INTO payments (booking_id, stripe_payment_intent_id, amount, commission, worker_payout, status, payment_kind, payment_date)
      VALUES ($1, $2, $3, $4, $5, 'pending', 'authorization_hold', NULL)
@@ -214,7 +209,7 @@ const processPrivatePayOnApproval = async (bookingId) => {
     throw new Error(`Capture did not succeed (${captured.status})`);
   }
 
-  const { commission, workerPayout } = computeCommissionBreakdown(finalAmount);
+  const { commission, workerPayout } = computePlatformFeeBreakdown(finalAmount);
 
   await pool.query(
     `UPDATE payments SET amount = $2, commission = $3, worker_payout = $4, status = 'succeeded', payment_kind = 'capture', payment_date = now()
@@ -274,7 +269,7 @@ const reconcileFundedStripeInvoicePaid = async (stripeInvoiceId) => {
 
   const invoice = invRes.rows[0];
   const total = Number(invoice.total || 0);
-  const { commission, workerPayout } = computeCommissionBreakdown(total);
+  const { commission, workerPayout } = computePlatformFeeBreakdown(total);
 
   await pool.query("UPDATE invoices SET status = 'paid' WHERE id = $1", [invoice.id]);
 
@@ -329,7 +324,7 @@ const cancelBookingAuthorization = async (bookingId) => {
 };
 
 module.exports = {
-  computeCommissionBreakdown,
+  computePlatformFeeBreakdown,
   ensureStripeCustomerForUser,
   createBookingAuthorization,
   processPrivatePayOnApproval,

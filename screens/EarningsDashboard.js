@@ -3,6 +3,7 @@ import { View, Text, ScrollView, RefreshControl, ActivityIndicator, TextInput, P
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { formatDateDMY } from '../utils/dateFormat.js';
+import { workerPayoutFromTotal } from '../utils/platformFee.js';
 
 const Card = ({ children, style }) => (
   <View style={[{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.sm }, style]}>
@@ -60,19 +61,21 @@ export function EarningsDashboard() {
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const yearStart = new Date(now.getFullYear(), 0, 1);
 
+    const paymentAmount = (p) => Number(p.worker_payout ?? workerPayoutFromTotal(p.amount));
+
     const sumByDate = (fromDate) =>
       succeeded
         .filter((p) => {
           const ts = p.payment_date || p.updated_at || p.created_at;
           return ts ? new Date(ts) >= fromDate : false;
         })
-        .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+        .reduce((sum, p) => sum + paymentAmount(p), 0);
 
     return {
       weekly: sumByDate(weekStart),
       monthly: sumByDate(monthStart),
       yearly: sumByDate(yearStart),
-      lifetime: succeeded.reduce((sum, p) => sum + Number(p.amount || 0), 0),
+      lifetime: succeeded.reduce((sum, p) => sum + paymentAmount(p), 0),
     };
   }, [payments]);
 
@@ -80,7 +83,7 @@ export function EarningsDashboard() {
     const map = new Map();
     for (const b of completedBookings) {
       const key = b.service_type || 'Other';
-      const value = Number(b.total_amount || 0);
+      const value = workerPayoutFromTotal(b.total_amount);
       map.set(key, (map.get(key) || 0) + value);
     }
     return [...map.entries()]
@@ -180,7 +183,7 @@ export function EarningsDashboard() {
       </Card>
 
       <Card style={{ marginBottom: Spacing.md, backgroundColor: Colors.primary }}>
-        <Text style={{ color: Colors.text.white, opacity: 0.9 }}>Lifetime earnings</Text>
+        <Text style={{ color: Colors.text.white, opacity: 0.9 }}>Lifetime earnings (your payout)</Text>
         <Text style={{ color: Colors.text.white, fontSize: 32, fontWeight: Typography.fontWeight.bold, marginTop: 4 }}>
           {fmtMoney(totals.lifetime)}
         </Text>

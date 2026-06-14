@@ -18,7 +18,7 @@ import { useErrorHandler } from '../../hooks/useErrorHandler.js';
 import { api } from '../../services/api.js';
 import { LoadingScreen } from '../../components/LoadingScreen.js';
 import { PasswordInput } from '../../components/PasswordInput.js';
-import { AppLogo } from '../../components/AppLogo.js';
+import { AppLogo } from '../../components/AppLogo';
 import { Colors, Spacing, Typography, Radius } from '../../constants/theme.js';
 
 const inputStyle = {
