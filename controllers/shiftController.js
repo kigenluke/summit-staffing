@@ -74,6 +74,7 @@ const getAvailableShifts = async (req, res) => {
               p.latitude AS participant_latitude,
               p.longitude AS participant_longitude,
               (SELECT COUNT(*) FROM shift_applications sa WHERE sa.shift_id = s.id) AS application_count
+              ${isWorker ? `, (SELECT sa.status FROM shift_applications sa WHERE sa.shift_id = s.id AND sa.worker_id = $3 LIMIT 1) AS my_application_status` : ''}
        FROM shifts s
        JOIN users u ON u.id = s.participant_id
        LEFT JOIN participants p ON p.user_id = s.participant_id
@@ -124,34 +125,31 @@ const getAvailableShifts = async (req, res) => {
       const isAssignedToMe = shift.status === 'filled' && shift.filled_by_worker_id === req.user.userId;
       const withinTravelRange = Boolean(shift._within_range);
       const distanceKm = shift._distance_m == null ? null : Number((Number(shift._distance_m) / 1000).toFixed(1));
+      const myApplicationStatus = shift.my_application_status || null;
       return {
         id: shift.id,
         title: shift.title,
         location: shift.location,
         status: shift.status,
+        service_type: shift.service_type,
+        start_time: shift.start_time,
+        end_time: shift.end_time,
+        hourly_rate: shift.hourly_rate,
+        description: shift.description,
+        sleepover_flat_amount: shift.sleepover_flat_amount,
+        travel_distance_km: shift.travel_distance_km,
+        travel_rate_per_km: shift.travel_rate_per_km,
         participant_first_name: shift.participant_first_name || '',
         participant_last_name: shift.participant_last_name || '',
+        participant_email: isAssignedToMe ? shift.participant_email : undefined,
         is_assigned_to_me: isAssignedToMe,
+        has_applied: Boolean(myApplicationStatus),
+        application_status: myApplicationStatus,
         within_travel_range: withinTravelRange,
         distance_km: distanceKm,
         location_missing: Boolean(shift._location_missing),
         travel_filter_enabled: hasWorkerTravelFilter,
         max_travel_km: hasWorkerTravelFilter ? Number(workerTravel.max_travel_km) : null,
-
-        // Before acceptance: keep the listing minimal (UI decides what to show).
-        // After acceptance: return full details (safe for the assigned worker).
-        ...(isAssignedToMe ? {
-          start_time: shift.start_time,
-          end_time: shift.end_time,
-          hourly_rate: shift.hourly_rate,
-          description: shift.description,
-          service_type: shift.service_type,
-          participant_email: shift.participant_email,
-        } : {
-          start_time: shift.start_time,
-          end_time: shift.end_time,
-          hourly_rate: shift.hourly_rate,
-        }),
       };
     });
 

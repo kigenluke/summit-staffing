@@ -16,7 +16,7 @@ import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { SERVICE_TYPES } from '../constants/serviceTypes.js';
 import { NavChevron } from '../components/NavChevron.js';
-import { formatDateDMY, formatYmdToDMY, sameLocalCalendarDay } from '../utils/dateFormat.js';
+import { formatDateDMY, formatYmdToDMY, sameLocalCalendarDay, parseApiDate, formatTime12h } from '../utils/dateFormat.js';
 import * as shiftBreakMetaMod from '../utils/shiftBreakMeta.js';
 import * as ndisParticipantRatesMod from '../utils/ndisParticipantRates.js';
 
@@ -35,6 +35,49 @@ const {
 function nativeAlertOnly(title, message = '') {
   const body = typeof message === 'string' && message.trim() ? message.trim() : '';
   Alert.alert(title, body || undefined);
+}
+
+function buildShiftPayOptions(shift) {
+  return {
+    sleepoverFlatAmount: shift.sleepover_flat_amount != null ? Number(shift.sleepover_flat_amount) : 0,
+    travelKm: shift.travel_distance_km != null ? Number(shift.travel_distance_km) : 0,
+    travelRatePerKm: shift.travel_rate_per_km != null ? Number(shift.travel_rate_per_km) : undefined,
+  };
+}
+
+function buildApplyConfirmBody(shift) {
+  const startDate = parseApiDate(shift.start_time);
+  const endDate = parseApiDate(shift.end_time);
+  const pay = getShiftPayEstimate(shift.start_time, shift.end_time, shift.hourly_rate, shift.description, buildShiftPayOptions(shift));
+  const unpaidDed = pay.breakMinutes > 0 && !pay.breakIsPaid && pay.paidHoursAtRate < pay.shiftHours - 1e-6;
+  const payLine = unpaidDed
+    ? `\nOn site: ${pay.shiftDurationLabel} • Paid time: ${pay.paidDurationLabel}\nApprox. total: ~$${pay.estimatedTotal.toFixed(2)} (hourly rate × paid time only)`
+    : `\nApprox. total: ~$${pay.estimatedTotal.toFixed(2)}`;
+  const dateStr = startDate ? formatDateDMY(startDate) : '—';
+  const timeStr = startDate && endDate
+    ? `${formatTime12h(startDate)} – ${formatTime12h(endDate)} (${pay.shiftDurationLabel})`
+    : '—';
+  const participantName =
+    (shift?.participant_first_name || shift?.participant_last_name)
+      ? `${shift.participant_first_name || ''} ${shift.participant_last_name || ''}`.trim()
+      : 'Participant';
+  return (
+    `Apply for "${shift.title}"?\n\n`
+    + `Participant: ${participantName}\n`
+    + `Date: ${dateStr}\n`
+    + `Time: ${timeStr}\n`
+    + `Labour: $${Number(shift.hourly_rate || 0).toFixed(2)}/hr${payLine}\n`
+    + `Location: ${shift.location || '—'}`
+  );
+}
+
+function getShiftTimeOfDayLocal(isoTime) {
+  const d = parseApiDate(isoTime);
+  if (!d) return null;
+  const h = d.getHours();
+  if (h >= 5 && h < 12) return 'am';
+  if (h >= 12 && h < 20) return 'pm';
+  return 'night';
 }
 
 function isoToAmPm(iso) {
@@ -317,6 +360,8 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo, editShift = 
       setWorkersCount('1');
       setSameShift(true);
       setStep('details');
+      const addr = editShift.location || '';
+      setTimeout(() => locationFieldRef.current?.setAddressText?.(addr), 150);
     } else if (!isEditMode) {
       reset();
     }
@@ -1040,6 +1085,7 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo, editShift = 
         ]}
       >
         <LocationAutocompleteField
+          key={isEditMode ? `edit-loc-${editShift?.id}` : 'create-loc'}
           ref={locationFieldRef}
           initialAddress={location}
           onAddressChange={handleLocationTextChange}
@@ -1662,71 +1708,76 @@ function AssignedWorkerSummary({ shift, variant = 'card' }) {
 }
 
 // ── Shift Card ────────────────────────────────────────────────────────────────
-function ShiftCard({ shift, onApply, isWorker, isParticipant, onOpenApplications, onEditShift }) {
-  const startDate = new Date(shift.start_time);
-  const endDate = new Date(shift.end_time);
-  const isShiftExpired = startDate.getTime() <= Date.now();
-  const payEst = getShiftPayEstimate(shift.start_time, shift.end_time, shift.hourly_rate, shift.description, {
-    sleepoverFlatAmount: shift.sleepover_flat_amount != null ? Number(shift.sleepover_flat_amount) : 0,
-    travelKm: shift.travel_distance_km != null ? Number(shift.travel_distance_km) : 0,
-    travelRatePerKm: shift.travel_rate_per_km != null ? Number(shift.travel_rate_per_km) : undefined,
-  });
+const ShiftCard = React.memo(function ShiftCard({ shift, onApply, isWorker, isParticipant, onOpenApplications, onEditShift }) {
+  const startDate = parseApiDate(shift.start_time);
+  const endDate = parseApiDate(shift.end_time);
+  const isShiftExpired = !startDate || startDate.getTime() <= Date.now();
+  const payEst = getShiftPayEstimate(shift.start_time, shift.end_time, shift.hourly_rate, shift.description, buildShiftPayOptions(shift));
   const hasUnpaidBreakDeduction = payEst.breakMinutes > 0 && !payEst.breakIsPaid && payEst.paidHoursAtRate < payEst.shiftHours - 1e-6;
   const hoursLabel = hasUnpaidBreakDeduction
     ? `${payEst.shiftDurationLabel} on site • ${payEst.paidDurationLabel} paid`
     : payEst.shiftDurationLabel;
   const workerAssigned = Boolean(shift?.is_assigned_to_me);
+  const hasApplied = Boolean(shift?.has_applied || shift?.application_status);
   const participantName =
     (shift?.participant_first_name || shift?.participant_last_name)
       ? `${shift.participant_first_name || ''} ${shift.participant_last_name || ''}`.trim()
       : (shift?.participant_email ? String(shift.participant_email).split('@')[0] : 'Participant');
-  const shouldShowFullForWorker = workerAssigned;
   const canWorkerApply = isWorker
     && shift.status === 'open'
     && !isShiftExpired
+    && !hasApplied
     && (shift.within_travel_range !== false);
 
-  const startTimeStr = startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const endTimeStr = endDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const dateTimeLine = sameLocalCalendarDay(startDate, endDate)
-    ? `${formatDateDMY(startDate)} • ${startTimeStr} – ${endTimeStr} (${hoursLabel})`
-    : `${formatDateDMY(startDate)} ${startTimeStr} – ${formatDateDMY(endDate)} ${endTimeStr} (${hoursLabel})`;
+  const startTimeStr = startDate ? formatTime12h(startDate) : '';
+  const endTimeStr = endDate ? formatTime12h(endDate) : '';
+  const dateLabel = startDate ? formatDateDMY(startDate) : '';
+  const dateTimeLine = startDate && endDate
+    ? (sameLocalCalendarDay(startDate, endDate)
+      ? `${dateLabel} • ${startTimeStr} – ${endTimeStr} (${hoursLabel})`
+      : `${formatDateDMY(startDate)} ${startTimeStr} – ${formatDateDMY(endDate)} ${endTimeStr} (${hoursLabel})`)
+    : (dateLabel || startTimeStr);
 
   const cardContent = (
     <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.sm, ...Shadows.md }}>
-      {!isWorker && (
+      {(isWorker && shift.service_type) || !isWorker ? (
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.sm }}>
-          <View style={{ backgroundColor: getServiceColor(shift.service_type), paddingHorizontal: Spacing.sm, paddingVertical: 3, borderRadius: Radius.full }}>
-            <Text style={{ color: Colors.text.white, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.bold }}>
-              {shift.service_type}
-            </Text>
-          </View>
-          <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted }}>{shift.application_count || 0} applicant(s)</Text>
+          {shift.service_type ? (
+            <View style={{ backgroundColor: getServiceColor(shift.service_type), paddingHorizontal: Spacing.sm, paddingVertical: 3, borderRadius: Radius.full }}>
+              <Text style={{ color: Colors.text.white, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.bold }}>
+                {shift.service_type}
+              </Text>
+            </View>
+          ) : <View />}
+          {!isWorker && (
+            <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted }}>{shift.application_count || 0} applicant(s)</Text>
+          )}
+          {isWorker && shift.distance_km != null && (
+            <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted }}>{shift.distance_km} km away</Text>
+          )}
         </View>
-      )}
+      ) : null}
 
       <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.xs }}>
         {shift.title}
       </Text>
 
-      {/* Worker: show only key info until selected/assigned */}
-      {isWorker && !shouldShowFullForWorker ? (
-        <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: Spacing.sm }}>
-          {participantName}
+      {isWorker && (
+        <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>
+          Participant: {participantName}
         </Text>
-      ) : (
-        <>
-          <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>
-            {dateTimeLine}
-          </Text>
-
-          <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>
-            ${Number(shift.hourly_rate || 0).toFixed(2)}/hr • ~${payEst.estimatedTotal.toFixed(2)} total
-            {payEst.breakIsPaid && payEst.breakPay > 0 ? ' (includes break pay)' : ''}
-          </Text>
-        </>
       )}
-      {payEst.breakMinutes > 0 && (!isWorker || shouldShowFullForWorker) && (
+
+      <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>
+        📅 {dateTimeLine}
+      </Text>
+
+      <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>
+        💰 ${Number(shift.hourly_rate || 0).toFixed(2)}/hr • ~${payEst.estimatedTotal.toFixed(2)} total
+        {payEst.breakIsPaid && payEst.breakPay > 0 ? ' (includes break pay)' : ''}
+      </Text>
+
+      {payEst.breakMinutes > 0 && (
         <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>
           Break: {payEst.breakMinutes} min • Paid: {payEst.breakIsPaid ? `Yes${payEst.breakPay > 0 ? ` ($${payEst.breakPay.toFixed(2)})` : ''}` : 'No'}
         </Text>
@@ -1744,7 +1795,22 @@ function ShiftCard({ shift, onApply, isWorker, isParticipant, onOpenApplications
         </Text>
       )}
 
-      {isWorker && shift.status === 'open' && (
+      {isWorker && shift.status === 'open' && hasApplied && (
+        <View style={{
+          backgroundColor: `${Colors.status.warning}22`,
+          borderRadius: Radius.md,
+          paddingVertical: Spacing.sm,
+          alignItems: 'center',
+          borderWidth: 1,
+          borderColor: `${Colors.status.warning}66`,
+        }}>
+          <Text style={{ color: Colors.status.warning, fontWeight: Typography.fontWeight.semibold }}>
+            Application Pending — awaiting participant approval
+          </Text>
+        </View>
+      )}
+
+      {isWorker && shift.status === 'open' && !hasApplied && (
         <Pressable
           onPress={() => {
             if (!canWorkerApply) return;
@@ -1814,7 +1880,7 @@ function ShiftCard({ shift, onApply, isWorker, isParticipant, onOpenApplications
 
   if (!isParticipant) return cardContent;
   return cardContent;
-}
+});
 
 // ── Main Screen ───────────────────────────────────────────────────────────────
 export function AvailableShiftsScreen({ navigation, route }) {
@@ -1880,14 +1946,7 @@ export function AvailableShiftsScreen({ navigation, route }) {
     setConfirmModal((p) => ({ ...p, visible: false }));
   }, []);
 
-  const getShiftTypeForLocalTime = useCallback((isoTime) => {
-    const d = new Date(isoTime);
-    if (Number.isNaN(d.getTime())) return 'all';
-    const h = d.getHours();
-    if (h >= 5 && h < 12) return 'am';
-    if (h >= 12 && h < 20) return 'pm';
-    return 'night';
-  }, []);
+  const getShiftTypeForLocalTime = useCallback((isoTime) => getShiftTimeOfDayLocal(isoTime) || 'all', []);
 
   useLayoutEffect(() => {
     const screenTitle = isWorker ? 'Available shifts' : isParticipant ? 'My shifts' : 'Shifts';
@@ -1943,7 +2002,7 @@ export function AvailableShiftsScreen({ navigation, route }) {
       }
     } catch (e) { }
     setLoading(false);
-  }, [isWorker, isParticipant, workerShiftTypeFilter]);
+  }, [isWorker, isParticipant]);
 
   const { nearShifts, awayShifts, visibleShifts } = useMemo(() => {
     if (!isWorker) {
@@ -1977,16 +2036,7 @@ export function AvailableShiftsScreen({ navigation, route }) {
 
   const handleApply = (shift) => {
     const confirmAction = () => applyForShift(shift.id);
-    const pay = getShiftPayEstimate(shift.start_time, shift.end_time, shift.hourly_rate, shift.description, {
-      sleepoverFlatAmount: shift.sleepover_flat_amount != null ? Number(shift.sleepover_flat_amount) : 0,
-      travelKm: shift.travel_distance_km != null ? Number(shift.travel_distance_km) : 0,
-      travelRatePerKm: shift.travel_rate_per_km != null ? Number(shift.travel_rate_per_km) : undefined,
-    });
-    const unpaidDed = pay.breakMinutes > 0 && !pay.breakIsPaid && pay.paidHoursAtRate < pay.shiftHours - 1e-6;
-    const payLine = unpaidDed
-      ? `\nOn site: ${pay.shiftDurationLabel} • Paid time: ${pay.paidDurationLabel}\nApprox. total: ~$${pay.estimatedTotal.toFixed(2)} (hourly rate × paid time only)`
-      : `\nApprox. total: ~$${pay.estimatedTotal.toFixed(2)}`;
-    const body = `Apply for "${shift.title}"?\n\nLabour: $${Number(shift.hourly_rate || 0).toFixed(2)}/hr${payLine}\nTime: ${new Date(shift.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${new Date(shift.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}\nLocation: ${shift.location}`;
+    const body = buildApplyConfirmBody(shift);
     if (Platform.OS === 'web') {
       openConfirm({
         title: 'Apply for shift',
@@ -2007,9 +2057,14 @@ export function AvailableShiftsScreen({ navigation, route }) {
     const { error } = await api.post(`/api/shifts/${shiftId}/apply`, { message: 'I am interested in this shift.' });
     if (error) openInfo('Error', error.message || 'Failed to apply');
     else {
+      setShifts((prev) => prev.map((s) => (
+        s.id === shiftId
+          ? { ...s, has_applied: true, application_status: 'pending' }
+          : s
+      )));
       openInfo(
         'Application Pending',
-        'Your shift application is pending. It will be assigned to you once the employer accepts it.'
+        'Your shift application is pending. It will be assigned to you once the participant accepts it.'
       );
       loadShifts();
     }
@@ -2085,6 +2140,10 @@ export function AvailableShiftsScreen({ navigation, route }) {
         keyExtractor={(item) => item.id}
         contentContainerStyle={{ padding: Spacing.md, paddingBottom: Spacing.xxl }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
+        initialNumToRender={8}
+        maxToRenderPerBatch={6}
+        windowSize={7}
+        removeClippedSubviews={Platform.OS === 'android'}
         renderItem={({ item }) => (
           <ShiftCard
             shift={item}

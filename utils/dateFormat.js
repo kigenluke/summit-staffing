@@ -2,9 +2,29 @@
  * Uniform display dates as DD/MM/YYYY (Australia-style) across the app.
  */
 
+/** Parse API / Postgres timestamps reliably on Hermes (Android). */
+export function parseApiDate(value) {
+  if (value == null || value === '') return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  const s = String(value).trim();
+  let d = new Date(s);
+  if (!Number.isNaN(d.getTime())) return d;
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (!m) return null;
+  d = new Date(
+    Number(m[1]),
+    Number(m[2]) - 1,
+    Number(m[3]),
+    Number(m[4] || 0),
+    Number(m[5] || 0),
+    Number(m[6] || 0),
+  );
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 export function formatDateDMY(value) {
-  const d = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(d.getTime())) return '';
+  const d = parseApiDate(value);
+  if (!d) return '';
   const day = String(d.getDate()).padStart(2, '0');
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const year = d.getFullYear();
@@ -28,7 +48,7 @@ export function sameLocalCalendarDay(d1, d2) {
 }
 
 export function formatTime12h(value) {
-  const d = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(d.getTime())) return '';
+  const d = parseApiDate(value);
+  if (!d) return '';
   return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: true });
 }

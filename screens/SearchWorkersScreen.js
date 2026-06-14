@@ -21,7 +21,7 @@ const distanceMeters = (lat1, lon1, lat2, lon2) => {
   return R * c;
 };
 
-const WorkerCard = ({ worker, onPress, isVendorMode = false }) => (
+const WorkerCard = React.memo(({ worker, onPress, isVendorMode = false }) => (
   <Pressable
     onPress={onPress}
     style={({ pressed }) => ({
@@ -89,7 +89,7 @@ const WorkerCard = ({ worker, onPress, isVendorMode = false }) => (
       </Text>
     )}
   </Pressable>
-);
+));
 
 export function SearchWorkersScreen() {
   const navigation = useGuardedNavigation();
@@ -104,6 +104,13 @@ export function SearchWorkersScreen() {
 
   const loadWorkers = useCallback(async () => {
     try {
+      if (mode === 'worker') {
+        const res = await api.get('/api/workers?limit=50');
+        if (res.data?.ok && res.data?.workers) setWorkers(res.data.workers);
+        setLoading(false);
+        return;
+      }
+
       let data;
       let coords = { latitude: null, longitude: null };
       try {
@@ -118,7 +125,7 @@ export function SearchWorkersScreen() {
         }
       } catch (_) {}
 
-      if (mode === 'vendor' && coords.latitude != null && coords.longitude != null) {
+      if (coords.latitude != null && coords.longitude != null) {
         const res = await api.get('/api/workers/search', {
           params: {
             latitude: coords.latitude,
@@ -145,7 +152,7 @@ export function SearchWorkersScreen() {
           }
         }
       } else {
-        if (mode === 'vendor') setLocationAvailable(false);
+        setLocationAvailable(false);
         const res = await api.get('/api/workers?limit=50');
         data = res.data;
       }
@@ -195,7 +202,7 @@ export function SearchWorkersScreen() {
       </View>
       <View style={{ flexDirection: 'row', paddingHorizontal: Spacing.md, paddingTop: Spacing.sm, gap: Spacing.sm }}>
         <Pressable
-          onPress={() => setMode('worker')}
+          onPress={() => { if (mode !== 'worker') { setLoading(true); setMode('worker'); } }}
           style={{
             flex: 1,
             backgroundColor: mode === 'worker' ? Colors.primary : Colors.surface,
@@ -211,7 +218,7 @@ export function SearchWorkersScreen() {
           </Text>
         </Pressable>
         <Pressable
-          onPress={() => setMode('vendor')}
+          onPress={() => { if (mode !== 'vendor') { setLoading(true); setMode('vendor'); } }}
           style={{
             flex: 1,
             backgroundColor: mode === 'vendor' ? Colors.primary : Colors.surface,
@@ -301,6 +308,10 @@ export function SearchWorkersScreen() {
           keyExtractor={(item) => item.id}
           contentContainerStyle={{ padding: Spacing.md, paddingBottom: Spacing.xxl }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
+          initialNumToRender={10}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          removeClippedSubviews
           renderItem={({ item }) => (
             <WorkerCard
               worker={item}

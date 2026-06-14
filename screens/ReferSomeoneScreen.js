@@ -7,6 +7,7 @@ import {
 } from 'react-native';
 import { api } from '../services/api.js';
 import { PUBLIC_WEB_BASE } from '../constants/apiPublic.js';
+import { copyToClipboard } from '../utils/clipboard.js';
 import { Colors, Spacing, Typography, Radius } from '../constants/theme.js';
 
 const inputStyle = {
@@ -52,6 +53,7 @@ export function ReferSomeoneScreen({ route }) {
   const [email, setEmail] = useState('');
   const [loadingLink, setLoadingLink] = useState(false);
   const [sending, setSending] = useState(false);
+  const [copying, setCopying] = useState(false);
 
   const loadLink = useCallback(async (nextRole) => {
     setLoadingLink(true);
@@ -69,16 +71,16 @@ export function ReferSomeoneScreen({ route }) {
   }, [role, loadLink]);
 
   const copyLink = async () => {
-    if (!link) return;
+    if (!link || copying) return;
+    setCopying(true);
     try {
-      if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(link);
-        notify('Copied', 'Referral link copied to clipboard.');
-        return;
-      }
-      notify('Referral link', link);
+      const copied = await copyToClipboard(link);
+      if (copied) notify('Copied', 'Referral link copied to clipboard.');
+      else notify('Referral link', link);
     } catch (_) {
       notify('Referral link', link);
+    } finally {
+      setCopying(false);
     }
   };
 
@@ -162,17 +164,19 @@ export function ReferSomeoneScreen({ route }) {
       )}
       <Pressable
         onPress={copyLink}
-        disabled={!link || loadingLink}
+        disabled={!link || loadingLink || copying}
         style={({ pressed }) => ({
           backgroundColor: Colors.primary,
           paddingVertical: Spacing.sm,
           borderRadius: Radius.md,
           alignItems: 'center',
           marginBottom: Spacing.lg,
-          opacity: !link || loadingLink || pressed ? 0.85 : 1,
+          opacity: !link || loadingLink || copying || pressed ? 0.85 : 1,
         })}
       >
-        <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Copy link</Text>
+        <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>
+          {copying ? 'Copying…' : 'Copy link'}
+        </Text>
       </Pressable>
 
       <Text style={{ fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.semibold, color: Colors.text.primary, marginBottom: Spacing.sm }}>

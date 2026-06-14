@@ -17,13 +17,20 @@ function readViteEnv(key) {
 
 export const PUBLIC_WEB_BASE = 'https://summitstaffing.com.au';
 
+let cachedApiBaseUrl = null;
+
 export function resolveApiBaseUrl() {
+  if (cachedApiBaseUrl) return cachedApiBaseUrl;
+
   const isNative = Platform.OS === 'android' || Platform.OS === 'ios';
 
   if (Platform.OS === 'web') {
     try {
       const host = typeof window !== 'undefined' ? window.location.hostname : '';
-      if (host === 'localhost' || host === '127.0.0.1') return '';
+      if (host === 'localhost' || host === '127.0.0.1') {
+        cachedApiBaseUrl = '';
+        return cachedApiBaseUrl;
+      }
     } catch (_) {}
   }
 
@@ -33,17 +40,23 @@ export function resolveApiBaseUrl() {
     native?.EXPO_PUBLIC_API_URL,
     native?.APP_URL,
   );
-  if (fromNativeConfig) return fromNativeConfig;
+  if (fromNativeConfig) {
+    cachedApiBaseUrl = fromNativeConfig;
+    return cachedApiBaseUrl;
+  }
 
-  // Live APK / iOS: never rely on Metro-inlined env — always fall back to production API.
-  if (isNative) return PRODUCTION_API_URL;
+  if (isNative) {
+    cachedApiBaseUrl = PRODUCTION_API_URL;
+    return cachedApiBaseUrl;
+  }
 
-  return pickFirstUrl(
+  cachedApiBaseUrl = pickFirstUrl(
     readViteEnv('VITE_API_URL'),
     typeof process !== 'undefined' ? process.env?.API_URL : '',
     typeof process !== 'undefined' ? process.env?.EXPO_PUBLIC_API_URL : '',
     PRODUCTION_API_URL,
   ) || PRODUCTION_API_URL;
+  return cachedApiBaseUrl;
 }
 
 export function getNetworkErrorMessage() {

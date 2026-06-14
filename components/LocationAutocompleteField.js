@@ -4,7 +4,8 @@
 import React, { useRef, useState, useMemo, useCallback, useImperativeHandle, forwardRef } from 'react';
 import { View, TextInput, Platform } from 'react-native';
 import * as PlacesPkg from 'react-native-google-places-autocomplete';
-import { api, ApiConfig } from '../services/api.js';
+import { PRODUCTION_API_URL } from '../constants/apiPublic.js';
+import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 
 function getGooglePlacesBrowserKey() {
@@ -30,7 +31,7 @@ const PlacesAutocompleteComponent = (
 const isWeb = Platform.OS === 'web';
 const placesProxyBaseUrl = isWeb
   ? (typeof window !== 'undefined' ? window.location.origin : '')
-  : String(ApiConfig?.baseURL || 'https://athletic-heart-backend-production.up.railway.app').replace(/\/$/, '');
+  : PRODUCTION_API_URL.replace(/\/$/, '');
 const canUsePlacesAutocomplete = !!PlacesAutocompleteComponent && !!placesProxyBaseUrl;
 const placesQueryKey = getGooglePlacesBrowserKey() || 'places-proxy-key';
 
@@ -117,6 +118,8 @@ export const LocationAutocompleteField = React.memo(
       const addr = String(initialAddress || '');
       if (addr === syncedAddressRef.current) return;
       applyAddressToInput(addr);
+      const t = setTimeout(() => applyAddressToInput(addr), 120);
+      return () => clearTimeout(t);
     }, [initialAddress, applyAddressToInput]);
 
     const handleTextChange = useCallback(
