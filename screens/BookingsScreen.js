@@ -9,15 +9,13 @@ import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { formatDateDMY, formatTime12h } from '../utils/dateFormat.js';
 import { useGuardedNavigation } from '../hooks/useGuardedNavigation.js';
+import {
+  getBookingDisplayStatus,
+  isBookingPastEnd,
+  navigateToBookingOrShift,
+  STATUS_TONE_COLORS,
+} from '../utils/bookingDisplayStatus.js';
 import { VerificationBanner } from '../components/VerificationBanner.js';
-
-const STATUS_COLORS = {
-  pending: Colors.status.warning,
-  confirmed: Colors.status.success,
-  in_progress: Colors.primary,
-  completed: Colors.primaryDark,
-  cancelled: Colors.status.error,
-};
 
 const TABS = ['all', 'pending', 'confirmed', 'in_progress'];
 
@@ -28,7 +26,7 @@ export function BookingsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState('all');
-  const [deleteConfirmBookingId, setDeleteConfirmBookingId] = useState(null);
+  const [deleteConfirmTarget, setDeleteConfirmTarget] = useState(null);
   const isWorker = user?.role === 'worker';
   const isParticipant = user?.role === 'participant';
 
@@ -44,6 +42,11 @@ export function BookingsScreen() {
 
   const bookings = useMemo(() => {
     if (activeTab === 'all') return allBookings;
+    if (activeTab === 'pending') {
+      return allBookings.filter(
+        (b) => b.status === 'pending' || (b.is_open_shift && b.status === 'open')
+      );
+    }
     return allBookings.filter((b) => b.status === activeTab);
   }, [allBookings, activeTab]);
 
@@ -55,8 +58,15 @@ export function BookingsScreen() {
     setRefreshing(false);
   }, [loadBookings]);
 
-  const deleteOldShift = useCallback(async (bookingId) => {
-    const { error } = await api.put(`/api/bookings/${bookingId}/cancel`);
+  const deleteOldShift = useCallback(async (target) => {
+    const id = typeof target === 'object' ? target?.id : target;
+    const isOpenShift = typeof target === 'object' && Boolean(target?.is_open_shift);
+    if (!id) return;
+
+    const { error } = isOpenShift
+      ? await api.put(`/api/shifts/${id}/cancel`)
+      : await api.put(`/api/bookings/${id}/cancel`);
+
     if (error) {
       Alert.alert('Error', error.message || 'Failed to delete old shift');
       return;
@@ -66,35 +76,31 @@ export function BookingsScreen() {
     loadBookings(true);
   }, [loadBookings]);
 
-  const openDeleteConfirm = useCallback((bookingId) => {
-    setDeleteConfirmBookingId(bookingId);
+  const openDeleteConfirm = useCallback((target) => {
+    setDeleteConfirmTarget(typeof target === 'object' ? target : { id: target, is_open_shift: false });
   }, []);
 
   const closeDeleteConfirm = useCallback(() => {
-    setDeleteConfirmBookingId(null);
+    setDeleteConfirmTarget(null);
   }, []);
 
   const renderBooking = ({ item: b }) => {
     const isOpenShift = Boolean(b.is_open_shift);
-    const endMs = b.end_time ? new Date(b.end_time).getTime() : null;
-    const isPastEnd = endMs != null && endMs < Date.now();
+    const isPastEnd = isBookingPastEnd(b);
+    const display = getBookingDisplayStatus(b);
+    const badgeColor = STATUS_TONE_COLORS[display.tone] || Colors.text.muted;
     const isNoShow = b.status === 'cancelled' && String(b.decline_reason || '').toLowerCase().includes('no-show');
     const isPastPendingOrConfirmed = !isOpenShift
       && (b.status === 'pending' || b.status === 'confirmed')
       && isPastEnd;
     const isExpiredConfirmed = !isOpenShift && b.status === 'confirmed' && isPastEnd && !b.timesheet?.clock_in_time;
+    const isExpiredOpenShift = isOpenShift && isPastEnd;
 
     const displayTitle = isOpenShift ? (b.title || b.service_type) : b.service_type;
 
     return (
       <Pressable
-        onPress={() => {
-          if (isOpenShift) {
-            navigation.navigate('AvailableShifts', { focusShiftId: b.id });
-            return;
-          }
-          navigation.navigate('BookingDetail', { bookingId: b.id });
-        }}
+        onPress={() => navigateToBookingOrShift(navigation, b)}
         style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.sm, ...Shadows.md }}
       >
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -105,9 +111,14 @@ export function BookingsScreen() {
           <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: 4 }}>
             {formatDateDMY(b.start_time)} • {formatTime12h(b.start_time)}
           </Text>
-          {isOpenShift && isParticipant && (
+          {isOpenShift && isParticipant && !isPastEnd && (
             <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.status.warning, marginTop: 4, fontWeight: Typography.fontWeight.medium }}>
               {b.application_count || 0} applicant(s) — awaiting worker
+            </Text>
+          )}
+          {isExpiredOpenShift && (
+            <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.muted, marginTop: 4, fontWeight: Typography.fontWeight.medium }}>
+              No worker assigned — shift time has passed
             </Text>
           )}
           {isWorker && !isOpenShift && (b.status === 'confirmed' || b.status === 'in_progress') && (b.participant_first_name || b.participant_last_name) ? (
@@ -127,20 +138,20 @@ export function BookingsScreen() {
           )}
         </View>
         <View style={{
-          backgroundColor: STATUS_COLORS[b.status] || Colors.text.muted,
+          backgroundColor: badgeColor,
           paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: Radius.full,
         }}>
           <Text style={{ color: Colors.text.white, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.bold }}>
-            {(b.status || '').replace('_', ' ').toUpperCase()}
+            {display.label.toUpperCase()}
           </Text>
         </View>
       </View>
 
-      {isPastPendingOrConfirmed && (
+      {(isPastPendingOrConfirmed || isExpiredOpenShift) && (
           <Pressable
             onPress={(e) => {
               if (e?.stopPropagation) e.stopPropagation();
-              openDeleteConfirm(b.id);
+              openDeleteConfirm({ id: b.id, is_open_shift: isOpenShift });
             }}
             style={({ pressed }) => ({
               marginTop: Spacing.xs,
@@ -225,7 +236,7 @@ export function BookingsScreen() {
       )}
 
       <Modal
-        visible={!!deleteConfirmBookingId}
+        visible={!!deleteConfirmTarget}
         transparent
         animationType="fade"
         onRequestClose={closeDeleteConfirm}
@@ -254,9 +265,9 @@ export function BookingsScreen() {
               </Pressable>
               <Pressable
                 onPress={async () => {
-                  const id = deleteConfirmBookingId;
+                  const target = deleteConfirmTarget;
                   closeDeleteConfirm();
-                  if (id) await deleteOldShift(id);
+                  if (target) await deleteOldShift(target);
                 }}
                 style={({ pressed }) => ({
                   paddingVertical: Spacing.xs,

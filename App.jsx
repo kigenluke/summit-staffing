@@ -6,6 +6,7 @@
 import React, { useEffect, useCallback } from 'react';
 import { View, Text, ScrollView, Platform, Linking } from 'react-native';
 import { NavigationContainer, createNavigationContainerRef, CommonActions } from '@react-navigation/native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ToastProvider } from './components/Toast.js';
 import RootWithOptionalStripe from './components/RootWithOptionalStripe';
 import { AppNavigator } from './navigation/AppNavigator';
@@ -113,11 +114,13 @@ export default function App() {
     <ErrorBoundary>
       <View style={appWrapperStyle}>
         <ToastProvider>
-          <RootWithOptionalStripe>
-            <NavigationContainer ref={navigationRef} theme={navTheme} onReady={onNavReady}>
-              <AppNavigator />
-            </NavigationContainer>
-          </RootWithOptionalStripe>
+          <SafeAreaProvider>
+            <RootWithOptionalStripe>
+              <NavigationContainer ref={navigationRef} theme={navTheme} onReady={onNavReady}>
+                <AppNavigator />
+              </NavigationContainer>
+            </RootWithOptionalStripe>
+          </SafeAreaProvider>
         </ToastProvider>
       </View>
     </ErrorBoundary>

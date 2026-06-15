@@ -9,6 +9,8 @@ import { api } from '../services/api.js';
 import { useAuthStore } from '../store/authStore.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { formatDateDMY } from '../utils/dateFormat.js';
+import { getMainTabFooterHeight } from '../components/MainTabFooter.js';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const STATUS_COLORS = { pending: Colors.status.warning, succeeded: Colors.status.success, failed: Colors.status.error, refunded: Colors.text.muted };
 
@@ -35,6 +37,8 @@ const formatAccountInput = (raw) => String(raw || '').replace(/\D/g, '').slice(0
 
 export function PaymentsScreen() {
   const { user } = useAuthStore();
+  const insets = useSafeAreaInsets();
+  const footerPad = getMainTabFooterHeight(insets) + Spacing.md;
   const isWorker = user?.role === 'worker';
   const isParticipant = user?.role === 'participant';
   const [payments, setPayments] = useState([]);
@@ -212,11 +216,10 @@ export function PaymentsScreen() {
     ]);
   };
 
-  return (
-    <View style={{ flex: 1, backgroundColor: Colors.background }}>
-      {/* Stripe Connect — workers only (API returns 403 for participants) */}
-      {!loading && isWorker && (
-        <View style={{ padding: Spacing.md }}>
+  const renderListHeader = useCallback(() => (
+    <View style={{ paddingTop: Spacing.md }}>
+      {isWorker && (
+        <View style={{ paddingHorizontal: Spacing.md, marginBottom: Spacing.sm }}>
           <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.sm }}>
             <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.sm }}>Payout bank account</Text>
             <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, lineHeight: 20, marginBottom: Spacing.md }}>
@@ -355,8 +358,9 @@ export function PaymentsScreen() {
           </View>
         </View>
       )}
-      {!loading && isParticipant && (
-        <View style={{ paddingHorizontal: Spacing.md, paddingBottom: Spacing.sm }}>
+
+      {isParticipant && (
+        <View style={{ paddingHorizontal: Spacing.md, marginBottom: Spacing.sm }}>
           <View style={{ backgroundColor: '#FFF7ED', borderRadius: Radius.lg, padding: Spacing.md, borderWidth: 1, borderColor: '#FDBA74' }}>
             <Text style={{ fontWeight: Typography.fontWeight.bold, color: '#9A3412', marginBottom: 4 }}>
               About card holds
@@ -368,8 +372,8 @@ export function PaymentsScreen() {
         </View>
       )}
 
-      {!loading && isWorker && (
-        <View style={{ paddingHorizontal: Spacing.md, paddingBottom: Spacing.sm }}>
+      {isWorker && (
+        <View style={{ paddingHorizontal: Spacing.md, marginBottom: Spacing.sm }}>
           <View style={{ backgroundColor: '#ECFDF5', borderRadius: Radius.lg, padding: Spacing.md, borderWidth: 1, borderColor: '#6EE7B7' }}>
             <Text style={{ fontWeight: Typography.fontWeight.bold, color: '#065F46', marginBottom: 4 }}>
               When do I get paid?
@@ -381,8 +385,8 @@ export function PaymentsScreen() {
         </View>
       )}
 
-      {!loading && isParticipant && (
-        <View style={{ padding: Spacing.md }}>
+      {isParticipant && (
+        <View style={{ paddingHorizontal: Spacing.md, marginBottom: Spacing.md }}>
           <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.sm }}>
             <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.xs }}>
               Saved cards
@@ -444,8 +448,8 @@ export function PaymentsScreen() {
         </View>
       )}
 
-      {!loading && !isWorker && !isParticipant && (
-        <View style={{ padding: Spacing.md }}>
+      {!isWorker && !isParticipant && (
+        <View style={{ paddingHorizontal: Spacing.md, marginBottom: Spacing.md }}>
           <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.sm }}>
             <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.sm }}>
               Paying for a participant
@@ -457,67 +461,106 @@ export function PaymentsScreen() {
         </View>
       )}
 
+      <View style={{ paddingHorizontal: Spacing.md, marginBottom: Spacing.sm }}>
+        <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>
+          Payment history
+        </Text>
+        <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: 4 }}>
+          {isWorker ? 'Your shift payouts and pending payments' : 'Charges and holds for your bookings'}
+        </Text>
+      </View>
+    </View>
+  ), [
+    isWorker,
+    isParticipant,
+    connectStatus,
+    hasSavedBank,
+    showInAppBankForm,
+    bankHolderName,
+    bankBsb,
+    bankAccountNumber,
+    savingBank,
+    hasLinkedAccount,
+    savedCards,
+    addingCard,
+    setupBankForm,
+    disconnectStripe,
+    saveBankDetails,
+    addCard,
+    removeCard,
+  ]);
+
+  const renderPaymentItem = useCallback(({ item: p }) => {
+    const counterparty = isWorker
+      ? [p.participant_first_name, p.participant_last_name].filter(Boolean).join(' ')
+      : [p.worker_first_name, p.worker_last_name].filter(Boolean).join(' ');
+    const displayAmount = isWorker && p.worker_payout > 0 ? Number(p.worker_payout) : Number(p.amount || 0);
+    return (
+      <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.sm, marginHorizontal: Spacing.md, ...Shadows.sm }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <View style={{ flex: 1, paddingRight: Spacing.sm }}>
+            <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, fontSize: Typography.fontSize.lg }}>
+              ${displayAmount.toFixed(2)}
+            </Text>
+            <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.primary, marginTop: 4, fontWeight: Typography.fontWeight.medium }}>
+              {p.service_type || 'Support shift'}
+            </Text>
+            {p.start_time ? (
+              <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.secondary, marginTop: 2 }}>
+                Shift: {formatDateDMY(p.start_time)}
+              </Text>
+            ) : null}
+            {counterparty ? (
+              <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.secondary, marginTop: 2 }}>
+                {isWorker ? 'Client' : 'Worker'}: {counterparty}
+              </Text>
+            ) : null}
+            <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: 2 }}>
+              {formatPaymentKind(p.payment_kind, p.status)}
+              {p.invoice_number ? ` · Invoice ${p.invoice_number}` : ''}
+            </Text>
+            {p.status_explanation ? (
+              <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.secondary, marginTop: 4, lineHeight: 16 }}>
+                {p.status_explanation}
+              </Text>
+            ) : null}
+            {(p.payment_date || p.created_at) && (
+              <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: 2 }}>
+                {formatDateDMY(p.payment_date || p.created_at)}
+              </Text>
+            )}
+          </View>
+          <View style={{ backgroundColor: STATUS_COLORS[p.status] || Colors.text.muted, paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: Radius.full }}>
+            <Text style={{ color: Colors.text.white, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.bold, textTransform: 'uppercase' }}>{p.status}</Text>
+          </View>
+        </View>
+        {isWorker && p.worker_payout > 0 && p.amount > 0 && Number(p.worker_payout) !== Number(p.amount) && (
+          <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.status.success, marginTop: Spacing.xs }}>
+            Your payout (85%): ${Number(p.worker_payout).toFixed(2)}
+          </Text>
+        )}
+      </View>
+    );
+  }, [isWorker]);
+
+  return (
+    <View style={{ flex: 1, backgroundColor: Colors.background }}>
       {loading ? (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}><ActivityIndicator size="large" color={Colors.primary} /></View>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+        </View>
       ) : (
         <FlatList
           data={payments}
-          keyExtractor={item => item.id}
-          contentContainerStyle={{ padding: Spacing.md, paddingBottom: Spacing.xxl }}
+          keyExtractor={(item) => item.id}
+          renderItem={renderPaymentItem}
+          ListHeaderComponent={renderListHeader}
+          contentContainerStyle={{ paddingBottom: footerPad, flexGrow: 1 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
-          renderItem={({ item: p }) => {
-            const counterparty = isWorker
-              ? [p.participant_first_name, p.participant_last_name].filter(Boolean).join(' ')
-              : [p.worker_first_name, p.worker_last_name].filter(Boolean).join(' ');
-            const displayAmount = isWorker && p.worker_payout > 0 ? Number(p.worker_payout) : Number(p.amount || 0);
-            return (
-            <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.sm, ...Shadows.sm }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <View style={{ flex: 1, paddingRight: Spacing.sm }}>
-                  <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, fontSize: Typography.fontSize.lg }}>
-                    ${displayAmount.toFixed(2)}
-                  </Text>
-                  <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.primary, marginTop: 4, fontWeight: Typography.fontWeight.medium }}>
-                    {p.service_type || 'Support shift'}
-                  </Text>
-                  {p.start_time ? (
-                    <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.secondary, marginTop: 2 }}>
-                      Shift: {formatDateDMY(p.start_time)}
-                    </Text>
-                  ) : null}
-                  {counterparty ? (
-                    <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.secondary, marginTop: 2 }}>
-                      {isWorker ? 'Client' : 'Worker'}: {counterparty}
-                    </Text>
-                  ) : null}
-                  <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: 2 }}>
-                    {formatPaymentKind(p.payment_kind, p.status)}
-                    {p.invoice_number ? ` · Invoice ${p.invoice_number}` : ''}
-                  </Text>
-                  {p.status_explanation ? (
-                    <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.secondary, marginTop: 4, lineHeight: 16 }}>
-                      {p.status_explanation}
-                    </Text>
-                  ) : null}
-                  {(p.payment_date || p.created_at) && (
-                    <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: 2 }}>
-                      {formatDateDMY(p.payment_date || p.created_at)}
-                    </Text>
-                  )}
-                </View>
-                <View style={{ backgroundColor: STATUS_COLORS[p.status] || Colors.text.muted, paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: Radius.full }}>
-                  <Text style={{ color: Colors.text.white, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.bold, textTransform: 'uppercase' }}>{p.status}</Text>
-                </View>
-              </View>
-              {isWorker && p.worker_payout > 0 && p.amount > 0 && Number(p.worker_payout) !== Number(p.amount) && (
-                <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.status.success, marginTop: Spacing.xs }}>
-                  Your payout (85%): ${Number(p.worker_payout).toFixed(2)}
-                </Text>
-              )}
-            </View>
-          );}}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator
           ListEmptyComponent={
-            <View style={{ padding: Spacing.xl, alignItems: 'center' }}>
+            <View style={{ paddingHorizontal: Spacing.xl, paddingVertical: Spacing.lg, alignItems: 'center' }}>
               <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.semibold, color: Colors.text.primary }}>No payments yet</Text>
               {isParticipant && (
                 <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: Spacing.xs, textAlign: 'center' }}>

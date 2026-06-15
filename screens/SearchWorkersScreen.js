@@ -9,6 +9,8 @@ import { getServiceTypeSuggestions } from '../constants/serviceTypes.js';
 import { VENDOR_CATEGORIES } from '../constants/vendorCategories.js';
 import { useGuardedNavigation } from '../hooks/useGuardedNavigation.js';
 import { VerificationBanner } from '../components/VerificationBanner.js';
+import { getMainTabFooterHeight } from '../components/MainTabFooter.js';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const toRad = (deg) => (Number(deg) * Math.PI) / 180;
 const distanceMeters = (lat1, lon1, lat2, lon2) => {
@@ -40,59 +42,59 @@ const WorkerCard = React.memo(({ worker, onPress, isVendorMode = false }) => (
       </View>
       <View style={{ flex: 1 }}>
         <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>
-          {worker.first_name} {worker.last_name}
+          {[worker.first_name, worker.last_name].filter(Boolean).join(' ') || 'Worker'}
         </Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
-          <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.status.warning }}>
+        <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: 2 }}>
+          <Text style={{ color: Colors.status.warning, fontWeight: Typography.fontWeight.semibold }}>
             {Number(worker.rating || 0).toFixed(1)}
           </Text>
-          <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.muted, marginLeft: Spacing.sm }}>
-            ({worker.total_reviews || 0} reviews)
-          </Text>
-        </View>
-        {worker.verification_status === 'verified' && (
+          {` (${worker.total_reviews || 0} reviews)`}
+        </Text>
+        {worker.verification_status === 'verified' ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
             <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.status.success }}>Verified</Text>
           </View>
-        )}
-        {isVendorMode && (
+        ) : null}
+        {isVendorMode ? (
           <View style={{ marginTop: 4 }}>
             <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.secondary }}>
-              Category: {(Array.isArray(worker.skills) && worker.skills.length > 0) ? worker.skills[0] : 'Not set'}
+              {`Category: ${(Array.isArray(worker.skills) && worker.skills.length > 0) ? worker.skills[0] : 'Not set'}`}
             </Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: 4 }}>
               <Text style={{ fontSize: Typography.fontSize.xs, color: worker.has_vendor_category ? Colors.status.success : Colors.status.error }}>
                 {worker.has_vendor_category ? 'Category added' : 'No category'}
               </Text>
-            <Text style={{ fontSize: Typography.fontSize.xs, color: worker.has_vendor_documents ? Colors.status.success : Colors.status.error }}>
-              {worker.has_vendor_documents ? 'Docs added' : 'No docs'}
-            </Text>
+              <Text style={{ fontSize: Typography.fontSize.xs, color: worker.has_vendor_documents ? Colors.status.success : Colors.status.error }}>
+                {worker.has_vendor_documents ? 'Docs added' : 'No docs'}
+              </Text>
             </View>
           </View>
-        )}
+        ) : null}
       </View>
       <View style={{ alignItems: 'flex-end' }}>
         <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.primary }}>
-          ${worker.hourly_rate || '—'}
+          {worker.hourly_rate != null ? `$${Number(worker.hourly_rate).toFixed(2)}` : '—'}
         </Text>
         <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted }}>/hour</Text>
-        {isVendorMode && worker.distance_m != null && (
+        {isVendorMode && worker.distance_m != null ? (
           <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.secondary, marginTop: 2 }}>
             {(Number(worker.distance_m) / 1000).toFixed(1)} km
           </Text>
-        )}
+        ) : null}
       </View>
     </View>
-    {worker.bio && (
+    {worker.bio ? (
       <Text numberOfLines={2} style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: Spacing.sm }}>
         {worker.bio}
       </Text>
-    )}
+    ) : null}
   </Pressable>
 ));
 
 export function SearchWorkersScreen() {
   const navigation = useGuardedNavigation();
+  const insets = useSafeAreaInsets();
+  const footerPad = getMainTabFooterHeight(insets) + Spacing.md;
   const [mode, setMode] = useState('worker');
   const [workers, setWorkers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -306,7 +308,7 @@ export function SearchWorkersScreen() {
         <FlatList
           data={filtered}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={{ padding: Spacing.md, paddingBottom: Spacing.xxl }}
+          contentContainerStyle={{ padding: Spacing.md, paddingBottom: footerPad }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
           initialNumToRender={10}
           maxToRenderPerBatch={8}

@@ -196,8 +196,9 @@ export function BookingDetailScreen({ route, navigation }) {
       const { data } = await api.get(`/api/bookings/${bookingId}`);
       if (data?.ok) {
         const b = data.booking;
-        // Backend returns timesheet separately at data.timesheet
         if (data.timesheet) b.timesheet = data.timesheet;
+        if (data.payment) b.payment = data.payment;
+        if (data.user_review) b.user_review = data.user_review;
         setBooking(b);
       }
     } catch (e) {}
@@ -599,11 +600,16 @@ export function BookingDetailScreen({ route, navigation }) {
   const isFundedPipeline = b.payment_pipeline === 'funded';
   const tsApproval = ts?.approval_status;
   const canReviewTimesheet = isParticipant && tsApproval === 'pending_review' && !!ts?.clock_out_time;
+  const isBookingPaid =
+    b.payment?.status === 'succeeded' || b.authorization_status === 'captured';
   const showLegacyPayButton =
     canPayForBooking
     && (b.status === 'confirmed' || b.status === 'completed')
     && !isPrivatePayPipeline
-    && !isFundedPipeline;
+    && !isFundedPipeline
+    && !isBookingPaid;
+  const hasUserReview = Boolean(b.user_review);
+  const canAddReview = b.status === 'completed' && !hasUserReview && !showReview;
   const needsCardAuthorization =
     isParticipant && isPrivatePayPipeline && b.authorization_status === 'required' && b.status === 'confirmed';
 
@@ -935,6 +941,14 @@ export function BookingDetailScreen({ route, navigation }) {
         </Pressable>
       )}
 
+      {isBookingPaid && isParticipant && !isPrivatePayPipeline && !isFundedPipeline && (
+        <AlertBanner
+          tone="success"
+          title="Payment completed"
+          message="This booking has already been paid. No further payment is required."
+        />
+      )}
+
       {showLegacyPayButton && (
         <StripePayBookingButton bookingId={bookingId} onPaid={loadBooking} />
       )}
@@ -967,10 +981,28 @@ export function BookingDetailScreen({ route, navigation }) {
       )}
 
       {/* Leave Review (worker + participant, completed) */}
-      {b.status === 'completed' && !showReview && (
+      {canAddReview && (
         <Pressable onPress={() => setShowReview(true)} style={({ pressed }) => ({ backgroundColor: Colors.status.warning, paddingVertical: Spacing.md, borderRadius: Radius.md, alignItems: 'center', marginBottom: Spacing.md, opacity: pressed ? 0.8 : 1 })}>
-          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>⭐ Complete & Leave Review</Text>
+          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>⭐ Add a Review</Text>
         </Pressable>
+      )}
+
+      {hasUserReview && (
+        <Section title="Your review">
+          <Text style={{ fontSize: Typography.fontSize.lg, marginBottom: Spacing.xs }}>
+            {'⭐'.repeat(Math.min(5, Math.max(1, Number(b.user_review.rating) || 0)))}
+          </Text>
+          {b.user_review.comment ? (
+            <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.primary, lineHeight: 22 }}>
+              {b.user_review.comment}
+            </Text>
+          ) : (
+            <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.muted }}>No written comment</Text>
+          )}
+          <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: Spacing.sm }}>
+            Submitted {new Date(b.user_review.created_at).toLocaleDateString()}
+          </Text>
+        </Section>
       )}
 
       {showReview && (

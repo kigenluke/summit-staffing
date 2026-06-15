@@ -1719,6 +1719,16 @@ function AssignedWorkerSummary({ shift, variant = 'card' }) {
   );
 }
 
+/** Hide the accepted/assigned worker from the applicants list (shown separately above). */
+function getVisibleShiftApplications(shift, applications) {
+  if (!Array.isArray(applications) || applications.length === 0) return [];
+  if (shift?.status !== 'filled') return applications;
+  const assignedUserId = shift.filled_by_worker_id;
+  return applications.filter(
+    (app) => app.status !== 'accepted' && (!assignedUserId || app.worker_id !== assignedUserId)
+  );
+}
+
 // ── Shift Card ────────────────────────────────────────────────────────────────
 const ShiftCard = React.memo(function ShiftCard({ shift, onApply, isWorker, isParticipant, onOpenApplications, onEditShift }) {
   const startDate = parseApiDate(shift.start_time);
@@ -1935,6 +1945,11 @@ export function AvailableShiftsScreen({ navigation, route }) {
   const [infoModal, setInfoModal] = useState({ visible: false, title: '', message: '' });
   const confirmActionRef = useRef(null);
   const focusShiftHandled = useRef(null);
+
+  const visibleApplications = useMemo(
+    () => getVisibleShiftApplications(selectedShift, applications),
+    [selectedShift, applications],
+  );
 
   const openInfo = useCallback((title, message = '') => {
     const body = typeof message === 'string' && message.trim() ? message.trim() : '';
@@ -2314,7 +2329,9 @@ export function AvailableShiftsScreen({ navigation, route }) {
               {selectedShift?.title || 'Shift Applicants'}
             </Text>
             <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: Spacing.xs, marginBottom: Spacing.md }}>
-              {selectedShift?.application_count || applications.length || 0} applicant(s)
+              {selectedShift?.status === 'filled'
+                ? 'Worker assigned to this shift'
+                : `${visibleApplications.length || selectedShift?.application_count || 0} applicant(s)`}
             </Text>
 
             {applicationsLoading ? (
@@ -2324,14 +2341,14 @@ export function AvailableShiftsScreen({ navigation, route }) {
                 {selectedShift?.status === 'filled' && (
                   <AssignedWorkerSummary shift={selectedShift} variant="compact" />
                 )}
-                {applications.length === 0 ? (
+                {visibleApplications.length === 0 ? (
                   <Text style={{ color: Colors.text.secondary }}>
                     {selectedShift?.status === 'filled'
                       ? 'Assigned worker is shown above.'
                       : 'No applicants yet for this shift.'}
                   </Text>
                 ) : (
-                  applications.map((app) => (
+                  visibleApplications.map((app) => (
                     <View
                       key={app.id}
                       style={{

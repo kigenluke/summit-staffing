@@ -11,6 +11,12 @@ import { cachedApiGet } from '../services/cachedApi.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { formatDateDMY, formatTime12h } from '../utils/dateFormat.js';
 import { workerPayoutFromTotal } from '../utils/platformFee.js';
+import {
+  getBookingDisplayStatus,
+  isHomeUpcomingBooking,
+  navigateToBookingOrShift,
+  STATUS_TONE_COLORS,
+} from '../utils/bookingDisplayStatus.js';
 import { VerificationBanner } from '../components/VerificationBanner.js';
 import { CoordinatorReturnBanner } from '../components/CoordinatorReturnBanner.js';
 import { NavChevron } from '../components/NavChevron.js';
@@ -92,11 +98,19 @@ export function DashboardScreen() {
       const { data } = bookingsRes;
       if (data?.ok && data?.bookings) {
         const bookings = data.bookings;
-        setUpcomingBookings(bookings.filter(b => b.status === 'confirmed' || b.status === 'pending').slice(0, 3));
+        const now = Date.now();
+        const hasFutureEnd = (b) => {
+          const endMs = b.end_time ? new Date(b.end_time).getTime() : null;
+          return endMs == null || endMs >= now;
+        };
+
+        setUpcomingBookings(bookings.filter(isHomeUpcomingBooking).slice(0, 3));
         setStats({
-          upcoming: bookings.filter(b => b.status === 'confirmed').length,
-          completed: bookings.filter(b => b.status === 'completed').length,
-          pending: bookings.filter(b => b.status === 'pending').length,
+          upcoming: bookings.filter((b) => b.status === 'confirmed' && hasFutureEnd(b)).length,
+          completed: bookings.filter((b) => b.status === 'completed').length,
+          pending: bookings.filter(
+            (b) => (b.status === 'pending' || b.is_open_shift || b.status === 'open') && hasFutureEnd(b)
+          ).length,
         });
 
         if (isWorker) {
@@ -452,13 +466,15 @@ export function DashboardScreen() {
 
       {/* Upcoming Bookings */}
       <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.md }}>
-        Recent Bookings
+        {isParticipant ? 'Upcoming Bookings' : 'Recent Bookings'}
       </Text>
       {loading ? (
         <ActivityIndicator size="small" color={Colors.primary} />
       ) : upcomingBookings.length === 0 ? (
         <Card>
-          <Text style={{ color: Colors.text.secondary, textAlign: 'center' }}>No bookings yet</Text>
+          <Text style={{ color: Colors.text.secondary, textAlign: 'center' }}>
+            {isParticipant ? 'No upcoming bookings' : 'No bookings yet'}
+          </Text>
           {!isWorker && (
             <Pressable onPress={() => navigation.navigate('Search')} style={{ marginTop: Spacing.md, alignItems: 'center' }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
@@ -469,15 +485,25 @@ export function DashboardScreen() {
           )}
         </Card>
       ) : (
-        upcomingBookings.map((b) => (
-          <Pressable key={b.id} onPress={() => navigation.navigate('BookingDetail', { bookingId: b.id })}>
+        upcomingBookings.map((b) => {
+          const display = getBookingDisplayStatus(b);
+          const badgeColor = STATUS_TONE_COLORS[display.tone] || Colors.text.muted;
+          const displayTitle = b.is_open_shift ? (b.title || b.service_type) : b.service_type;
+
+          return (
+          <Pressable key={b.id} onPress={() => navigateToBookingOrShift(navigation, b)}>
           <Card style={{ marginBottom: Spacing.sm }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <View style={{ flex: 1 }}>
-                <Text style={{ fontWeight: Typography.fontWeight.semibold, color: Colors.text.primary }}>{b.service_type}</Text>
+                <Text style={{ fontWeight: Typography.fontWeight.semibold, color: Colors.text.primary }}>{displayTitle}</Text>
                 <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: 2 }}>
                   {formatDateDMY(b.start_time)} • {formatTime12h(b.start_time)}
                 </Text>
+                {isParticipant && b.is_open_shift && (
+                  <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.status.warning, marginTop: 4, fontWeight: Typography.fontWeight.medium }}>
+                    {(b.application_count || 0) > 0 ? `${b.application_count} applicant(s)` : 'Waiting for applications'}
+                  </Text>
+                )}
                 {isWorker && (b.status === 'confirmed' || b.status === 'in_progress') && (b.participant_first_name || b.participant_last_name) ? (
                   <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.primary, marginTop: 4, fontWeight: Typography.fontWeight.medium }}>
                     Client: {[b.participant_first_name, b.participant_last_name].filter(Boolean).join(' ')}
@@ -485,17 +511,18 @@ export function DashboardScreen() {
                 ) : null}
               </View>
               <View style={{
-                backgroundColor: b.status === 'confirmed' ? Colors.status.success : Colors.status.warning,
+                backgroundColor: badgeColor,
                 paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: Radius.full,
               }}>
                 <Text style={{ color: Colors.text.white, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.semibold }}>
-                  {b.status?.toUpperCase()}
+                  {display.label.toUpperCase()}
                 </Text>
               </View>
             </View>
           </Card>
           </Pressable>
-        ))
+          );
+        })
       )}
 
     </ScrollView>

@@ -14,7 +14,7 @@ import {
   getNotificationKey,
   isNotificationUnread,
 } from '../utils/notificationHelpers.js';
-import { useNotificationStore } from '../store/notificationStore.js';
+import { refreshUnreadCount, setUnreadCount, adjustUnreadCount } from '../store/notificationStore.js';
 
 const getRelativeTime = (dateStr) => {
   const now = new Date();
@@ -36,8 +36,6 @@ export function NotificationsScreen({ navigation }) {
   const [notifications, setNotifications] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
-  const refreshUnreadCount = useNotificationStore((s) => s.refreshUnreadCount);
-  const setUnreadCount = useNotificationStore((s) => s.setUnreadCount);
 
   const loadNotifications = useCallback(async () => {
     try {
@@ -68,7 +66,7 @@ export function NotificationsScreen({ navigation }) {
       prev.map((n) => (getNotificationKey(n) === key ? { ...n, read: true } : n))
     );
     if (unreadBefore > 0) {
-      useNotificationStore.getState().adjustUnreadCount(-unreadBefore);
+      adjustUnreadCount(-unreadBefore);
     }
 
     try {

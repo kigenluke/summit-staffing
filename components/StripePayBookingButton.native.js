@@ -1,11 +1,20 @@
 import React, { useState } from 'react';
-import { Pressable, Text, ActivityIndicator, Alert } from 'react-native';
+import { Pressable, Text, ActivityIndicator, Alert, Platform } from 'react-native';
 import { useStripe } from '@stripe/stripe-react-native';
 import { api } from '../services/api.js';
 import { getStripePublishableKeyForNative } from '../constants/stripePublic';
 import { Colors, Spacing, Typography, Radius } from '../constants/theme.js';
 
 const STRIPE_RETURN_URL = 'summitstaffing://stripe-redirect';
+
+function showUserMessage(title, message) {
+  const body = message ? String(message) : '';
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && typeof window.alert === 'function') {
+    window.alert(body ? `${title}\n\n${body}` : title);
+    return;
+  }
+  Alert.alert(title, body || undefined);
+}
 
 function StripePayBookingButtonInner({ bookingId, onPaid }) {
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
@@ -16,10 +25,13 @@ function StripePayBookingButtonInner({ bookingId, onPaid }) {
     try {
       const { data, error } = await api.post('/api/payments/create-intent', { bookingId });
       if (error || !data?.client_secret) {
-        Alert.alert(
+        showUserMessage(
           'Could not start payment',
           error?.message || 'Please try again shortly. If this keeps happening, contact support.',
         );
+        if (/already paid/i.test(error?.message || '')) {
+          onPaid?.();
+        }
         return;
       }
 

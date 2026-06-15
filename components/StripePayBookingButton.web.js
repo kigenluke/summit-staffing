@@ -1,7 +1,16 @@
 import React, { useState } from 'react';
-import { Pressable, Text, ActivityIndicator, Alert, Linking } from 'react-native';
+import { Pressable, Text, ActivityIndicator, Alert, Linking, Platform } from 'react-native';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius } from '../constants/theme.js';
+
+function showUserMessage(title, message) {
+  const body = message ? String(message) : '';
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && typeof window.alert === 'function') {
+    window.alert(body ? `${title}\n\n${body}` : title);
+    return;
+  }
+  Alert.alert(title, body || undefined);
+}
 
 /**
  * Web: Stripe Checkout in browser (Hosted Checkout).
@@ -14,20 +23,23 @@ export function StripePayBookingButton({ bookingId, onPaid }) {
     try {
       const { data, error } = await api.post('/api/payments/checkout-session', { bookingId });
       if (error) {
-        Alert.alert(
+        showUserMessage(
           'Could not start payment',
           error.message || 'Please try again shortly. If this keeps happening, contact support.',
         );
+        if (/already paid/i.test(error.message || '')) {
+          onPaid?.();
+        }
         return;
       }
       const checkoutUrl = data?.checkout_url;
       if (!checkoutUrl) {
-        Alert.alert('Payment', 'Checkout link was not returned.');
+        showUserMessage('Payment', 'Checkout link was not returned.');
         return;
       }
       const canOpen = await Linking.canOpenURL(checkoutUrl);
       if (!canOpen) {
-        Alert.alert('Payment', 'Could not open the payment page in this browser.');
+        showUserMessage('Payment', 'Could not open the payment page in this browser.');
         return;
       }
       await Linking.openURL(checkoutUrl);

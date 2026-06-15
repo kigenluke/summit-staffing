@@ -195,7 +195,8 @@ const getInvoicePdfBuffer = async (invoiceId) => {
   throw new Error('Could not generate invoice PDF');
 };
 
-const emailInvoiceToPlanManager = async (invoiceId) => {
+const emailInvoiceToPlanManager = async (invoiceId, options = {}) => {
+  const isResend = options.resend === true;
   const detailsRes = await pool.query(
     `SELECT
        i.*,
@@ -237,6 +238,7 @@ const emailInvoiceToPlanManager = async (invoiceId) => {
 
   const html = `
     <p>Hello${row.plan_manager_name ? ` ${row.plan_manager_name}` : ''},</p>
+    ${isResend ? '<p><em>This is a resent copy of your invoice with full details and an updated PDF attachment.</em></p>' : ''}
     <p>Please find attached NDIS invoice <strong>${row.invoice_number}</strong> for plan-managed payment.</p>
     <table cellpadding="6" cellspacing="0" style="border-collapse:collapse;margin:12px 0;font-size:14px;">
       <tr><td><strong>Participant</strong></td><td>${participantName}${row.participant_ndis ? ` (NDIS ${row.participant_ndis})` : ''}</td></tr>
@@ -252,10 +254,16 @@ const emailInvoiceToPlanManager = async (invoiceId) => {
     ${bsb && acct ? `<p><strong>Bank transfer:</strong> BSB ${bsb} · Account ${acct} · ${acctName}</p>` : '<p>Use the EFT reference above when paying by bank transfer so we can reconcile your payment automatically.</p>'}
     <p>The full line-item breakdown is in the attached PDF.</p>
   `;
-  await sendInvoiceEmail(to, row.invoice_number, pdfBuffer, { html, subject: `NDIS Invoice ${row.invoice_number} - Summit Staffing` });
+  const subject = isResend
+    ? `NDIS Invoice ${row.invoice_number} (resend) - Summit Staffing`
+    : `NDIS Invoice ${row.invoice_number} - Summit Staffing`;
+  await sendInvoiceEmail(to, row.invoice_number, pdfBuffer, { html, subject });
 
-  await pool.query("UPDATE invoices SET status = 'sent' WHERE id = $1", [invoiceId]);
-  return { to, eftReference: eftRef };
+  await pool.query(
+    "UPDATE invoices SET status = 'sent' WHERE id = $1 AND status IN ('draft', 'sent')",
+    [invoiceId]
+  );
+  return { to, eftReference: eftRef, resent: isResend };
 };
 
 /** Stripe Invoice for reconciliation (metadata carries EFT reference). */

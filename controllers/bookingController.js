@@ -18,24 +18,28 @@ const respondValidation = (req, res) => {
   return false;
 };
 
-/** Unassigned posted shifts appear in Bookings as pending (participant view). */
-const mapOpenShiftToPendingBooking = (shift) => ({
-  id: shift.id,
-  service_type: shift.service_type,
-  title: shift.title,
-  start_time: shift.start_time,
-  end_time: shift.end_time,
-  status: 'pending',
-  is_open_shift: true,
-  worker_id: null,
-  worker_first_name: '',
-  worker_last_name: '',
-  application_count: shift.application_count || 0,
-  location_address: shift.location,
-  hourly_rate: shift.hourly_rate,
-  created_at: shift.created_at,
-  updated_at: shift.updated_at,
-});
+/** Unassigned posted shifts appear in Bookings as open (participant view). */
+const mapOpenShiftToPendingBooking = (shift) => {
+  const endMs = shift.end_time ? new Date(shift.end_time).getTime() : null;
+  const isPast = endMs != null && endMs < Date.now();
+  return {
+    id: shift.id,
+    service_type: shift.service_type,
+    title: shift.title,
+    start_time: shift.start_time,
+    end_time: shift.end_time,
+    status: isPast ? 'expired' : 'open',
+    is_open_shift: true,
+    worker_id: null,
+    worker_first_name: '',
+    worker_last_name: '',
+    application_count: shift.application_count || 0,
+    location_address: shift.location,
+    hourly_rate: shift.hourly_rate,
+    created_at: shift.created_at,
+    updated_at: shift.updated_at,
+  };
+};
 
 const updateTimesheetNotes = async (req, res) => {
   try {
@@ -403,7 +407,30 @@ const getBookingById = async (req, res) => {
 
     const timesheetRes = await pool.query('SELECT * FROM booking_timesheets WHERE booking_id = $1 LIMIT 1', [id]);
 
-    return res.status(200).json({ ok: true, booking, timesheet: timesheetRes.rows[0] || null });
+    const paymentRes = await pool.query(
+      `SELECT id, status, amount, payment_date, created_at
+       FROM payments
+       WHERE booking_id = $1 AND status = 'succeeded'
+       ORDER BY payment_date DESC NULLS LAST, created_at DESC
+       LIMIT 1`,
+      [id]
+    );
+
+    const reviewRes = await pool.query(
+      `SELECT id, rating, comment, incident_reported, created_at
+       FROM reviews
+       WHERE booking_id = $1 AND reviewer_id = $2
+       LIMIT 1`,
+      [id, req.user.userId]
+    );
+
+    return res.status(200).json({
+      ok: true,
+      booking,
+      timesheet: timesheetRes.rows[0] || null,
+      payment: paymentRes.rows[0] || null,
+      user_review: reviewRes.rows[0] || null,
+    });
   } catch (err) {
     return res.status(500).json({ ok: false, error: 'Failed to fetch booking' });
   }

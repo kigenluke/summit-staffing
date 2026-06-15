@@ -3,9 +3,10 @@
  */
 
 import React from 'react';
+import { View, Pressable } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Pressable } from 'react-native';
 import { NavChevron } from '../components/NavChevron.js';
+import { MainTabFooter } from '../components/MainTabFooter.js';
 import { useAuthStore } from '../store/authStore.js';
 import { AuthStack } from './AuthStack';
 import { MainTabs } from './MainTabs';
@@ -51,7 +52,9 @@ export function AppNavigator() {
 
   return (
     <WorkerGateProvider>
-    <Stack.Navigator
+      <View style={{ flex: 1 }}>
+        <View style={{ flex: 1 }}>
+          <Stack.Navigator
       screenOptions={({ navigation }) => ({
         headerStyle: { backgroundColor: Colors.primary },
         headerTintColor: Colors.text.white,
@@ -106,7 +109,10 @@ export function AppNavigator() {
       <Stack.Screen name="ParticipantSearchCoordinator" component={ParticipantSearchCoordinatorScreen} options={{ title: 'Invite coordinator' }} />
       <Stack.Screen name="ParticipantCompliance" component={ParticipantComplianceScreen} options={{ title: 'Upload documents' }} />
       <Stack.Screen name="ReferSomeone" component={ReferSomeoneScreen} options={{ title: 'Refer someone' }} />
-    </Stack.Navigator>
+          </Stack.Navigator>
+        </View>
+        <MainTabFooter />
+      </View>
     </WorkerGateProvider>
   );
 }

@@ -11,7 +11,7 @@ import { api } from '../services/api.js';
 import { cachedApiGet } from '../services/cachedApi.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { useWorkerGate } from '../context/WorkerGateContext.js';
-import { useNotificationStore } from '../store/notificationStore.js';
+import { useNotificationStore, refreshUnreadCount } from '../store/notificationStore.js';
 import { showVerificationRequiredAlert } from '../utils/verificationPrompt.js';
 import { ProfilePhotoPicker } from '../components/ProfilePhotoPicker.js';
 import { CoordinatorReturnBanner } from '../components/CoordinatorReturnBanner.js';
@@ -72,7 +72,6 @@ export function ProfileScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const unreadCount = useNotificationStore((s) => s.unreadCount);
-  const refreshUnreadCount = useNotificationStore((s) => s.refreshUnreadCount);
   const [profileImageUrl, setProfileImageUrl] = useState(null);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [incidentMenuOpen, setIncidentMenuOpen] = useState(false);
@@ -131,13 +130,13 @@ export function ProfileScreen({ navigation }) {
     setLoading(false);
   }, [isWorker, isParticipant, isCoordinator, syncFromWorkerProfile, syncFromParticipantProfile]);
 
-  useEffect(() => { loadProfile(false); refreshUnreadCount(); }, [loadProfile, refreshUnreadCount]);
+  useEffect(() => { loadProfile(false); refreshUnreadCount(); }, [loadProfile]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await Promise.all([loadProfile(true), refreshUnreadCount(true)]);
     setRefreshing(false);
-  }, [loadProfile, refreshUnreadCount]);
+  }, [loadProfile]);
 
   const handleSignOut = () => {
     if (Platform.OS === 'web') {

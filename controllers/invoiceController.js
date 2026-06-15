@@ -396,8 +396,9 @@ const sendInvoiceEmailHandler = async (req, res) => {
     const access = await assertInvoiceAccess(req, req.params.id);
     if (!access.ok) return res.status(access.status).json({ ok: false, error: access.error });
 
-    const emailResult = await emailInvoiceToPlanManager(access.invoice.id);
-    return res.status(200).json({ ok: true, emailedTo: emailResult.to });
+    const isResend = req.query.resend === 'true' || req.body?.resend === true;
+    const emailResult = await emailInvoiceToPlanManager(access.invoice.id, { resend: isResend });
+    return res.status(200).json({ ok: true, emailedTo: emailResult.to, resent: emailResult.resent === true });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message || 'Failed to send invoice email' });
   }
