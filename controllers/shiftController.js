@@ -357,6 +357,18 @@ const createShift = async (req, res) => {
     const shiftLat = location_lat != null && location_lat !== '' ? Number(location_lat) : null;
     const shiftLng = location_lng != null && location_lng !== '' ? Number(location_lng) : null;
 
+    const dupRes = await pool.query(
+      `SELECT * FROM shifts
+       WHERE participant_id = $1 AND title = $2 AND start_time = $3 AND end_time = $4
+         AND created_at > now() - interval '3 minutes'
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [userId, title, start_time, end_time]
+    );
+    if (dupRes.rowCount > 0) {
+      return res.status(200).json({ ok: true, shift: dupRes.rows[0], duplicate: true });
+    }
+
     const { rows } = await pool.query(
       `INSERT INTO shifts (
          participant_id, title, description, service_type, start_time, end_time, hourly_rate, location,
@@ -539,9 +551,10 @@ const acceptApplication = async (req, res) => {
            high_intensity,
            travel_distance_km,
            sleepover_flat_amount,
-           travel_rate_per_km
+           travel_rate_per_km,
+           source_shift_id
          )
-         VALUES ($1, $2, $3, $4, $5, 'confirmed', $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+         VALUES ($1, $2, $3, $4, $5, 'confirmed', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
         [
           participant.id,
           workerRes.rows[0].id,
@@ -557,6 +570,7 @@ const acceptApplication = async (req, res) => {
           shift.travel_distance_km != null ? Number(shift.travel_distance_km) : null,
           shift.sleepover_flat_amount != null ? Number(shift.sleepover_flat_amount) : null,
           shift.travel_rate_per_km != null ? Number(shift.travel_rate_per_km) : TRAVEL_NON_LABOUR_PER_KM,
+          id,
         ]
       );
     }

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
+import { cachedApiGet } from '../services/cachedApi.js';
 import {
   getComplianceProgress,
   getExpiredComplianceDocuments,
@@ -70,7 +71,7 @@ export function WorkerGateProvider({ children }) {
     });
   }, []);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (force = false) => {
     if (!isGatedRole) {
       setState({
         loaded: true,
@@ -85,7 +86,7 @@ export function WorkerGateProvider({ children }) {
 
     try {
       if (isWorker) {
-        const { data } = await api.get('/api/workers/me');
+        const { data } = await cachedApiGet('/api/workers/me', 60000, { force });
         if (data?.ok && data?.worker) {
           applyFromProfile(data.worker, data.documents || [], REQUIRED_WORKER_COMPLIANCE_DOCS);
         } else {

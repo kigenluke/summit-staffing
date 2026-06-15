@@ -4,6 +4,7 @@ const pool = require('../config/database');
 const { sendEmail } = require('../services/emailService');
 const { uploadFile } = require('../services/s3Service');
 const { replaceStaleComplianceUpload } = require('../utils/complianceDocumentDb');
+const { unassignWorkerAndReopenShift, listAssignedShifts } = require('../services/adminShiftService');
 
 const respondValidation = (req, res) => {
   const errors = validationResult(req);
@@ -632,6 +633,39 @@ const uploadUserComplianceDocument = async (req, res) => {
   }
 };
 
+const getAssignedShifts = async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 50, 100);
+    const offset = Math.max(Number(req.query.offset) || 0, 0);
+    const upcomingOnly = req.query.upcomingOnly !== 'false';
+    const result = await listAssignedShifts({ limit, offset, upcomingOnly });
+    return res.status(200).json(result);
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message || 'Failed to list assigned shifts' });
+  }
+};
+
+const unassignWorkerFromShift = async (req, res) => {
+  try {
+    if (respondValidation(req, res)) return;
+
+    const reason = req.body?.reason ? String(req.body.reason).trim() : 'Removed by Summit Staffing office';
+    const notifyParticipant = req.body?.notifyParticipant !== false;
+
+    const result = await unassignWorkerAndReopenShift({
+      bookingId: req.params.bookingId || null,
+      shiftId: req.params.shiftId || null,
+      reason,
+      notifyParticipant,
+    });
+
+    return res.status(200).json(result);
+  } catch (err) {
+    const status = err.status || 500;
+    return res.status(status).json({ ok: false, error: err.message || 'Failed to unassign worker' });
+  }
+};
+
 module.exports = {
   getDashboardStats,
   getPendingDocuments,
@@ -643,5 +677,7 @@ module.exports = {
   uploadUserComplianceDocument,
   suspendUser,
   getRevenueReport,
-  getBookingMetrics
+  getBookingMetrics,
+  getAssignedShifts,
+  unassignWorkerFromShift,
 };

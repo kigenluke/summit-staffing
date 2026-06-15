@@ -49,10 +49,23 @@ export function InvoicesScreen() {
                     #{inv.invoice_number}
                   </Text>
                   <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginTop: 2 }}>
-                    {inv.service_description || 'NDIS Service'}
+                    {inv.service_description || inv.service_type || 'NDIS Service'}
                   </Text>
+                  {(inv.participant_first_name || inv.worker_first_name) && (
+                    <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.secondary, marginTop: 4 }}>
+                      {inv.participant_first_name || inv.participant_last_name
+                        ? `Participant: ${[inv.participant_first_name, inv.participant_last_name].filter(Boolean).join(' ')}`
+                        : ''}
+                      {inv.worker_first_name ? `${inv.participant_first_name ? ' · ' : ''}Worker: ${[inv.worker_first_name, inv.worker_last_name].filter(Boolean).join(' ')}` : ''}
+                    </Text>
+                  )}
+                  {inv.ndis_support_item_code ? (
+                    <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: 2 }}>
+                      NDIS item: {inv.ndis_support_item_code}
+                    </Text>
+                  ) : null}
                   {inv.service_date && <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: 2 }}>
-                     {formatDateDMY(inv.service_date)}
+                     Service date: {formatDateDMY(inv.service_date)}
                   </Text>}
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
@@ -66,9 +79,13 @@ export function InvoicesScreen() {
               </View>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: Spacing.sm, paddingTop: Spacing.sm, borderTopWidth: 1, borderTopColor: Colors.borderLight }}>
                 <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted }}>
-                  {inv.hours ? `${inv.hours}h @ $${inv.rate}/hr` : ''}
+                  {inv.hours ? `${Number(inv.hours).toFixed(2)}h @ $${Number(inv.rate || 0).toFixed(2)}/hr` : ''}
                 </Text>
-                {inv.gst > 0 && <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted }}>GST: ${Number(inv.gst).toFixed(2)}</Text>}
+                {inv.eft_reference ? (
+                  <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted }}>Ref: {inv.eft_reference}</Text>
+                ) : inv.gst > 0 ? (
+                  <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted }}>GST: ${Number(inv.gst).toFixed(2)}</Text>
+                ) : null}
               </View>
               {inv.status === 'draft' && (
                 <Pressable onPress={() => sendInvoice(inv.id)}

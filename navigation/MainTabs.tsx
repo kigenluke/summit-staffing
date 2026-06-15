@@ -3,7 +3,7 @@
  */
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text, Pressable, View, ActivityIndicator } from 'react-native';
+import { Text, Pressable, View } from 'react-native';
 import { NavChevron } from '../components/NavChevron.js';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { DashboardScreen } from '../screens/DashboardScreen.js';
@@ -18,30 +18,20 @@ import { useAuthStore } from '../store/authStore.js';
 import { useAccountAccess } from '../context/WorkerGateContext.js';
 import { showVerificationRequiredAlert, showExpiredDocumentsAlert } from '../utils/verificationPrompt.js';
 import { DocumentExpiryScreen } from '../screens/DocumentExpiryScreen.js';
-import { api } from '../services/api.js';
+import { useNotificationStore } from '../store/notificationStore.js';
 
 const Tab = createBottomTabNavigator();
 
 function HomeHeaderRight() {
   const nav = useNavigation();
-  const [unreadCount, setUnreadCount] = React.useState(0);
-
-  const loadUnreadCount = React.useCallback(async () => {
-    try {
-      const { data } = await api.get('/api/notifications/unread-count');
-      if (data?.ok) setUnreadCount(Math.max(0, Number(data.count) || 0));
-    } catch (_) {}
-  }, []);
-
-  React.useEffect(() => {
-    loadUnreadCount();
-  }, [loadUnreadCount]);
+  const unreadCount = useNotificationStore((s) => s.unreadCount);
+  const refreshUnreadCount = useNotificationStore((s) => s.refreshUnreadCount);
 
   useFocusEffect(
     React.useCallback(() => {
-      loadUnreadCount();
+      refreshUnreadCount();
       return () => {};
-    }, [loadUnreadCount])
+    }, [refreshUnreadCount])
   );
 
   return (
@@ -178,7 +168,7 @@ function AvailabilityHeaderLeft() {
 
 export function MainTabs() {
   const { user } = useAuthStore();
-  const { restricted, accessChecking, accessPhase } = useAccountAccess();
+  const { restricted, accessPhase } = useAccountAccess();
   const isWorker = user?.role === 'worker';
   const isCoordinator = user?.role === 'coordinator';
   const isGatedRole = isWorker;
@@ -187,17 +177,10 @@ export function MainTabs() {
     return <DocumentExpiryScreen />;
   }
 
-  if (isGatedRole && accessChecking) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background }}>
-        <ActivityIndicator size="large" color={Colors.primary} />
-        <Text style={{ marginTop: 12, color: Colors.text.secondary, fontSize: 14 }}>Checking your account…</Text>
-      </View>
-    );
-  }
-
   return (
     <Tab.Navigator
+      lazy
+      detachInactiveScreens
       screenOptions={({ route }) => ({
         headerShown: true,
         headerStyle: { backgroundColor: Colors.primary },

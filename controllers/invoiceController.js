@@ -1,11 +1,9 @@
 const { validationResult } = require('express-validator');
 
-const axios = require('axios');
-
 const pool = require('../config/database');
 const { getNDISItemCode } = require('../utils/ndisHelper');
 const { generateInvoicePDF } = require('../services/pdfService');
-const { sendInvoiceEmail } = require('../services/emailService');
+const { emailInvoiceToPlanManager } = require('../services/invoicePipelineService');
 
 const respondValidation = (req, res) => {
   const errors = validationResult(req);
@@ -253,10 +251,13 @@ const getInvoices = async (req, res) => {
          b.start_time,
          b.end_time,
          p.first_name AS participant_first_name,
-         p.last_name AS participant_last_name
+         p.last_name AS participant_last_name,
+         w.first_name AS worker_first_name,
+         w.last_name AS worker_last_name
        FROM invoices i
        JOIN bookings b ON b.id = i.booking_id
        JOIN participants p ON p.id = b.participant_id
+       JOIN workers w ON w.id = b.worker_id
        ${whereSql}
        ORDER BY i.created_at DESC
        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
@@ -395,79 +396,10 @@ const sendInvoiceEmailHandler = async (req, res) => {
     const access = await assertInvoiceAccess(req, req.params.id);
     if (!access.ok) return res.status(access.status).json({ ok: false, error: access.error });
 
-    const detailsRes = await pool.query(
-      `SELECT
-        i.*, b.participant_id,
-        p.plan_manager_email,
-        u.email AS participant_email
-      FROM invoices i
-      JOIN bookings b ON b.id = i.booking_id
-      JOIN participants p ON p.id = b.participant_id
-      JOIN users u ON u.id = p.user_id
-      WHERE i.id = $1
-      LIMIT 1`,
-      [access.invoice.id]
-    );
-
-    if (detailsRes.rowCount === 0) {
-      return res.status(404).json({ ok: false, error: 'Invoice not found' });
-    }
-
-    const row = detailsRes.rows[0];
-    const to = row.plan_manager_email || row.participant_email;
-
-    if (!to) {
-      return res.status(400).json({ ok: false, error: 'No recipient email found for participant/plan manager' });
-    }
-
-    // Ensure we have a PDF buffer to attach
-    let pdfBuffer = null;
-    if (row.pdf_url) {
-      try {
-        const download = await axios.get(row.pdf_url, { responseType: 'arraybuffer', timeout: 20000 });
-        pdfBuffer = Buffer.from(download.data);
-      } catch (err) {
-        pdfBuffer = null;
-      }
-    }
-
-    if (!pdfBuffer) {
-      const totalAmount2 = Number(row.total || 0);
-      const workerAmount2 = Number((totalAmount2 * 0.85).toFixed(2));
-      const platformFee2 = Number((totalAmount2 * 0.15).toFixed(2));
-
-      const pdf = await generateInvoicePDF({
-        invoice_number: row.invoice_number,
-        issue_date: new Date().toISOString().slice(0, 10),
-        due_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
-        worker_name: '',
-        worker_abn: row.worker_abn || '',
-        participant_name: '',
-        participant_ndis: row.participant_ndis || '',
-        plan_manager_name: '',
-        plan_manager_email: row.plan_manager_email || '',
-        service_datetime: row.service_date ? String(row.service_date) : '',
-        service_description: row.service_description || '',
-        ndis_support_item_code: row.ndis_support_item_code || '',
-        hours: Number(row.hours || 0).toFixed(2),
-        rate: row.rate,
-        subtotal: row.subtotal,
-        gst: row.gst,
-        total: row.total,
-        worker_amount: workerAmount2,
-        platform_fee: platformFee2
-      });
-
-      pdfBuffer = pdf.buffer;
-      await pool.query('UPDATE invoices SET pdf_url = $2 WHERE id = $1', [row.id, pdf.url]);
-    }
-
-    await sendInvoiceEmail(to, row.invoice_number, pdfBuffer);
-    await pool.query("UPDATE invoices SET status = 'sent' WHERE id = $1", [row.id]);
-
-    return res.status(200).json({ ok: true });
+    const emailResult = await emailInvoiceToPlanManager(access.invoice.id);
+    return res.status(200).json({ ok: true, emailedTo: emailResult.to });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: 'Failed to send invoice email' });
+    return res.status(500).json({ ok: false, error: err.message || 'Failed to send invoice email' });
   }
 };
 

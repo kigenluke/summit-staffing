@@ -5,6 +5,7 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { Platform } from 'react-native';
+import { clearApiGetCache } from '../services/cachedApi.js';
 
 const AUTH_KEY = 'summit_auth';
 const IMPERSONATION_STASH_KEY = 'summit_coordinator_impersonation_stash';
@@ -175,6 +176,7 @@ export function setAuth(token, user) {
 
 export function logout() {
   clearCoordinatorImpersonationStashSync();
+  clearApiGetCache();
   setState({ token: null, user: null });
 }
 

@@ -782,8 +782,15 @@ const clockOut = async (req, res) => {
       }
 
       if (timesheetRes.rows[0].clock_out_time) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({ ok: false, error: 'Already clocked out' });
+        const currentBooking = await client.query('SELECT * FROM bookings WHERE id = $1 LIMIT 1', [id]);
+        const currentTs = await client.query('SELECT * FROM booking_timesheets WHERE booking_id = $1 LIMIT 1', [id]);
+        await client.query('COMMIT');
+        return res.status(200).json({
+          ok: true,
+          already_clocked_out: true,
+          booking: currentBooking.rows[0],
+          timesheet: currentTs.rows[0] || null,
+        });
       }
 
       const clockInTime = new Date(timesheetRes.rows[0].clock_in_time);
@@ -807,7 +814,7 @@ const clockOut = async (req, res) => {
       const { commission: commissionAmount } = computePlatformFeeBreakdown(totalAmount);
 
       const updatedBooking = await client.query(
-        'UPDATE bookings SET total_amount = $2, commission_amount = $3, updated_at = now() WHERE id = $1 RETURNING *',
+        "UPDATE bookings SET status = 'completed', total_amount = $2, commission_amount = $3, updated_at = now() WHERE id = $1 RETURNING *",
         [id, totalAmount, commissionAmount]
       );
 

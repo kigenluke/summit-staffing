@@ -91,4 +91,40 @@ router.get(
 
 router.get('/reports/bookings', [auth, checkAdmin], adminController.getBookingMetrics);
 
+router.get(
+  '/shifts/assigned',
+  [
+    auth,
+    checkAdmin,
+    query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
+    query('offset').optional().isInt({ min: 0 }).toInt(),
+    query('upcomingOnly').optional().isIn(['true', 'false']),
+  ],
+  adminController.getAssignedShifts
+);
+
+router.post(
+  '/bookings/:bookingId/unassign-worker',
+  [
+    auth,
+    checkAdmin,
+    param('bookingId').isUUID(),
+    body('reason').optional().isString().isLength({ max: 500 }),
+    body('notifyParticipant').optional().isBoolean(),
+  ],
+  adminController.unassignWorkerFromShift
+);
+
+router.post(
+  '/shifts/:shiftId/unassign-worker',
+  [
+    auth,
+    checkAdmin,
+    param('shiftId').isUUID(),
+    body('reason').optional().isString().isLength({ max: 500 }),
+    body('notifyParticipant').optional().isBoolean(),
+  ],
+  adminController.unassignWorkerFromShift
+);
+
 module.exports = router;

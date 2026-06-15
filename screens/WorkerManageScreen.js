@@ -5,6 +5,7 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef, createElement } from 'react';
 import { View, Text, ScrollView, Pressable, TextInput, Alert, ActivityIndicator, RefreshControl, Platform, Modal } from 'react-native';
 import { api } from '../services/api.js';
+import { cachedApiGet, invalidateCachedGet } from '../services/cachedApi.js';
 import { useAuthStore } from '../store/authStore.js';
 import { useAccountAccess } from '../context/WorkerGateContext.js';
 import { ComplianceDocumentsPanel } from '../components/ComplianceDocumentsPanel.js';
@@ -146,12 +147,12 @@ export function WorkerManageScreen({ route, navigation }) {
     }
   }, [route?.params?.focusDocument, worker, scrollToDocuments]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     try {
       // If no workerId passed, fetch from /me first
       let wId = workerId;
       if (!wId) {
-        const meRes = await api.get('/api/workers/me');
+        const meRes = await cachedApiGet('/api/workers/me', 60000, { force });
         if (meRes.data?.ok && meRes.data?.worker) {
           const w = meRes.data.worker;
           // /me returns skills, availability, documents as separate fields
@@ -174,7 +175,7 @@ export function WorkerManageScreen({ route, navigation }) {
         return;
       }
       // When fetching by ID, also use /me if we're the worker
-      const { data } = await api.get('/api/workers/me');
+      const { data } = await cachedApiGet('/api/workers/me', 60000, { force });
       if (data?.ok && data?.worker) {
         const w = data.worker;
         w.skills = data.skills || w.skills || [];
@@ -191,13 +192,13 @@ export function WorkerManageScreen({ route, navigation }) {
     setLoading(false);
   }, [workerId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(false); }, [load]);
 
-  const onRefresh = useCallback(async () => { setRefreshing(true); await load(); setRefreshing(false); }, [load]);
+  const onRefresh = useCallback(async () => { setRefreshing(true); await load(true); setRefreshing(false); }, [load]);
 
   const refreshSkillsOnly = useCallback(async () => {
     try {
-      const { data } = await api.get('/api/workers/me');
+      const { data } = await cachedApiGet('/api/workers/me', 60000, { force: true });
       if (data?.ok) {
         setWorker((prev) => (prev ? { ...prev, skills: data.skills || [] } : prev));
       }
@@ -524,8 +525,9 @@ export function WorkerManageScreen({ route, navigation }) {
         throw error;
       }
       Alert.alert('Uploaded', `${DOC_TYPES.find((d) => d.key === documentType)?.label || 'Document'} saved successfully.`);
-      await load();
-      await refresh();
+      invalidateCachedGet('/api/workers/me');
+      await load(true);
+      await refresh(true);
     } catch (e) {
       if (e?.message) throw e;
     } finally {
@@ -541,8 +543,9 @@ export function WorkerManageScreen({ route, navigation }) {
     }
     if (data?.ok) {
       Alert.alert('Submitted', data.message || 'Awaiting verification. An admin will review your documents.');
-      await load();
-      await refresh();
+      invalidateCachedGet('/api/workers/me');
+      await load(true);
+      await refresh(true);
     }
   };
 
@@ -578,7 +581,8 @@ export function WorkerManageScreen({ route, navigation }) {
         });
         setAvailability(data.availability || []);
       } else {
-        load();
+        invalidateCachedGet('/api/workers/me');
+        load(true);
       }
     } catch (e) {
       setSettingUp(false);

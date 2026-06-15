@@ -24,7 +24,7 @@ function StatCard({ label, value, color }) {
 }
 
 /* ───── tabs ───── */
-const TABS = ['Overview', 'Documents', 'Users', 'Revenue'];
+const TABS = ['Overview', 'Shifts', 'Documents', 'Users', 'Revenue'];
 
 function UserAvatar({ url, name, email, size = 40 }) {
   const letter = (name || email || '?')[0].toUpperCase();
@@ -78,6 +78,10 @@ export function AdminDashboardScreen({ navigation }) {
   const [revenue, setRevenue] = useState(null);
   const [bookingMetrics, setBookingMetrics] = useState(null);
 
+  // Assigned shifts (admin unassign)
+  const [assignedShifts, setAssignedShifts] = useState([]);
+  const [unassignBusyId, setUnassignBusyId] = useState(null);
+
   /* ── loaders ── */
   const loadOverview = useCallback(async () => {
     const { data } = await api.get('/api/admin/dashboard');
@@ -106,16 +110,23 @@ export function AdminDashboardScreen({ navigation }) {
     if (bm.data?.ok) setBookingMetrics(bm.data);
   }, []);
 
+  const loadAssignedShifts = useCallback(async () => {
+    const { data } = await api.get('/api/admin/shifts/assigned?limit=50');
+    if (data?.ok && data?.shifts) setAssignedShifts(data.shifts);
+    else setAssignedShifts([]);
+  }, []);
+
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
       if (tab === 'Overview') await loadOverview();
+      else if (tab === 'Shifts') await loadAssignedShifts();
       else if (tab === 'Documents') await loadDocs();
       else if (tab === 'Users') await loadUsers();
       else if (tab === 'Revenue') await loadRevenue();
     } catch (e) { /* */ }
     setRefreshing(false);
-  }, [tab, loadOverview, loadDocs, loadUsers, loadRevenue]);
+  }, [tab, loadOverview, loadAssignedShifts, loadDocs, loadUsers, loadRevenue]);
 
   useEffect(() => { refresh(); }, [tab]);
 
@@ -172,6 +183,52 @@ export function AdminDashboardScreen({ navigation }) {
     await loadCompliance(complianceUser);
   };
 
+  const confirmUnassignWorker = (row) => {
+    const workerName = [row.worker_first_name, row.worker_last_name].filter(Boolean).join(' ') || 'Worker';
+    const participantName = [row.participant_first_name, row.participant_last_name].filter(Boolean).join(' ') || 'Participant';
+    const title = row.title || row.service_type || 'Shift';
+
+    Alert.alert(
+      'Remove worker & reopen shift?',
+      `Remove ${workerName} from "${title}"?\n\nThe shift will become open again for worker applications. ${participantName} will be notified in the app and by email.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove & reopen',
+          style: 'destructive',
+          onPress: () => runUnassignWorker(row),
+        },
+      ],
+    );
+  };
+
+  const runUnassignWorker = async (row) => {
+    const busyKey = row.booking_id || row.shift_id;
+    setUnassignBusyId(busyKey);
+    try {
+      const path = row.booking_id
+        ? `/api/admin/bookings/${row.booking_id}/unassign-worker`
+        : `/api/admin/shifts/${row.shift_id}/unassign-worker`;
+      const { data, error } = await api.post(path, {
+        reason: 'Removed by Summit Staffing office — shift reopened for applications',
+        notifyParticipant: true,
+      });
+      if (error) {
+        Alert.alert('Could not unassign', error.message || 'Request failed');
+        return;
+      }
+      Alert.alert(
+        'Shift reopened',
+        data?.participantNotified
+          ? 'Worker removed. Shift is open again and the participant has been notified.'
+          : 'Worker removed and shift is open again.',
+      );
+      await loadAssignedShifts();
+    } finally {
+      setUnassignBusyId(null);
+    }
+  };
+
   /* ── render ── */
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
@@ -220,6 +277,65 @@ export function AdminDashboardScreen({ navigation }) {
                 )}
               </>
             ) : <ActivityIndicator style={{ marginTop: 40 }} color={Colors.primary} />}
+          </>
+        )}
+
+        {/* ── SHIFTS (admin unassign / reopen) ── */}
+        {tab === 'Shifts' && (
+          <>
+            <Text style={{ fontSize: Typography.fontSize.xl, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.xs }}>
+              Filled shifts
+            </Text>
+            <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: Spacing.md, lineHeight: 20 }}>
+              When someone calls to cancel, remove the worker here. The shift reopens for applications and the participant is notified automatically.
+            </Text>
+            {assignedShifts.length === 0 ? (
+              <Text style={{ color: Colors.text.muted, textAlign: 'center', marginTop: 40 }}>No filled upcoming shifts</Text>
+            ) : (
+              assignedShifts.map((row) => {
+                const busy = unassignBusyId === (row.booking_id || row.shift_id);
+                const workerName = [row.worker_first_name, row.worker_last_name].filter(Boolean).join(' ') || '—';
+                const participantName = [row.participant_first_name, row.participant_last_name].filter(Boolean).join(' ') || '—';
+                return (
+                  <View key={row.shift_id} style={{ backgroundColor: Colors.surface, borderRadius: Radius.md, padding: Spacing.md, marginBottom: Spacing.sm, ...Shadows.sm }}>
+                    <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, fontSize: Typography.fontSize.base }}>
+                      {row.title || row.service_type}
+                    </Text>
+                    <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, marginTop: 4 }}>
+                      {formatDateDMY(row.start_time)}
+                      {row.start_time && row.end_time ? ` · ${new Date(row.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} – ${new Date(row.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
+                    </Text>
+                    <Text style={{ color: Colors.text.primary, fontSize: Typography.fontSize.sm, marginTop: 6 }}>
+                      Participant: {participantName}
+                    </Text>
+                    <Text style={{ color: Colors.text.primary, fontSize: Typography.fontSize.sm, marginTop: 2 }}>
+                      Worker: {workerName}
+                    </Text>
+                    {row.booking_status ? (
+                      <Text style={{ color: Colors.text.muted, fontSize: Typography.fontSize.xs, marginTop: 4 }}>
+                        Booking: {row.booking_status}
+                      </Text>
+                    ) : null}
+                    <Pressable
+                      disabled={busy}
+                      onPress={() => confirmUnassignWorker(row)}
+                      style={({ pressed }) => ({
+                        marginTop: Spacing.md,
+                        backgroundColor: Colors.status.error,
+                        paddingVertical: Spacing.sm,
+                        borderRadius: Radius.md,
+                        alignItems: 'center',
+                        opacity: pressed || busy ? 0.85 : 1,
+                      })}
+                    >
+                      <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>
+                        {busy ? 'Removing…' : 'Remove worker & reopen shift'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                );
+              })
+            )}
           </>
         )}
 

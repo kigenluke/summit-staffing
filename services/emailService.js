@@ -181,10 +181,11 @@ const sendInvoiceEmail = async (to, invoiceNumber, pdfBuffer, options = {}) => {
     options.html
     || `<p>Please find attached your invoice <strong>${invoiceNumber}</strong>.</p><p>Payment due per terms on the invoice.</p>`;
 
-  const attachments = [];
-  if (pdfBuffer) {
-    attachments.push(createAttachment(pdfBuffer, `${invoiceNumber}.pdf`, 'application/pdf'));
+  if (!pdfBuffer?.length) {
+    throw new Error(`Cannot send invoice ${invoiceNumber}: PDF attachment is missing`);
   }
+
+  const attachments = [createAttachment(pdfBuffer, `${invoiceNumber}.pdf`, 'application/pdf')];
 
   return sendEmail(to, subject, html, attachments);
 };

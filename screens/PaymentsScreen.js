@@ -12,6 +12,19 @@ import { formatDateDMY } from '../utils/dateFormat.js';
 
 const STATUS_COLORS = { pending: Colors.status.warning, succeeded: Colors.status.success, failed: Colors.status.error, refunded: Colors.text.muted };
 
+const PAYMENT_KIND_LABELS = {
+  authorization_hold: 'Card hold (authorized)',
+  capture: 'Payment captured',
+  funded_eft: 'NDIS invoice paid',
+};
+
+const formatPaymentKind = (kind, status) => {
+  if (kind && PAYMENT_KIND_LABELS[kind]) return PAYMENT_KIND_LABELS[kind];
+  if (status === 'pending') return 'Pending';
+  if (status === 'succeeded') return 'Paid';
+  return kind || status || 'Payment';
+};
+
 const formatBsbInput = (raw) => {
   const digits = String(raw || '').replace(/\D/g, '').slice(0, 6);
   if (digits.length <= 3) return digits;
@@ -343,6 +356,32 @@ export function PaymentsScreen() {
         </View>
       )}
       {!loading && isParticipant && (
+        <View style={{ paddingHorizontal: Spacing.md, paddingBottom: Spacing.sm }}>
+          <View style={{ backgroundColor: '#FFF7ED', borderRadius: Radius.lg, padding: Spacing.md, borderWidth: 1, borderColor: '#FDBA74' }}>
+            <Text style={{ fontWeight: Typography.fontWeight.bold, color: '#9A3412', marginBottom: 4 }}>
+              About card holds
+            </Text>
+            <Text style={{ color: '#9A3412', fontSize: Typography.fontSize.sm, lineHeight: 20 }}>
+              PENDING does not always mean you were charged. Your bank may show a temporary hold when a shift is authorized. The final amount is captured only after you approve the worker&apos;s timesheet. If checkout was not finished, the hold is released automatically.
+            </Text>
+          </View>
+        </View>
+      )}
+
+      {!loading && isWorker && (
+        <View style={{ paddingHorizontal: Spacing.md, paddingBottom: Spacing.sm }}>
+          <View style={{ backgroundColor: '#ECFDF5', borderRadius: Radius.lg, padding: Spacing.md, borderWidth: 1, borderColor: '#6EE7B7' }}>
+            <Text style={{ fontWeight: Typography.fontWeight.bold, color: '#065F46', marginBottom: 4 }}>
+              When do I get paid?
+            </Text>
+            <Text style={{ color: '#065F46', fontSize: Typography.fontSize.sm, lineHeight: 20 }}>
+              You receive 85% of the shift total after the participant approves your timesheet (or after auto-approval). PENDING means payment is not finalized yet — not missing from Summit.
+            </Text>
+          </View>
+        </View>
+      )}
+
+      {!loading && isParticipant && (
         <View style={{ padding: Spacing.md }}>
           <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.sm }}>
             <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.xs }}>
@@ -426,28 +465,57 @@ export function PaymentsScreen() {
           keyExtractor={item => item.id}
           contentContainerStyle={{ padding: Spacing.md, paddingBottom: Spacing.xxl }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
-          renderItem={({ item: p }) => (
+          renderItem={({ item: p }) => {
+            const counterparty = isWorker
+              ? [p.participant_first_name, p.participant_last_name].filter(Boolean).join(' ')
+              : [p.worker_first_name, p.worker_last_name].filter(Boolean).join(' ');
+            const displayAmount = isWorker && p.worker_payout > 0 ? Number(p.worker_payout) : Number(p.amount || 0);
+            return (
             <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.sm, ...Shadows.sm }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <View>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <View style={{ flex: 1, paddingRight: Spacing.sm }}>
                   <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, fontSize: Typography.fontSize.lg }}>
-                    ${Number(p.amount || 0).toFixed(2)}
+                    ${displayAmount.toFixed(2)}
                   </Text>
-                  {p.payment_date && <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: 2 }}>
-                    {formatDateDMY(p.payment_date)}
-                  </Text>}
+                  <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.primary, marginTop: 4, fontWeight: Typography.fontWeight.medium }}>
+                    {p.service_type || 'Support shift'}
+                  </Text>
+                  {p.start_time ? (
+                    <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.secondary, marginTop: 2 }}>
+                      Shift: {formatDateDMY(p.start_time)}
+                    </Text>
+                  ) : null}
+                  {counterparty ? (
+                    <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.secondary, marginTop: 2 }}>
+                      {isWorker ? 'Client' : 'Worker'}: {counterparty}
+                    </Text>
+                  ) : null}
+                  <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: 2 }}>
+                    {formatPaymentKind(p.payment_kind, p.status)}
+                    {p.invoice_number ? ` · Invoice ${p.invoice_number}` : ''}
+                  </Text>
+                  {p.status_explanation ? (
+                    <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.secondary, marginTop: 4, lineHeight: 16 }}>
+                      {p.status_explanation}
+                    </Text>
+                  ) : null}
+                  {(p.payment_date || p.created_at) && (
+                    <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: 2 }}>
+                      {formatDateDMY(p.payment_date || p.created_at)}
+                    </Text>
+                  )}
                 </View>
                 <View style={{ backgroundColor: STATUS_COLORS[p.status] || Colors.text.muted, paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: Radius.full }}>
                   <Text style={{ color: Colors.text.white, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.bold, textTransform: 'uppercase' }}>{p.status}</Text>
                 </View>
               </View>
-              {isWorker && p.worker_payout > 0 && (
+              {isWorker && p.worker_payout > 0 && p.amount > 0 && Number(p.worker_payout) !== Number(p.amount) && (
                 <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.status.success, marginTop: Spacing.xs }}>
-                  Your payout: ${Number(p.worker_payout).toFixed(2)}
+                  Your payout (85%): ${Number(p.worker_payout).toFixed(2)}
                 </Text>
               )}
             </View>
-          )}
+          );}}
           ListEmptyComponent={
             <View style={{ padding: Spacing.xl, alignItems: 'center' }}>
               <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.semibold, color: Colors.text.primary }}>No payments yet</Text>

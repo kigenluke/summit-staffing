@@ -1,4 +1,3 @@
-const axios = require('axios');
 const pool = require('../config/database');
 const { getNDISItemCode } = require('../utils/ndisHelper');
 const { generateInvoicePDF } = require('../services/pdfService');
@@ -186,17 +185,32 @@ const generateAndStoreInvoicePdf = async (invoiceId) => {
   });
 
   await pool.query('UPDATE invoices SET pdf_url = $2 WHERE id = $1', [invoiceId, pdf.url]);
-  return pdf.url;
+  return { url: pdf.url, buffer: pdf.buffer };
+};
+
+/** Returns PDF bytes for email attachment (uses in-memory buffer — no S3 re-download). */
+const getInvoicePdfBuffer = async (invoiceId) => {
+  const result = await generateAndStoreInvoicePdf(invoiceId);
+  if (result?.buffer?.length) return result.buffer;
+  throw new Error('Could not generate invoice PDF');
 };
 
 const emailInvoiceToPlanManager = async (invoiceId) => {
   const detailsRes = await pool.query(
-    `SELECT i.*, p.plan_manager_email, u.email AS participant_email
+    `SELECT
+       i.*,
+       b.service_type, b.start_time, b.end_time, b.location_address,
+       p.plan_manager_email, p.plan_manager_name,
+       p.first_name AS participant_first_name, p.last_name AS participant_last_name,
+       w.first_name AS worker_first_name, w.last_name AS worker_last_name,
+       u.email AS participant_email
      FROM invoices i
      JOIN bookings b ON b.id = i.booking_id
      JOIN participants p ON p.id = b.participant_id
      JOIN users u ON u.id = p.user_id
-     WHERE i.id = $1 LIMIT 1`,
+     JOIN workers w ON w.id = b.worker_id
+     WHERE i.id = $1
+     LIMIT 1`,
     [invoiceId]
   );
   if (detailsRes.rowCount === 0) throw new Error('Invoice not found');
@@ -204,22 +218,10 @@ const emailInvoiceToPlanManager = async (invoiceId) => {
   const to = row.plan_manager_email || row.participant_email;
   if (!to) throw new Error('No plan manager or participant email on file');
 
-  let pdfBuffer = null;
-  if (row.pdf_url) {
-    try {
-      const download = await axios.get(row.pdf_url, { responseType: 'arraybuffer', timeout: 20000 });
-      pdfBuffer = Buffer.from(download.data);
-    } catch (_) {
-      pdfBuffer = null;
-    }
-  }
-  if (!pdfBuffer) {
-    await generateAndStoreInvoicePdf(invoiceId);
-    const refreshed = await pool.query('SELECT pdf_url, invoice_number, total, eft_reference, payment_terms_days FROM invoices WHERE id = $1', [invoiceId]);
-    if (refreshed.rows[0]?.pdf_url) {
-      const download = await axios.get(refreshed.rows[0].pdf_url, { responseType: 'arraybuffer', timeout: 20000 });
-      pdfBuffer = Buffer.from(download.data);
-    }
+  const pdfResult = await generateAndStoreInvoicePdf(invoiceId);
+  const pdfBuffer = pdfResult?.buffer;
+  if (!pdfBuffer?.length) {
+    throw new Error('Invoice PDF could not be generated — email not sent');
   }
 
   const terms = row.payment_terms_days || paymentTermsDays();
@@ -227,13 +229,28 @@ const emailInvoiceToPlanManager = async (invoiceId) => {
   const bsb = process.env.PLATFORM_EFT_BSB || '';
   const acct = process.env.PLATFORM_EFT_ACCOUNT || '';
   const acctName = process.env.PLATFORM_EFT_ACCOUNT_NAME || 'Summit Staffing Pty Ltd';
+  const participantName = `${row.participant_first_name || ''} ${row.participant_last_name || ''}`.trim() || 'Participant';
+  const workerName = `${row.worker_first_name || ''} ${row.worker_last_name || ''}`.trim() || 'Support worker';
+  const serviceWhen = row.start_time && row.end_time
+    ? `${new Date(row.start_time).toLocaleString()} – ${new Date(row.end_time).toLocaleString()}`
+    : (row.service_date ? String(row.service_date) : '—');
 
   const html = `
+    <p>Hello${row.plan_manager_name ? ` ${row.plan_manager_name}` : ''},</p>
     <p>Please find attached NDIS invoice <strong>${row.invoice_number}</strong> for plan-managed payment.</p>
+    <table cellpadding="6" cellspacing="0" style="border-collapse:collapse;margin:12px 0;font-size:14px;">
+      <tr><td><strong>Participant</strong></td><td>${participantName}${row.participant_ndis ? ` (NDIS ${row.participant_ndis})` : ''}</td></tr>
+      <tr><td><strong>Support worker</strong></td><td>${workerName}${row.worker_abn ? ` · ABN ${row.worker_abn}` : ''}</td></tr>
+      <tr><td><strong>Service</strong></td><td>${row.service_description || row.service_type || 'NDIS support'}</td></tr>
+      <tr><td><strong>When</strong></td><td>${serviceWhen}</td></tr>
+      ${row.ndis_support_item_code ? `<tr><td><strong>NDIS item</strong></td><td>${row.ndis_support_item_code}</td></tr>` : ''}
+      ${row.hours != null && row.rate != null ? `<tr><td><strong>Hours / rate</strong></td><td>${Number(row.hours).toFixed(2)} h @ $${Number(row.rate).toFixed(2)}/hr</td></tr>` : ''}
+      <tr><td><strong>Total due</strong></td><td><strong>$${Number(row.total || 0).toFixed(2)} AUD</strong></td></tr>
+    </table>
     <p><strong>Payment terms:</strong> ${terms} days from invoice date.</p>
     <p><strong>EFT reference (required):</strong> ${eftRef}</p>
     ${bsb && acct ? `<p><strong>Bank transfer:</strong> BSB ${bsb} · Account ${acct} · ${acctName}</p>` : '<p>Use the EFT reference above when paying by bank transfer so we can reconcile your payment automatically.</p>'}
-    <p>Total due: <strong>$${Number(row.total || 0).toFixed(2)} AUD</strong></p>
+    <p>The full line-item breakdown is in the attached PDF.</p>
   `;
   await sendInvoiceEmail(to, row.invoice_number, pdfBuffer, { html, subject: `NDIS Invoice ${row.invoice_number} - Summit Staffing` });
 
@@ -332,6 +349,7 @@ module.exports = {
   buildEftReference,
   createFundedInvoiceForBooking,
   generateAndStoreInvoicePdf,
+  getInvoicePdfBuffer,
   emailInvoiceToPlanManager,
   processFundedPipelineOnApproval,
 };

@@ -309,11 +309,14 @@ export function BookingDetailScreen({ route, navigation }) {
         if (error) {
           if (mode !== 'auto') Alert.alert('Error', error.message);
           else setGeoStatus(error.message);
+          if (String(error.message || '').toLowerCase().includes('already clocked out')) {
+            loadBooking();
+          }
           return;
         }
 
         setGeoStatus('');
-        if (mode === 'manual') Alert.alert('Success', 'Clocked out!');
+        if (mode === 'manual') Alert.alert('Success', 'Clocked out! Shift marked complete.');
         loadBooking();
       } catch (e) {
         if (mode !== 'auto') Alert.alert('Error', e?.message || 'Failed to clock out');
@@ -542,7 +545,9 @@ export function BookingDetailScreen({ route, navigation }) {
 
   const b = booking;
   const ts = b.timesheet;
-  const canMarkComplete = isWorker && b.status === 'in_progress' && !!ts?.clock_out_time;
+  const hasClockedOut = Boolean(ts?.clock_out_time);
+  const canClockOut = isWorker && b.status === 'in_progress' && !hasClockedOut;
+  const canMarkComplete = isWorker && b.status === 'in_progress' && hasClockedOut;
 
   const isPendingAcceptance = isWorker && (b.status === 'pending' || b.status === 'confirmed');
   const bookingHasGps = b.location_lat != null && b.location_lng != null;
@@ -805,10 +810,18 @@ export function BookingDetailScreen({ route, navigation }) {
             </Pressable>
           )}
 
-          {b.status === 'in_progress' && (
+          {canClockOut && (
             <Pressable onPress={handleClockOut} style={({ pressed }) => ({ backgroundColor: Colors.status.error, paddingVertical: 14, borderRadius: Radius.md, alignItems: 'center', marginBottom: Spacing.sm, opacity: pressed ? 0.85 : 1 })}>
               <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold, fontSize: Typography.fontSize.base }}>Clock out</Text>
             </Pressable>
+          )}
+
+          {hasClockedOut && isWorker && b.status === 'completed' && (
+            <View style={{ backgroundColor: Colors.surfaceSecondary, borderRadius: Radius.md, padding: Spacing.md, marginBottom: Spacing.sm }}>
+              <Text style={{ color: Colors.status.success, fontWeight: Typography.fontWeight.semibold, textAlign: 'center' }}>
+                Shift complete — timesheet submitted for approval
+              </Text>
+            </View>
           )}
 
           {canMarkComplete && (

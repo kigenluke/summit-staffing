@@ -8,39 +8,13 @@ import { View, Text, FlatList, RefreshControl, Pressable, Alert, Platform, Activ
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { formatDateDMY } from '../utils/dateFormat.js';
-
-const getNotifData = (n) => {
-  let d = n?.data;
-  if (d == null) return {};
-  if (typeof d === 'string') {
-    try {
-      d = JSON.parse(d);
-    } catch {
-      return {};
-    }
-  }
-  return typeof d === 'object' && d !== null ? d : {};
-};
-
-const dedupeNotifications = (list) => {
-  const seen = new Set();
-  const out = [];
-  for (const n of list || []) {
-    const d = getNotifData(n);
-    const key = [
-      n?.type || '',
-      n?.title || '',
-      n?.body || '',
-      d?.requestId || '',
-      d?.participantId || '',
-      d?.coordinatorUserId || '',
-    ].join('|');
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(n);
-  }
-  return out;
-};
+import {
+  dedupeNotifications,
+  getNotificationData,
+  getNotificationKey,
+  isNotificationUnread,
+} from '../utils/notificationHelpers.js';
+import { useNotificationStore } from '../store/notificationStore.js';
 
 const getRelativeTime = (dateStr) => {
   const now = new Date();
@@ -62,6 +36,8 @@ export function NotificationsScreen({ navigation }) {
   const [notifications, setNotifications] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const refreshUnreadCount = useNotificationStore((s) => s.refreshUnreadCount);
+  const setUnreadCount = useNotificationStore((s) => s.setUnreadCount);
 
   const loadNotifications = useCallback(async () => {
     try {
@@ -82,19 +58,44 @@ export function NotificationsScreen({ navigation }) {
   }, [loadNotifications]);
 
   const markAsRead = async (id) => {
+    const item = notifications.find((n) => n.id === id);
+    if (!item || !isNotificationUnread(item)) return;
+
+    const key = getNotificationKey(item);
+    const unreadBefore = notifications.filter((n) => getNotificationKey(n) === key && isNotificationUnread(n)).length;
+
+    setNotifications((prev) =>
+      prev.map((n) => (getNotificationKey(n) === key ? { ...n, read: true } : n))
+    );
+    if (unreadBefore > 0) {
+      useNotificationStore.getState().adjustUnreadCount(-unreadBefore);
+    }
+
     try {
-      await api.put(`/api/notifications/${id}/read`);
-      setNotifications((prev) =>
-        prev.map((n) => (n.id === id ? { ...n, read: true } : n))
-      );
-    } catch (e) {}
+      const { data } = await api.put(`/api/notifications/${id}/read`);
+      if (data?.ok && data.unreadCount != null) {
+        setUnreadCount(data.unreadCount);
+      } else {
+        await refreshUnreadCount(true);
+      }
+    } catch (e) {
+      await loadNotifications();
+      await refreshUnreadCount(true);
+    }
   };
 
   const markAllAsRead = async () => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    setUnreadCount(0);
     try {
-      await api.put('/api/notifications/read-all');
-      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-    } catch (e) {}
+      const { data } = await api.put('/api/notifications/read-all');
+      if (data?.ok && data.unreadCount != null) {
+        setUnreadCount(data.unreadCount);
+      }
+    } catch (e) {
+      await loadNotifications();
+      await refreshUnreadCount(true);
+    }
   };
 
   const deleteNotification = async (id) => {
@@ -105,7 +106,7 @@ export function NotificationsScreen({ navigation }) {
   };
 
   const approveCoordinatorRequest = async (notification) => {
-    const requestId = getNotifData(notification).requestId;
+    const requestId = getNotificationData(notification).requestId;
     if (!requestId) return;
     try {
       const { data, error } = await api.post(`/api/coordinator/requests/${requestId}/approve`);
@@ -122,7 +123,7 @@ export function NotificationsScreen({ navigation }) {
   };
 
   const declineCoordinatorRequest = async (notification) => {
-    const requestId = getNotifData(notification).requestId;
+    const requestId = getNotificationData(notification).requestId;
     if (!requestId) return;
     try {
       const { data, error } = await api.post(`/api/participants/me/access-requests/${requestId}/reject`);
@@ -139,7 +140,7 @@ export function NotificationsScreen({ navigation }) {
   };
 
   const approveParticipantCoordinatorRequest = async (notification) => {
-    const requestId = getNotifData(notification).requestId;
+    const requestId = getNotificationData(notification).requestId;
     if (!requestId) return;
     try {
       const { data, error } = await api.post(`/api/coordinator/requests/${requestId}/approve-participant`);
@@ -156,7 +157,7 @@ export function NotificationsScreen({ navigation }) {
   };
 
   const declineParticipantCoordinatorRequest = async (notification) => {
-    const requestId = getNotifData(notification).requestId;
+    const requestId = getNotificationData(notification).requestId;
     if (!requestId) return;
     try {
       const { data, error } = await api.post(`/api/coordinator/requests/${requestId}/reject-participant`);
@@ -185,7 +186,14 @@ export function NotificationsScreen({ navigation }) {
     }
   };
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const unreadCount = notifications.filter((n) => isNotificationUnread(n)).length;
+
+  useEffect(() => {
+    const unsub = navigation.addListener('blur', () => {
+      refreshUnreadCount(true);
+    });
+    return unsub;
+  }, [navigation, refreshUnreadCount]);
 
   useEffect(() => {
     navigation.setOptions({
@@ -211,7 +219,7 @@ export function NotificationsScreen({ navigation }) {
         contentContainerStyle={{ padding: Spacing.md, paddingBottom: Spacing.xxl }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
         renderItem={({ item: n }) => {
-          const isUnread = !n.read;
+          const isUnread = isNotificationUnread(n);
 
           return (
             <Pressable

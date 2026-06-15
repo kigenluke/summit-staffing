@@ -1,12 +1,13 @@
 /**
  * Summit Staffing – Dashboard Screen
  */
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, ScrollView, Pressable, RefreshControl, ActivityIndicator, Linking, Platform, Alert } from 'react-native';
+import React, { useState, useCallback, useRef } from 'react';
+import { View, Text, ScrollView, Pressable, RefreshControl, ActivityIndicator, Linking, Platform, Alert, InteractionManager } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useGuardedNavigation } from '../hooks/useGuardedNavigation.js';
 import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
+import { cachedApiGet } from '../services/cachedApi.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { formatDateDMY, formatTime12h } from '../utils/dateFormat.js';
 import { workerPayoutFromTotal } from '../utils/platformFee.js';
@@ -50,39 +51,44 @@ export function DashboardScreen() {
   const [nextShift, setNextShift] = useState(null);
   const [weeklyGoal, setWeeklyGoal] = useState(null);
   const [weeklyGoalLoading, setWeeklyGoalLoading] = useState(false);
+  const lastLoadAtRef = useRef(0);
+  const STALE_MS = 30000;
 
   const isWorker = user?.role === 'worker';
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (force = false) => {
     const role = user?.role;
-    const fetchFirstName = async () => {
-      try {
-        if (role === 'worker') {
-          setWeeklyGoalLoading(true);
-          const { data } = await api.get('/api/workers/me');
-          const n = data?.worker?.first_name;
-          const goal = data?.worker?.weekly_earnings_goal;
-          setWeeklyGoal(goal == null ? null : Number(goal));
-          setWeeklyGoalLoading(false);
-          return n != null && String(n).trim() ? String(n).trim() : null;
-        }
-        if (role === 'participant') {
-          const { data } = await api.get('/api/participants/me');
-          const n = data?.participant?.first_name;
-          return n != null && String(n).trim() ? String(n).trim() : null;
-        }
-      } catch (_) {}
-      if (role === 'worker') setWeeklyGoalLoading(false);
-      return null;
-    };
 
     try {
-      const requests = [fetchFirstName(), api.get('/api/bookings?limit=5')];
-      if (isWorker) requests.push(api.get('/api/payments/history'));
-      if (isWorker) requests.push(api.get('/api/bookings?status=confirmed&limit=50'));
+      const workerMePromise = role === 'worker'
+        ? cachedApiGet('/api/workers/me', 60000, { force })
+        : role === 'participant'
+          ? cachedApiGet('/api/participants/me', 60000, { force })
+          : Promise.resolve(null);
 
-      const [name, bookingsRes, paymentsRes, confirmedRes] = await Promise.all(requests);
-      setFirstName(name);
+      const bookingsPromise = cachedApiGet('/api/bookings?limit=50', 30000, { force });
+      const paymentsPromise = isWorker
+        ? cachedApiGet('/api/payments/history?limit=50', 30000, { force })
+        : Promise.resolve(null);
+
+      const [meRes, bookingsRes, paymentsRes] = await Promise.all([
+        workerMePromise,
+        bookingsPromise,
+        paymentsPromise,
+      ]);
+
+      if (role === 'worker' && meRes?.data?.ok) {
+        setWeeklyGoalLoading(true);
+        const n = meRes.data.worker?.first_name;
+        const goal = meRes.data.worker?.weekly_earnings_goal;
+        setWeeklyGoal(goal == null ? null : Number(goal));
+        setWeeklyGoalLoading(false);
+        setFirstName(n != null && String(n).trim() ? String(n).trim() : null);
+      } else if (role === 'participant' && meRes?.data?.ok) {
+        const n = meRes.data.participant?.first_name;
+        setFirstName(n != null && String(n).trim() ? String(n).trim() : null);
+      }
+
       const { data } = bookingsRes;
       if (data?.ok && data?.bookings) {
         const bookings = data.bookings;
@@ -92,46 +98,48 @@ export function DashboardScreen() {
           completed: bookings.filter(b => b.status === 'completed').length,
           pending: bookings.filter(b => b.status === 'pending').length,
         });
+
+        if (isWorker) {
+          const now = new Date();
+          const upcoming = bookings
+            .filter((b) => b.status === 'confirmed' && b.start_time && new Date(b.start_time) > now)
+            .sort((a, b) => new Date(a.start_time) - new Date(b.start_time));
+          setNextShift(upcoming[0] || null);
+        }
       }
+
       if (isWorker && paymentsRes?.data?.ok) {
         const payments = paymentsRes.data.payments || [];
         const succeeded = payments.filter((p) => p.status === 'succeeded');
         const pending = payments.filter((p) => p.status === 'pending');
-        const total = succeeded.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+        const total = succeeded.reduce((sum, p) => sum + parseFloat(p.worker_payout ?? p.amount ?? 0), 0);
         const monthStart = new Date();
         monthStart.setDate(1);
         monthStart.setHours(0, 0, 0, 0);
         const weekStart = new Date();
-        const day = weekStart.getDay(); // Sunday=0
+        const day = weekStart.getDay();
         const diffToMonday = (day + 6) % 7;
         weekStart.setDate(weekStart.getDate() - diffToMonday);
         weekStart.setHours(0, 0, 0, 0);
         const earnedThisMonth = succeeded
           .filter((p) => {
-            const ts = p.paid_at || p.updated_at || p.created_at;
+            const ts = p.payment_date || p.updated_at || p.created_at;
             if (!ts) return false;
             return new Date(ts) >= monthStart;
           })
-          .reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+          .reduce((sum, p) => sum + parseFloat(p.worker_payout ?? p.amount ?? 0), 0);
         const earnedThisWeek = succeeded
           .filter((p) => {
-            const ts = p.paid_at || p.updated_at || p.created_at;
+            const ts = p.payment_date || p.updated_at || p.created_at;
             if (!ts) return false;
             return new Date(ts) >= weekStart;
           })
-          .reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-        const pendingAmount = pending.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+          .reduce((sum, p) => sum + parseFloat(p.worker_payout ?? p.amount ?? 0), 0);
+        const pendingAmount = pending.reduce((sum, p) => sum + parseFloat(p.worker_payout ?? p.amount ?? 0), 0);
         setWorkerEarningsTotal(total);
         setWorkerEarnedThisMonth(earnedThisMonth);
         setWorkerEarnedThisWeek(earnedThisWeek);
         setWorkerPendingAmount(pendingAmount);
-      }
-      if (isWorker && confirmedRes?.data?.ok) {
-        const now = new Date();
-        const upcoming = (confirmedRes.data.bookings || [])
-          .filter((b) => b.start_time && new Date(b.start_time) > now)
-          .sort((a, b) => new Date(a.start_time) - new Date(b.start_time));
-        setNextShift(upcoming[0] || null);
       }
     } catch (e) {}
     setLoading(false);
@@ -139,17 +147,22 @@ export function DashboardScreen() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadData();
+    await loadData(true);
+    lastLoadAtRef.current = Date.now();
     setRefreshing(false);
   }, [loadData]);
 
-  useEffect(() => { loadData(); }, [loadData]);
-
-  // Refresh dashboard when returning to this screen (e.g. after setting weekly goal).
   useFocusEffect(
     useCallback(() => {
-      loadData();
-      return () => {};
+      const task = InteractionManager.runAfterInteractions(() => {
+        const stale = Date.now() - lastLoadAtRef.current > STALE_MS;
+        if (stale || lastLoadAtRef.current === 0) {
+          loadData(false).then(() => {
+            lastLoadAtRef.current = Date.now();
+          });
+        }
+      });
+      return () => task.cancel();
     }, [loadData])
   );
 

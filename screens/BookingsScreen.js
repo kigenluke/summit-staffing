@@ -1,9 +1,10 @@
 /**
  * Summit Staffing – Bookings Screen
  */
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { View, Text, FlatList, Pressable, RefreshControl, ActivityIndicator, Alert, Modal } from 'react-native';
 import { useAuthStore } from '../store/authStore.js';
+import { cachedApiGet, invalidateCachedGet } from '../services/cachedApi.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { formatDateDMY, formatTime12h } from '../utils/dateFormat.js';
@@ -23,7 +24,7 @@ const TABS = ['all', 'pending', 'confirmed', 'in_progress'];
 export function BookingsScreen() {
   const navigation = useGuardedNavigation();
   const { user } = useAuthStore();
-  const [bookings, setBookings] = useState([]);
+  const [allBookings, setAllBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState('all');
@@ -31,22 +32,26 @@ export function BookingsScreen() {
   const isWorker = user?.role === 'worker';
   const isParticipant = user?.role === 'participant';
 
-  const loadBookings = useCallback(async () => {
+  const loadBookings = useCallback(async (force = false) => {
     try {
-      const query = activeTab !== 'all' ? `?status=${activeTab}` : '?limit=100';
-      const { data } = await api.get(`/api/bookings${query}`);
+      const { data } = await cachedApiGet('/api/bookings?limit=100', 30000, { force });
       if (data?.ok && data?.bookings) {
-        setBookings(data.bookings);
+        setAllBookings(data.bookings);
       }
     } catch (e) {}
     setLoading(false);
-  }, [activeTab]);
+  }, []);
 
-  useEffect(() => { setLoading(true); loadBookings(); }, [loadBookings]);
+  const bookings = useMemo(() => {
+    if (activeTab === 'all') return allBookings;
+    return allBookings.filter((b) => b.status === activeTab);
+  }, [allBookings, activeTab]);
+
+  useEffect(() => { loadBookings(false); }, [loadBookings]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadBookings();
+    await loadBookings(true);
     setRefreshing(false);
   }, [loadBookings]);
 
@@ -57,7 +62,8 @@ export function BookingsScreen() {
       return;
     }
     Alert.alert('Deleted', 'Old shift deleted successfully.');
-    loadBookings();
+    invalidateCachedGet('/api/bookings');
+    loadBookings(true);
   }, [loadBookings]);
 
   const openDeleteConfirm = useCallback((bookingId) => {

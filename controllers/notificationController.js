@@ -67,7 +67,28 @@ const markAsRead = async (req, res) => {
       return res.status(404).json({ ok: false, error: 'Notification not found' });
     }
 
-    return res.json({ ok: true, notification: result.rows[0] });
+    const notification = result.rows[0];
+
+    // Mark duplicate notifications (same content) so badge count drops correctly.
+    await pool.query(
+      `UPDATE notifications SET read = true
+       WHERE user_id = $1 AND read = false
+         AND type IS NOT DISTINCT FROM $2
+         AND title = $3
+         AND COALESCE(body, '') = COALESCE($4, '')`,
+      [userId, notification.type, notification.title, notification.body]
+    );
+
+    const countRes = await pool.query(
+      'SELECT COUNT(*)::int AS count FROM notifications WHERE user_id = $1 AND read = false',
+      [userId]
+    );
+
+    return res.json({
+      ok: true,
+      notification,
+      unreadCount: countRes.rows[0]?.count ?? 0,
+    });
   } catch (err) {
     console.error('markAsRead error:', err);
     return res.status(500).json({ ok: false, error: 'Failed to mark as read' });
@@ -82,7 +103,7 @@ const markAllAsRead = async (req, res) => {
       'UPDATE notifications SET read = true WHERE user_id = $1 AND read = false',
       [userId]
     );
-    return res.json({ ok: true, message: 'All notifications marked as read' });
+    return res.json({ ok: true, message: 'All notifications marked as read', unreadCount: 0 });
   } catch (err) {
     console.error('markAllAsRead error:', err);
     return res.status(500).json({ ok: false, error: 'Failed to mark all as read' });

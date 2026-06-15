@@ -533,6 +533,36 @@ const createPaymentIntentHandler = async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Invalid booking amount' });
     }
 
+    // Reuse an open payment intent instead of creating duplicates on double-tap
+    const existingPayRes = await pool.query(
+      `SELECT stripe_payment_intent_id, status, payment_kind
+       FROM payments
+       WHERE booking_id = $1
+       ORDER BY created_at DESC
+       LIMIT 5`,
+      [booking.id]
+    );
+    for (const row of existingPayRes.rows) {
+      if (row.status === 'succeeded') {
+        return res.status(400).json({ ok: false, error: 'This booking has already been paid.' });
+      }
+      if (row.stripe_payment_intent_id) {
+        try {
+          const existingPi = await stripe.paymentIntents.retrieve(row.stripe_payment_intent_id);
+          if (existingPi && ['requires_payment_method', 'requires_confirmation', 'requires_action', 'processing'].includes(existingPi.status)) {
+            const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY || null;
+            return res.status(200).json({
+              ok: true,
+              payment_intent_id: existingPi.id,
+              client_secret: existingPi.client_secret,
+              publishable_key: publishableKey,
+              reused: true,
+            });
+          }
+        } catch (_) {}
+      }
+    }
+
     const amountCents = toCents(amount);
 
     const pi = await createPaymentIntent({
@@ -907,21 +937,76 @@ const getPaymentHistory = async (req, res) => {
          b.service_type,
          b.start_time,
          b.end_time,
-         i.invoice_number,
-         i.status AS invoice_status,
+         b.status AS booking_status,
+         inv.invoice_number,
+         inv.invoice_status,
          pa.first_name AS participant_first_name,
-         pa.last_name AS participant_last_name
+         pa.last_name AS participant_last_name,
+         w.first_name AS worker_first_name,
+         w.last_name AS worker_last_name
        FROM payments p
        JOIN bookings b ON b.id = p.booking_id
        JOIN participants pa ON pa.id = b.participant_id
-       LEFT JOIN invoices i ON i.booking_id = b.id
+       JOIN workers w ON w.id = b.worker_id
+       LEFT JOIN LATERAL (
+         SELECT invoice_number, status AS invoice_status
+         FROM invoices
+         WHERE booking_id = b.id
+         ORDER BY created_at DESC
+         LIMIT 1
+       ) inv ON true
        ${whereSql}
        ORDER BY p.created_at DESC
        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
       [...params, limit, offset]
     );
 
-    return res.status(200).json({ ok: true, total: countRes.rows[0]?.total || 0, limit, offset, payments: dataRes.rows });
+    const rawPayments = dataRes.rows;
+    const seenIds = new Set();
+    const byBooking = new Map();
+    const rank = (p) => {
+      if (p.status === 'succeeded') return 5;
+      if (p.status === 'pending' && p.payment_kind === 'authorization_hold') return 4;
+      if (p.status === 'pending') return 2;
+      if (p.status === 'failed') return 1;
+      return 0;
+    };
+    for (const row of rawPayments) {
+      if (seenIds.has(row.id)) continue;
+      seenIds.add(row.id);
+      const prev = byBooking.get(row.booking_id);
+      if (!prev || rank(row) >= rank(prev)) byBooking.set(row.booking_id, row);
+    }
+    let payments = Array.from(byBooking.values());
+    const succeededBookings = new Set(payments.filter((p) => p.status === 'succeeded').map((p) => p.booking_id));
+    payments = payments.filter((p) => !(p.status === 'pending' && succeededBookings.has(p.booking_id)));
+    payments.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+    const isWorkerView = req.user.role === 'worker';
+    const explainStatus = (p) => {
+      if (p.status === 'succeeded') {
+        return isWorkerView
+          ? 'Paid to your bank account (85% after platform fee)'
+          : 'Payment completed for this shift';
+      }
+      if (p.status === 'pending' && p.payment_kind === 'authorization_hold') {
+        return isWorkerView
+          ? 'Card authorized — payout after participant approves timesheet'
+          : 'Card hold only — not charged yet. Captured when timesheet is approved.';
+      }
+      if (p.status === 'pending') {
+        return isWorkerView
+          ? 'Awaiting payment — participant must complete checkout or approve timesheet'
+          : 'Payment in progress or awaiting timesheet approval';
+      }
+      return null;
+    };
+    payments = payments.map((p) => ({
+      ...p,
+      status_explanation: explainStatus(p),
+    }));
+
+    return res.status(200).json({ ok: true, total: payments.length, limit, offset, payments });
   } catch (err) {
     return res.status(500).json({ ok: false, error: 'Failed to fetch payment history' });
   }

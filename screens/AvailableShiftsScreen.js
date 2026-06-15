@@ -13,6 +13,7 @@ import { useAuthStore } from '../store/authStore.js';
 import { useWorkerGate } from '../context/WorkerGateContext.js';
 import { showVerificationRequiredAlert } from '../utils/verificationPrompt.js';
 import { api } from '../services/api.js';
+import { cachedApiGet, invalidateCachedGet } from '../services/cachedApi.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { SERVICE_TYPES } from '../constants/serviceTypes.js';
 import { NavChevron } from '../components/NavChevron.js';
@@ -294,6 +295,7 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo, editShift = 
   const [locationLng, setLocationLng] = useState(null);
   const [description, setDescription] = useState('');
   const [saving, setSaving] = useState(false);
+  const submitLockRef = useRef(false);
   const [showCalendar, setShowCalendar] = useState(false);
   const [participantProfileId, setParticipantProfileId] = useState(null);
 
@@ -654,6 +656,7 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo, editShift = 
   };
 
   const handleCreate = async () => {
+    if (submitLockRef.current || saving) return;
     const count = parseInt(workersCount, 10) || 0;
     if (count < 1) {
       say('Missing Fields', 'Please select workers count.');
@@ -725,6 +728,7 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo, editShift = 
     const fullDescription = [description, breakMetaText].filter(Boolean).join('\n');
 
     setSaving(true);
+    submitLockRef.current = true;
     try {
       // Best-effort: store participant coords so workers can filter by distance.
       if (participantProfileId && locationLat != null && locationLng != null) {
@@ -790,6 +794,7 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo, editShift = 
       say('Error', e?.message || (isEditMode ? 'Failed to update shift' : 'Failed to create shift'));
     }
     setSaving(false);
+    submitLockRef.current = false;
   };
 
   const workerCountNumber = parseInt(workersCount, 10) || 0;
@@ -1989,23 +1994,23 @@ export function AvailableShiftsScreen({ navigation, route }) {
     });
   }, [navigation, isParticipant]);
 
-  const loadShifts = useCallback(async () => {
+  const loadShifts = useCallback(async (force = false) => {
     try {
       if (isWorker) {
         const [shiftsRes, paymentsRes] = await Promise.all([
-          api.get('/api/shifts'),
-          api.get('/api/payments/history'),
+          cachedApiGet('/api/shifts', 30000, { force }),
+          cachedApiGet('/api/payments/history?limit=30', 30000, { force }),
         ]);
         if (shiftsRes.data?.ok) setShifts(shiftsRes.data.shifts || []);
         if (paymentsRes.data?.ok) {
           const payments = paymentsRes.data.payments || [];
           const succeeded = payments.filter((p) => p.status === 'succeeded');
           const pending = payments.filter((p) => p.status === 'pending');
-          setEarningsTotal(succeeded.reduce((s, p) => s + parseFloat(p.amount || 0), 0));
-          setEarningsPending(pending.reduce((s, p) => s + parseFloat(p.amount || 0), 0));
+          setEarningsTotal(succeeded.reduce((s, p) => s + parseFloat(p.worker_payout ?? p.amount ?? 0), 0));
+          setEarningsPending(pending.reduce((s, p) => s + parseFloat(p.worker_payout ?? p.amount ?? 0), 0));
         }
       } else if (isParticipant) {
-        const { data } = await api.get('/api/shifts/mine');
+        const { data } = await cachedApiGet('/api/shifts/mine', 30000, { force });
         if (data?.ok) setShifts(data.shifts || []);
       }
     } catch (e) { }
@@ -2034,11 +2039,11 @@ export function AvailableShiftsScreen({ navigation, route }) {
     return { nearShifts: near, awayShifts: away, visibleShifts: showAwayShifts ? [...near, ...away] : near };
   }, [shifts, isWorker, workerShiftTypeFilter, getShiftTypeForLocalTime, showAwayShifts]);
 
-  useEffect(() => { loadShifts(); }, [loadShifts]);
+  useEffect(() => { loadShifts(false); }, [loadShifts]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadShifts();
+    await loadShifts(true);
     setRefreshing(false);
   }, [loadShifts]);
 
@@ -2074,7 +2079,8 @@ export function AvailableShiftsScreen({ navigation, route }) {
         'Application Pending',
         'Your shift application is pending. It will be assigned to you once the participant accepts it.'
       );
-      loadShifts();
+      invalidateCachedGet('/api/shifts');
+      loadShifts(true);
     }
   };
 
@@ -2121,7 +2127,8 @@ export function AvailableShiftsScreen({ navigation, route }) {
       setShowApplicantsModal(false);
       setSelectedShift(null);
       setApplications([]);
-      loadShifts();
+      invalidateCachedGet('/api/shifts');
+      loadShifts(true);
     };
 
     if (Platform.OS === 'web') {

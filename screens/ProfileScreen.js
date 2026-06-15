@@ -8,8 +8,10 @@ import {
   useAuthStore,
 } from '../store/authStore.js';
 import { api } from '../services/api.js';
+import { cachedApiGet } from '../services/cachedApi.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { useWorkerGate } from '../context/WorkerGateContext.js';
+import { useNotificationStore } from '../store/notificationStore.js';
 import { showVerificationRequiredAlert } from '../utils/verificationPrompt.js';
 import { ProfilePhotoPicker } from '../components/ProfilePhotoPicker.js';
 import { CoordinatorReturnBanner } from '../components/CoordinatorReturnBanner.js';
@@ -69,7 +71,8 @@ export function ProfileScreen({ navigation }) {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [unreadCount, setUnreadCount] = useState(0);
+  const unreadCount = useNotificationStore((s) => s.unreadCount);
+  const refreshUnreadCount = useNotificationStore((s) => s.refreshUnreadCount);
   const [profileImageUrl, setProfileImageUrl] = useState(null);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [incidentMenuOpen, setIncidentMenuOpen] = useState(false);
@@ -107,13 +110,13 @@ export function ProfileScreen({ navigation }) {
         ? '/api/coordinator/me/profile-photo'
         : null;
 
-  const loadProfile = useCallback(async () => {
+  const loadProfile = useCallback(async (force = false) => {
     try {
       if (isCoordinator) {
         setProfile(null);
       } else {
         const endpoint = isWorker ? '/api/workers/me' : '/api/participants/me';
-        const { data } = await api.get(endpoint);
+        const { data } = await cachedApiGet(endpoint, 60000, { force });
         if (data?.ok) {
           const p = isWorker ? data.worker : data.participant;
           if (p) {
@@ -128,28 +131,13 @@ export function ProfileScreen({ navigation }) {
     setLoading(false);
   }, [isWorker, isParticipant, isCoordinator, syncFromWorkerProfile, syncFromParticipantProfile]);
 
-  const loadUnreadCount = useCallback(async () => {
-    try {
-      const { data } = await api.get('/api/notifications/unread-count');
-      if (data?.ok) setUnreadCount(data.count || 0);
-    } catch (e) {}
-  }, []);
-
-  useEffect(() => { loadProfile(); loadUnreadCount(); }, [loadProfile, loadUnreadCount]);
-
-  // Refresh unread count on screen focus
-  useEffect(() => {
-    const unsub = navigation.addListener('focus', () => {
-      loadUnreadCount();
-    });
-    return unsub;
-  }, [navigation, loadUnreadCount]);
+  useEffect(() => { loadProfile(false); refreshUnreadCount(); }, [loadProfile, refreshUnreadCount]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([loadProfile(), loadUnreadCount()]);
+    await Promise.all([loadProfile(true), refreshUnreadCount(true)]);
     setRefreshing(false);
-  }, [loadProfile, loadUnreadCount]);
+  }, [loadProfile, refreshUnreadCount]);
 
   const handleSignOut = () => {
     if (Platform.OS === 'web') {
