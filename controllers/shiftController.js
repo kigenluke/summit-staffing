@@ -58,14 +58,16 @@ const getAvailableShifts = async (req, res) => {
       workerTravel = workerRes.rows[0] || null;
     }
 
-    // Workers should still see "their" assigned shift with full details after selection.
-    // For workers: include open shifts + filled shifts assigned to them.
-    // For participants: this endpoint is only used for "available shifts" browsing; keep it to open shifts.
+    // Workers: future open shifts they can apply to + upcoming shifts assigned to them only.
+    // Past/expired open shifts and shifts filled for other workers are excluded (see Bookings for completed work).
     const queryParams = [limit, offset];
     let whereClause = `s.status = 'open'`;
     if (isWorker) {
       queryParams.push(req.user.userId);
-      whereClause = `(s.status = 'open' OR (s.status = 'filled' AND s.filled_by_worker_id = $3))`;
+      whereClause = `(
+        (s.status = 'open' AND s.end_time > NOW())
+        OR (s.status = 'filled' AND s.filled_by_worker_id = $3 AND s.end_time > NOW())
+      )`;
     }
 
     const { rows } = await pool.query(
@@ -75,15 +77,21 @@ const getAvailableShifts = async (req, res) => {
               COALESCE(p.last_name, '') AS participant_last_name,
               p.latitude AS participant_latitude,
               p.longitude AS participant_longitude,
-              (SELECT COUNT(*) FROM shift_applications sa WHERE sa.shift_id = s.id) AS application_count
-              ${isWorker ? `, (SELECT sa.status FROM shift_applications sa WHERE sa.shift_id = s.id AND sa.worker_id = $3 LIMIT 1) AS my_application_status` : ''}
+              COALESCE(sa_counts.application_count, 0)::int AS application_count
+              ${isWorker ? `, my_sa.status AS my_application_status` : ''}
        FROM shifts s
        JOIN users u ON u.id = s.participant_id
        LEFT JOIN participants p ON p.user_id = s.participant_id
+       LEFT JOIN (
+         SELECT shift_id, COUNT(*)::int AS application_count
+         FROM shift_applications
+         GROUP BY shift_id
+       ) sa_counts ON sa_counts.shift_id = s.id
+       ${isWorker ? `LEFT JOIN shift_applications my_sa ON my_sa.shift_id = s.id AND my_sa.worker_id = $3` : ''}
        WHERE ${whereClause}
        ORDER BY
          CASE WHEN s.status = 'filled' THEN 0 ELSE 1 END,
-         s.created_at DESC
+         s.start_time ASC
        LIMIT $1 OFFSET $2`,
       queryParams
     );

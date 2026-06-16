@@ -184,7 +184,9 @@ const generateAndStoreInvoicePdf = async (invoiceId) => {
     eft_account_name: process.env.PLATFORM_EFT_ACCOUNT_NAME || 'Summit Staffing Pty Ltd',
   });
 
-  await pool.query('UPDATE invoices SET pdf_url = $2 WHERE id = $1', [invoiceId, pdf.url]);
+  if (pdf.url) {
+    await pool.query('UPDATE invoices SET pdf_url = $2 WHERE id = $1', [invoiceId, pdf.url]);
+  }
   return { url: pdf.url, buffer: pdf.buffer };
 };
 
@@ -253,6 +255,7 @@ const emailInvoiceToPlanManager = async (invoiceId, options = {}) => {
     <p><strong>EFT reference (required):</strong> ${eftRef}</p>
     ${bsb && acct ? `<p><strong>Bank transfer:</strong> BSB ${bsb} · Account ${acct} · ${acctName}</p>` : '<p>Use the EFT reference above when paying by bank transfer so we can reconcile your payment automatically.</p>'}
     <p>The full line-item breakdown is in the attached PDF.</p>
+    ${pdfResult.url ? `<p>If the attachment does not appear in your mail app, <a href="${pdfResult.url}">download the invoice PDF here</a>.</p>` : ''}
   `;
   const subject = isResend
     ? `NDIS Invoice ${row.invoice_number} (resend) - Summit Staffing`

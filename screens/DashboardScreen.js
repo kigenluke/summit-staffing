@@ -76,6 +76,10 @@ export function DashboardScreen() {
       const paymentsPromise = isWorker
         ? cachedApiGet('/api/payments/history?limit=50', 30000, { force })
         : Promise.resolve(null);
+      // Warm cache so Available Shifts opens instantly on the worker home flow.
+      if (isWorker && !force) {
+        cachedApiGet('/api/shifts', 30000, { force: false }).catch(() => {});
+      }
 
       const [meRes, bookingsRes, paymentsRes] = await Promise.all([
         workerMePromise,

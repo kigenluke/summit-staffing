@@ -9,6 +9,14 @@ const DEFAULT_TTL_MS = 25000;
  * @param {number} ttlMs
  * @param {{ force?: boolean }} options
  */
+/** Synchronous read of a fresh cached GET (for instant UI before network returns). */
+export function peekCachedApiGet(path, ttlMs = DEFAULT_TTL_MS) {
+  const entry = store.get(path);
+  if (!entry?.result) return null;
+  if (Date.now() - entry.time >= ttlMs) return null;
+  return entry.result;
+}
+
 export async function cachedApiGet(path, ttlMs = DEFAULT_TTL_MS, { force = false } = {}) {
   const key = path;
   const now = Date.now();

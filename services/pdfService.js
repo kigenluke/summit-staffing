@@ -42,15 +42,22 @@ const generateInvoicePDF = async (invoiceData) => {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'networkidle0' });
 
-    const pdfBuffer = await page.pdf({
+    const rawPdf = await page.pdf({
       format: 'A4',
       printBackground: true,
       margin: { top: '20px', right: '20px', bottom: '20px', left: '20px' }
     });
+    const pdfBuffer = Buffer.isBuffer(rawPdf) ? rawPdf : Buffer.from(rawPdf);
 
     const invoiceNumber = invoiceData.invoice_number;
     const key = `invoices/${invoiceNumber}.pdf`;
-    const url = await uploadBuffer(pdfBuffer, key, 'application/pdf');
+    let url = null;
+    try {
+      url = await uploadBuffer(pdfBuffer, key, 'application/pdf');
+    } catch (uploadErr) {
+      // eslint-disable-next-line no-console
+      console.warn('[pdf] invoice storage upload failed:', uploadErr.message);
+    }
 
     return { url, buffer: pdfBuffer };
   } finally {

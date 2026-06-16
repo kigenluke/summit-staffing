@@ -20,6 +20,14 @@ const getClient = () => {
   return mailgun({ apiKey, domain });
 };
 
+/** mailgun-js ignores non-Buffer attachment data (e.g. Puppeteer Uint8Array). */
+const toNodeBuffer = (data) => {
+  if (!data) return null;
+  if (Buffer.isBuffer(data)) return data;
+  if (data instanceof Uint8Array || Array.isArray(data)) return Buffer.from(data);
+  return Buffer.from(String(data));
+};
+
 const sendEmail = async (to, subject, html, attachments = [], text = null) => {
   const mg = getClient();
   const from = getMailgunFrom();
@@ -37,11 +45,17 @@ const sendEmail = async (to, subject, html, attachments = [], text = null) => {
 };
 
 const createAttachment = (buffer, filename, contentType = 'application/octet-stream') => {
+  const data = toNodeBuffer(buffer);
+  if (!data?.length) {
+    throw new Error('Cannot create attachment: empty or invalid buffer');
+  }
+
   const mg = getClient();
   return new mg.Attachment({
-    data: buffer,
+    data,
     filename,
-    contentType
+    contentType,
+    knownLength: data.length
   });
 };
 
@@ -181,11 +195,13 @@ const sendInvoiceEmail = async (to, invoiceNumber, pdfBuffer, options = {}) => {
     options.html
     || `<p>Please find attached your invoice <strong>${invoiceNumber}</strong>.</p><p>Payment due per terms on the invoice.</p>`;
 
-  if (!pdfBuffer?.length) {
+  const normalizedPdf = toNodeBuffer(pdfBuffer);
+  if (!normalizedPdf?.length) {
     throw new Error(`Cannot send invoice ${invoiceNumber}: PDF attachment is missing`);
   }
 
-  const attachments = [createAttachment(pdfBuffer, `${invoiceNumber}.pdf`, 'application/pdf')];
+  const safeName = String(invoiceNumber || 'invoice').replace(/[^\w.-]+/g, '_');
+  const attachments = [createAttachment(normalizedPdf, `${safeName}.pdf`, 'application/pdf')];
 
   return sendEmail(to, subject, html, attachments);
 };

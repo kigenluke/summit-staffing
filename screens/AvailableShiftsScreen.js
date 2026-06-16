@@ -13,7 +13,7 @@ import { useAuthStore } from '../store/authStore.js';
 import { useWorkerGate } from '../context/WorkerGateContext.js';
 import { showVerificationRequiredAlert } from '../utils/verificationPrompt.js';
 import { api } from '../services/api.js';
-import { cachedApiGet, invalidateCachedGet } from '../services/cachedApi.js';
+import { cachedApiGet, peekCachedApiGet, invalidateCachedGet } from '../services/cachedApi.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { SERVICE_TYPES } from '../constants/serviceTypes.js';
 import { NavChevron } from '../components/NavChevron.js';
@@ -1719,6 +1719,15 @@ function AssignedWorkerSummary({ shift, variant = 'card' }) {
   );
 }
 
+/** Worker feed: upcoming open shifts + shifts assigned to this worker (completed work lives under Bookings). */
+function isWorkerVisibleShift(shift) {
+  if (!shift) return false;
+  const endMs = shift.end_time ? new Date(shift.end_time).getTime() : null;
+  if (endMs != null && endMs <= Date.now()) return false;
+  if (shift.is_assigned_to_me || shift.status === 'filled') return true;
+  return shift.status === 'open';
+}
+
 /** Hide the accepted/assigned worker from the applicants list (shown separately above). */
 function getVisibleShiftApplications(shift, applications) {
   if (!Array.isArray(applications) || applications.length === 0) return [];
@@ -1922,8 +1931,16 @@ export function AvailableShiftsScreen({ navigation, route }) {
     }, [restricted, navigation])
   );
 
-  const [shifts, setShifts] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const shiftsCachePath = isWorker ? '/api/shifts' : isParticipant ? '/api/shifts/mine' : null;
+  const [shifts, setShifts] = useState(() => {
+    if (!shiftsCachePath) return [];
+    const cached = peekCachedApiGet(shiftsCachePath, 30000);
+    return cached?.data?.ok ? (cached.data.shifts || []) : [];
+  });
+  const [loading, setLoading] = useState(() => {
+    if (!shiftsCachePath) return true;
+    return !peekCachedApiGet(shiftsCachePath, 30000)?.data?.ok;
+  });
   const [refreshing, setRefreshing] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editShift, setEditShift] = useState(null);
@@ -2009,28 +2026,32 @@ export function AvailableShiftsScreen({ navigation, route }) {
     });
   }, [navigation, isParticipant]);
 
+  const loadEarnings = useCallback(async (force = false) => {
+    if (!isWorker) return;
+    try {
+      const paymentsRes = await cachedApiGet('/api/payments/history?limit=30', 30000, { force });
+      if (!paymentsRes.data?.ok) return;
+      const payments = paymentsRes.data.payments || [];
+      const succeeded = payments.filter((p) => p.status === 'succeeded');
+      const pending = payments.filter((p) => p.status === 'pending');
+      setEarningsTotal(succeeded.reduce((s, p) => s + parseFloat(p.worker_payout ?? p.amount ?? 0), 0));
+      setEarningsPending(pending.reduce((s, p) => s + parseFloat(p.worker_payout ?? p.amount ?? 0), 0));
+    } catch (_) { /* earnings card can update later */ }
+  }, [isWorker]);
+
   const loadShifts = useCallback(async (force = false) => {
     try {
       if (isWorker) {
-        const [shiftsRes, paymentsRes] = await Promise.all([
-          cachedApiGet('/api/shifts', 30000, { force }),
-          cachedApiGet('/api/payments/history?limit=30', 30000, { force }),
-        ]);
+        const shiftsRes = await cachedApiGet('/api/shifts', 30000, { force });
         if (shiftsRes.data?.ok) setShifts(shiftsRes.data.shifts || []);
-        if (paymentsRes.data?.ok) {
-          const payments = paymentsRes.data.payments || [];
-          const succeeded = payments.filter((p) => p.status === 'succeeded');
-          const pending = payments.filter((p) => p.status === 'pending');
-          setEarningsTotal(succeeded.reduce((s, p) => s + parseFloat(p.worker_payout ?? p.amount ?? 0), 0));
-          setEarningsPending(pending.reduce((s, p) => s + parseFloat(p.worker_payout ?? p.amount ?? 0), 0));
-        }
+        loadEarnings(force);
       } else if (isParticipant) {
         const { data } = await cachedApiGet('/api/shifts/mine', 30000, { force });
         if (data?.ok) setShifts(data.shifts || []);
       }
     } catch (e) { }
     setLoading(false);
-  }, [isWorker, isParticipant]);
+  }, [isWorker, isParticipant, loadEarnings]);
 
   const { nearShifts, awayShifts, visibleShifts } = useMemo(() => {
     if (!isWorker) {
@@ -2041,9 +2062,10 @@ export function AvailableShiftsScreen({ navigation, route }) {
     }
 
     const travelEnabled = shifts.some((s) => s?.travel_filter_enabled);
-    const base = workerShiftTypeFilter === 'all'
+    const base = (workerShiftTypeFilter === 'all'
       ? shifts
-      : shifts.filter((s) => getShiftTypeForLocalTime(s.start_time) === workerShiftTypeFilter);
+      : shifts.filter((s) => getShiftTypeForLocalTime(s.start_time) === workerShiftTypeFilter)
+    ).filter(isWorkerVisibleShift);
 
     if (!travelEnabled) {
       return { nearShifts: base, awayShifts: [], visibleShifts: base };
@@ -2054,7 +2076,21 @@ export function AvailableShiftsScreen({ navigation, route }) {
     return { nearShifts: near, awayShifts: away, visibleShifts: showAwayShifts ? [...near, ...away] : near };
   }, [shifts, isWorker, workerShiftTypeFilter, getShiftTypeForLocalTime, showAwayShifts]);
 
-  useEffect(() => { loadShifts(false); }, [loadShifts]);
+  useFocusEffect(
+    useCallback(() => {
+      if (restricted) return undefined;
+      const path = isWorker ? '/api/shifts' : isParticipant ? '/api/shifts/mine' : null;
+      if (path) {
+        const cached = peekCachedApiGet(path, 30000);
+        if (cached?.data?.ok) {
+          setShifts(cached.data.shifts || []);
+          setLoading(false);
+        }
+      }
+      loadShifts(false);
+      return undefined;
+    }, [restricted, isWorker, isParticipant, loadShifts])
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -2314,13 +2350,15 @@ export function AvailableShiftsScreen({ navigation, route }) {
         }
       />
 
-      <CreateShiftModal
-        visible={showCreateModal}
-        editShift={editShift}
-        onClose={() => { setShowCreateModal(false); setEditShift(null); }}
-        onCreated={loadShifts}
-        onAppInfo={openInfo}
-      />
+      {isParticipant && (
+        <CreateShiftModal
+          visible={showCreateModal}
+          editShift={editShift}
+          onClose={() => { setShowCreateModal(false); setEditShift(null); }}
+          onCreated={loadShifts}
+          onAppInfo={openInfo}
+        />
+      )}
 
       <Modal visible={showApplicantsModal} transparent animationType="slide" onRequestClose={() => setShowApplicantsModal(false)}>
         <View style={fallbackOverlay}>
