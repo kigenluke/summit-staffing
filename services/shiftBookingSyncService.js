@@ -1,6 +1,31 @@
 const pool = require('../config/database');
 const { resolveWorkLocationCoords } = require('../utils/bookingLocation');
 
+/** Run a query; inside a transaction use SAVEPOINT so a failed attempt does not abort the whole tx. */
+async function runWithOptionalSavepoint(db, fn) {
+  const txRes = await db.query('SELECT txid_current_if_assigned() IS NOT NULL AS in_tx');
+  const inTx = Boolean(txRes.rows[0]?.in_tx);
+
+  if (inTx) {
+    await db.query('SAVEPOINT shift_booking_sp');
+    try {
+      const result = await fn();
+      await db.query('RELEASE SAVEPOINT shift_booking_sp');
+      return { ok: true, result };
+    } catch (err) {
+      await db.query('ROLLBACK TO SAVEPOINT shift_booking_sp');
+      return { ok: false, err };
+    }
+  }
+
+  try {
+    const result = await fn();
+    return { ok: true, result };
+  } catch (err) {
+    return { ok: false, err };
+  }
+}
+
 async function findExistingBookingForShift(db, shift, shiftId) {
   const matchByTimeParams = [
     shift.participant_id,
@@ -18,15 +43,14 @@ async function findExistingBookingForShift(db, shift, shiftId) {
     ORDER BY b.created_at DESC
     LIMIT 1`;
 
-  try {
-    const byShift = await db.query(
+  const byShift = await runWithOptionalSavepoint(db, () =>
+    db.query(
       `SELECT b.* FROM bookings b WHERE b.source_shift_id = $1 ORDER BY b.created_at DESC LIMIT 1`,
       [shiftId]
-    );
-    if (byShift.rowCount > 0) return byShift.rows[0];
-  } catch (err) {
-    if (err.code !== '42703') throw err;
-  }
+    )
+  );
+  if (byShift.ok && byShift.result.rowCount > 0) return byShift.result.rows[0];
+  if (!byShift.ok && byShift.err.code !== '42703') throw byShift.err;
 
   const byTime = await db.query(matchByTimeSql, matchByTimeParams);
   return byTime.rowCount > 0 ? byTime.rows[0] : null;
@@ -108,8 +132,8 @@ async function ensureBookingForShift(shiftId, db = pool) {
   ];
 
   let insertRes;
-  try {
-    insertRes = await db.query(
+  const fullInsert = await runWithOptionalSavepoint(db, () =>
+    db.query(
       `INSERT INTO bookings (
          participant_id,
          worker_id,
@@ -138,10 +162,12 @@ async function ensureBookingForShift(shiftId, db = pool) {
         shift.travel_rate_per_km != null ? Number(shift.travel_rate_per_km) : TRAVEL_NON_LABOUR_PER_KM,
         shiftId,
       ]
-    );
-  } catch (err) {
-    if (err.code !== '42703') throw err;
-    // Older DB without NDIS / source_shift_id columns — minimal confirmed booking still enables clock-in.
+    )
+  );
+
+  if (fullInsert.ok) {
+    insertRes = fullInsert.result;
+  } else if (fullInsert.err.code === '42703') {
     insertRes = await db.query(
       `INSERT INTO bookings (
          participant_id,
@@ -160,6 +186,8 @@ async function ensureBookingForShift(shiftId, db = pool) {
        RETURNING *`,
       baseParams
     );
+  } else {
+    throw fullInsert.err;
   }
 
   return { booking: insertRes.rows[0], created: true };

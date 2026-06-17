@@ -179,7 +179,7 @@ const getMyShifts = async (req, res) => {
     const userId = req.user.userId;
     const { rows } = await pool.query(
       `SELECT s.*,
-              (SELECT COUNT(*) FROM shift_applications sa WHERE sa.shift_id = s.id) AS application_count,
+              COALESCE(sa_counts.application_count, 0)::int AS application_count,
               COALESCE(w.first_name, '') AS assigned_worker_first_name,
               COALESCE(w.last_name, '') AS assigned_worker_last_name,
               w.profile_image_url AS assigned_worker_profile_image_url,
@@ -190,6 +190,11 @@ const getMyShifts = async (req, res) => {
               w.total_reviews AS assigned_worker_total_reviews,
               uw.email AS assigned_worker_email
        FROM shifts s
+       LEFT JOIN (
+         SELECT shift_id, COUNT(*)::int AS application_count
+         FROM shift_applications
+         GROUP BY shift_id
+       ) sa_counts ON sa_counts.shift_id = s.id
        LEFT JOIN users uw ON uw.id = s.filled_by_worker_id
        LEFT JOIN workers w ON w.user_id = s.filled_by_worker_id
        WHERE s.participant_id = $1
@@ -274,7 +279,11 @@ const getShiftById = async (req, res) => {
       [id]
     );
 
-    return res.json({ ok: true, shift, applications: apps.rows });
+    return res.json({
+      ok: true,
+      shift: { ...shift, application_count: apps.rows.length },
+      applications: apps.rows,
+    });
   } catch (err) {
     console.error('getShiftById error:', err);
     return res.status(500).json({ ok: false, error: 'Failed to fetch shift' });
@@ -530,20 +539,34 @@ const acceptApplication = async (req, res) => {
       [application.worker_id, id]
     );
 
+    await client.query('COMMIT');
+
     let bookingResult;
     try {
-      bookingResult = await ensureBookingForShift(id, client);
+      bookingResult = await ensureBookingForShift(id, pool);
     } catch (bookingErr) {
-      await client.query('ROLLBACK');
-      const msg = bookingErr.code === 'worker_profile_missing'
-        ? 'This worker has not finished their profile. Ask them to complete Profile before you assign the shift.'
-        : (bookingErr.message || 'Could not create booking for this shift');
+      console.error('acceptApplication booking error:', bookingErr);
+      try {
+        await pool.query(
+          `UPDATE shifts SET status = 'open', filled_by_worker_id = NULL, updated_at = now() WHERE id = $1 AND status = 'filled'`,
+          [id]
+        );
+        await pool.query(`UPDATE shift_applications SET status = 'pending' WHERE shift_id = $1`, [id]);
+        await pool.query(`UPDATE shift_applications SET status = 'accepted' WHERE id = $1`, [applicationId]);
+      } catch (revertErr) {
+        console.error('acceptApplication revert error:', revertErr);
+      }
+      const code = bookingErr.code;
+      let msg = bookingErr.message || 'Could not create booking for this shift';
+      if (code === 'worker_profile_missing') {
+        msg = 'This worker has not finished their profile. Ask them to complete Profile before you assign the shift.';
+      } else if (code === 'participant_profile_missing') {
+        msg = 'Your participant profile is incomplete. Complete Profile and try again.';
+      }
       return res.status(400).json({ ok: false, error: msg });
     }
 
-    await client.query('COMMIT');
-
-    // Notify accepted worker (after commit)
+    // Notify accepted worker (after commit + booking)
     await createNotification(
       application.worker_id,
       'Application accepted! 🎉',

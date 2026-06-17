@@ -1781,7 +1781,9 @@ const ShiftCard = React.memo(function ShiftCard({ shift, onApply, isWorker, isPa
             </View>
           ) : <View />}
           {!isWorker && (
-            <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted }}>{shift.application_count || 0} applicant(s)</Text>
+            <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted }}>
+              {Number(shift.application_count) || 0} applicant(s)
+            </Text>
           )}
           {isWorker && shift.distance_km != null && (
             <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted }}>{shift.distance_km} km away</Text>
@@ -2046,7 +2048,7 @@ export function AvailableShiftsScreen({ navigation, route }) {
         if (shiftsRes.data?.ok) setShifts(shiftsRes.data.shifts || []);
         loadEarnings(force);
       } else if (isParticipant) {
-        const { data } = await cachedApiGet('/api/shifts/mine', 30000, { force });
+        const { data } = await cachedApiGet('/api/shifts/mine', 10000, { force: true });
         if (data?.ok) setShifts(data.shifts || []);
       }
     } catch (e) { }
@@ -2079,13 +2081,14 @@ export function AvailableShiftsScreen({ navigation, route }) {
   useFocusEffect(
     useCallback(() => {
       if (restricted) return undefined;
-      const path = isWorker ? '/api/shifts' : isParticipant ? '/api/shifts/mine' : null;
-      if (path) {
-        const cached = peekCachedApiGet(path, 30000);
-        if (cached?.data?.ok) {
-          setShifts(cached.data.shifts || []);
-          setLoading(false);
-        }
+      if (isParticipant) {
+        loadShifts(true);
+        return undefined;
+      }
+      const cached = peekCachedApiGet('/api/shifts', 30000);
+      if (cached?.data?.ok) {
+        setShifts(cached.data.shifts || []);
+        setLoading(false);
       }
       loadShifts(false);
       return undefined;
@@ -2131,6 +2134,7 @@ export function AvailableShiftsScreen({ navigation, route }) {
         'Your shift application is pending. It will be assigned to you once the participant accepts it.'
       );
       invalidateCachedGet('/api/shifts');
+      invalidateCachedGet('/api/shifts/mine');
       loadShifts(true);
     }
   };
@@ -2146,8 +2150,14 @@ export function AvailableShiftsScreen({ navigation, route }) {
       setApplicationsLoading(false);
       return;
     }
-    setSelectedShift(data?.shift || shift);
-    setApplications(data?.applications || []);
+    const apps = data?.applications || [];
+    const freshShift = {
+      ...(data?.shift || shift),
+      application_count: apps.length,
+    };
+    setSelectedShift(freshShift);
+    setApplications(apps);
+    setShifts((prev) => prev.map((s) => (s.id === shift.id ? { ...s, ...freshShift } : s)));
     setApplicationsLoading(false);
   };
 
@@ -2179,6 +2189,7 @@ export function AvailableShiftsScreen({ navigation, route }) {
       setSelectedShift(null);
       setApplications([]);
       invalidateCachedGet('/api/shifts');
+      invalidateCachedGet('/api/shifts/mine');
       invalidateCachedGet('/api/bookings');
       loadShifts(true);
     };

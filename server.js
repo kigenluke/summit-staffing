@@ -86,6 +86,8 @@ const start = async () => {
     await pool.query('SELECT NOW()');
     // eslint-disable-next-line no-console
     console.log('Database connection established');
+    const { ensureDbSchema } = require('./services/ensureDbSchema');
+    await ensureDbSchema(pool);
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('Database connection failed', err);
