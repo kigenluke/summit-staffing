@@ -9,6 +9,7 @@ const { createBookingAuthorization, cancelBookingAuthorization } = require('../s
 const { submitTimesheetForReview } = require('../services/timesheetApprovalService');
 const { resolveWorkLocationCoords } = require('../utils/bookingLocation');
 const { computePlatformFeeBreakdown } = require('../utils/platformFee.cjs');
+const { syncMissingBookingsForUser } = require('../services/shiftBookingSyncService');
 const respondValidation = (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -261,6 +262,15 @@ const createBooking = async (req, res) => {
 const getBookings = async (req, res) => {
   try {
     if (respondValidation(req, res)) return;
+
+    if (req.user.role === 'worker' || req.user.role === 'participant') {
+      try {
+        await syncMissingBookingsForUser(req.user.userId, req.user.role);
+      } catch (syncErr) {
+        // eslint-disable-next-line no-console
+        console.warn('[getBookings] shift→booking sync:', syncErr.message);
+      }
+    }
 
     const limit = Math.min(Number(req.query.limit) || 20, 100);
     const offset = Math.max(Number(req.query.offset) || 0, 0);

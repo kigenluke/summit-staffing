@@ -1,7 +1,6 @@
 const pool = require('../config/database');
 const { sendPushNotification } = require('../services/notificationService');
-const { geocodeAddress } = require('../utils/geocodeAddress');
-const { resolveWorkLocationCoords } = require('../utils/bookingLocation');
+const { ensureBookingForShift } = require('../services/shiftBookingSyncService');
 
 // ── Helper: insert an in-app notification ────────────────────────
 const createNotification = async (userId, title, body, type = 'general', data = {}) => {
@@ -438,6 +437,14 @@ const applyForShift = async (req, res) => {
       return res.status(400).json({ ok: false, error: 'You cannot apply to your own shift' });
     }
 
+    const workerProfile = await pool.query('SELECT id FROM workers WHERE user_id = $1 LIMIT 1', [userId]);
+    if (workerProfile.rowCount === 0) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Complete your worker profile before applying to shifts (Profile → worker details).',
+      });
+    }
+
     // Check for duplicate application
     const existingApp = await pool.query(
       'SELECT id FROM shift_applications WHERE shift_id = $1 AND worker_id = $2',
@@ -479,128 +486,80 @@ const applyForShift = async (req, res) => {
 
 // ── PUT /api/shifts/:id/applications/:applicationId/accept ──────
 const acceptApplication = async (req, res) => {
+  const client = await pool.connect();
   try {
-    const [ndis, breakMeta] = await Promise.all([
-      import('../utils/ndisParticipantRates.mjs'),
-      import('../utils/shiftBreakMeta.mjs'),
-    ]);
-    const { TRAVEL_NON_LABOUR_PER_KM } = ndis;
-    const { getShiftPayEstimate } = breakMeta;
     const { id, applicationId } = req.params;
     const userId = req.user.userId;
 
-    // Verify shift ownership
-    const shiftRes = await pool.query('SELECT * FROM shifts WHERE id = $1', [id]);
+    await client.query('BEGIN');
+
+    const shiftRes = await client.query('SELECT * FROM shifts WHERE id = $1 FOR UPDATE', [id]);
     if (shiftRes.rowCount === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ ok: false, error: 'Shift not found' });
     }
     const shift = shiftRes.rows[0];
 
     if (shift.participant_id !== userId) {
+      await client.query('ROLLBACK');
       return res.status(403).json({ ok: false, error: 'Only the shift creator can accept applications' });
     }
 
     if (shift.status !== 'open') {
+      await client.query('ROLLBACK');
       return res.status(400).json({ ok: false, error: 'Shift is no longer open' });
     }
 
-    // Get the application
-    const appRes = await pool.query('SELECT * FROM shift_applications WHERE id = $1 AND shift_id = $2', [applicationId, id]);
+    const appRes = await client.query(
+      'SELECT * FROM shift_applications WHERE id = $1 AND shift_id = $2',
+      [applicationId, id]
+    );
     if (appRes.rowCount === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ ok: false, error: 'Application not found' });
     }
     const application = appRes.rows[0];
 
-    // Accept this application, reject others
-    await pool.query(`UPDATE shift_applications SET status = 'accepted' WHERE id = $1`, [applicationId]);
-    await pool.query(`UPDATE shift_applications SET status = 'rejected' WHERE shift_id = $1 AND id != $2`, [id, applicationId]);
-
-    // Update shift status
-    await pool.query(`UPDATE shifts SET status = 'filled', filled_by_worker_id = $1, updated_at = now() WHERE id = $2`, [application.worker_id, id]);
-
-    // Auto-create a booking (total aligns with shift card: unpaid break reduces billable hours)
-    const payEst = getShiftPayEstimate(shift.start_time, shift.end_time, shift.hourly_rate, shift.description, {
-      sleepoverFlatAmount: shift.sleepover_flat_amount != null ? Number(shift.sleepover_flat_amount) : 0,
-      travelKm: shift.travel_distance_km != null ? Number(shift.travel_distance_km) : 0,
-      travelRatePerKm: shift.travel_rate_per_km != null ? Number(shift.travel_rate_per_km) : undefined,
-    });
-    const totalAmount = payEst.estimatedTotal.toFixed(2);
-
-    // Get participant and worker profile IDs
-    const participantRes = await pool.query(
-      'SELECT id, latitude, longitude, address FROM participants WHERE user_id = $1',
-      [shift.participant_id]
+    await client.query(`UPDATE shift_applications SET status = 'accepted' WHERE id = $1`, [applicationId]);
+    await client.query(
+      `UPDATE shift_applications SET status = 'rejected' WHERE shift_id = $1 AND id != $2`,
+      [id, applicationId]
     );
-    const workerRes = await pool.query('SELECT id FROM workers WHERE user_id = $1', [application.worker_id]);
+    await client.query(
+      `UPDATE shifts SET status = 'filled', filled_by_worker_id = $1, updated_at = now() WHERE id = $2`,
+      [application.worker_id, id]
+    );
 
-    if (participantRes.rowCount > 0 && workerRes.rowCount > 0) {
-      const participant = participantRes.rows[0];
-      const bookingAddress = shift.location || participant.address || null;
-      const coords = await resolveWorkLocationCoords({
-        location_lat: shift.location_lat,
-        location_lng: shift.location_lng,
-        location_address: bookingAddress,
-        participantLat: participant.latitude,
-        participantLng: participant.longitude,
-      });
-      await pool.query(
-        `INSERT INTO bookings (
-           participant_id,
-           worker_id,
-           service_type,
-           start_time,
-           end_time,
-           status,
-           location_address,
-           location_lat,
-           location_lng,
-           total_amount,
-           hourly_rate,
-           high_intensity,
-           travel_distance_km,
-           sleepover_flat_amount,
-           travel_rate_per_km,
-           source_shift_id
-         )
-         VALUES ($1, $2, $3, $4, $5, 'confirmed', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
-        [
-          participant.id,
-          workerRes.rows[0].id,
-          shift.service_type,
-          shift.start_time,
-          shift.end_time,
-          bookingAddress,
-          coords.lat,
-          coords.lng,
-          totalAmount,
-          shift.hourly_rate,
-          Boolean(shift.high_intensity),
-          shift.travel_distance_km != null ? Number(shift.travel_distance_km) : null,
-          shift.sleepover_flat_amount != null ? Number(shift.sleepover_flat_amount) : null,
-          shift.travel_rate_per_km != null ? Number(shift.travel_rate_per_km) : TRAVEL_NON_LABOUR_PER_KM,
-          id,
-        ]
-      );
+    let bookingResult;
+    try {
+      bookingResult = await ensureBookingForShift(id, client);
+    } catch (bookingErr) {
+      await client.query('ROLLBACK');
+      const msg = bookingErr.code === 'worker_profile_missing'
+        ? 'This worker has not finished their profile. Ask them to complete Profile before you assign the shift.'
+        : (bookingErr.message || 'Could not create booking for this shift');
+      return res.status(400).json({ ok: false, error: msg });
     }
 
-    // Notify accepted worker
+    await client.query('COMMIT');
+
+    // Notify accepted worker (after commit)
     await createNotification(
       application.worker_id,
       'Application accepted! 🎉',
-      `Your application for "${shift.title}" has been accepted.`,
+      `Your application for "${shift.title}" has been accepted. Open Bookings to clock in when your shift starts.`,
       'shift_accepted',
-      { shift_id: id }
+      { shift_id: id, booking_id: bookingResult.booking?.id || null }
     );
     await sendPushNotification(
       application.worker_id,
       'Application accepted! 🎉',
-      `Your application for "${shift.title}" has been accepted.`,
-      { type: 'shift_accepted', shiftId: id }
+      `Your application for "${shift.title}" has been accepted. Open Bookings to clock in.`,
+      { type: 'shift_accepted', shiftId: id, bookingId: bookingResult.booking?.id || null }
     );
 
-    // Notify rejected applicants
     const rejectedApps = await pool.query(
-      `SELECT worker_id FROM shift_applications WHERE shift_id = $1 AND id != $2`,
+      `SELECT worker_id FROM shift_applications WHERE shift_id = $1 AND id != $2 AND status = 'rejected'`,
       [id, applicationId]
     );
     for (const rej of rejectedApps.rows) {
@@ -613,10 +572,18 @@ const acceptApplication = async (req, res) => {
       );
     }
 
-    return res.json({ ok: true, message: 'Application accepted and booking created' });
+    return res.json({
+      ok: true,
+      message: 'Application accepted and booking created',
+      bookingId: bookingResult.booking?.id || null,
+      bookingCreated: bookingResult.created,
+    });
   } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* ignore */ }
     console.error('acceptApplication error:', err);
     return res.status(500).json({ ok: false, error: 'Failed to accept application' });
+  } finally {
+    client.release();
   }
 };
 

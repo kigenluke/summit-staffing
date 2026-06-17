@@ -2179,6 +2179,7 @@ export function AvailableShiftsScreen({ navigation, route }) {
       setSelectedShift(null);
       setApplications([]);
       invalidateCachedGet('/api/shifts');
+      invalidateCachedGet('/api/bookings');
       loadShifts(true);
     };
 

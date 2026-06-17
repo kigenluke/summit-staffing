@@ -1,8 +1,9 @@
 /**
  * Summit Staffing – Bookings Screen
  */
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { View, Text, FlatList, Pressable, RefreshControl, ActivityIndicator, Alert, Modal } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useAuthStore } from '../store/authStore.js';
 import { cachedApiGet, invalidateCachedGet } from '../services/cachedApi.js';
 import { api } from '../services/api.js';
@@ -50,7 +51,11 @@ export function BookingsScreen() {
     return allBookings.filter((b) => b.status === activeTab);
   }, [allBookings, activeTab]);
 
-  useEffect(() => { loadBookings(false); }, [loadBookings]);
+  useFocusEffect(
+    useCallback(() => {
+      loadBookings(false);
+    }, [loadBookings])
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
