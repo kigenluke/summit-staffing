@@ -40,6 +40,17 @@ function StripePayBookingButtonInner({ bookingId, onPaid }) {
         paymentIntentClientSecret: data.client_secret,
         allowsDelayedPaymentMethods: true,
         returnURL: STRIPE_RETURN_URL,
+        defaultBillingDetails: {
+          address: { country: 'AU' },
+        },
+        applePay: {
+          merchantCountryCode: 'AU',
+        },
+        googlePay: {
+          merchantCountryCode: 'AU',
+          currencyCode: 'AUD',
+          testEnv: __DEV__,
+        },
       });
 
       if (initError) {

@@ -65,6 +65,12 @@ router.post(
   paymentController.confirmPayment
 );
 
+router.post(
+  '/sync-booking',
+  [auth, checkParticipant, body('bookingId').isUUID().withMessage('bookingId is required')],
+  paymentController.syncBookingPayment
+);
+
 router.get(
   '/history',
   [auth, query('limit').optional().isInt({ min: 1, max: 100 }).toInt(), query('offset').optional().isInt({ min: 0 }).toInt()],

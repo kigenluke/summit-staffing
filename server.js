@@ -104,6 +104,7 @@ const start = async () => {
         const cron = require('node-cron');
         const { runTimesheetApprovalCron } = require('./jobs/timesheetApprovalCron');
         const { runMissedShiftCron } = require('./jobs/missedShiftCron');
+        const { runWorkerPayoutCron } = require('./jobs/workerPayoutCron');
         cron.schedule('*/15 * * * *', () => {
           runTimesheetApprovalCron().catch((e) => {
             // eslint-disable-next-line no-console
@@ -113,9 +114,13 @@ const start = async () => {
             // eslint-disable-next-line no-console
             console.error('[cron] missed-shift auto-close failed:', e.message);
           });
+          runWorkerPayoutCron().catch((e) => {
+            // eslint-disable-next-line no-console
+            console.error('[cron] worker payout retry failed:', e.message);
+          });
         });
         // eslint-disable-next-line no-console
-        console.log('[cron] Timesheet 24h auto-approval + missed-shift jobs scheduled (every 15 minutes)');
+        console.log('[cron] Timesheet auto-approval + missed-shift + worker payout jobs scheduled (every 15 minutes)');
       } catch (cronErr) {
         // eslint-disable-next-line no-console
         console.warn('[cron] Could not start timesheet job:', cronErr.message);

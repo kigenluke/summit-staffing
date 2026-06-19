@@ -4,6 +4,7 @@ const { body, query, param } = require('express-validator');
 const auth = require('../middleware/auth');
 const checkAdmin = require('../middleware/checkAdmin');
 const adminController = require('../controllers/adminController');
+const paymentController = require('../controllers/paymentController');
 const { complianceUpload } = require('../middleware/complianceMulter');
 
 const router = express.Router();
@@ -90,6 +91,14 @@ router.get(
 );
 
 router.get('/reports/bookings', [auth, checkAdmin], adminController.getBookingMetrics);
+
+router.post('/payments/retry-transfers', [auth, checkAdmin], paymentController.retryPendingTransfers);
+
+router.post(
+  '/payments/retry-transfer',
+  [auth, checkAdmin, body('payment_intent_id').isString().trim().notEmpty()],
+  paymentController.createTransfer
+);
 
 router.get(
   '/shifts/assigned',

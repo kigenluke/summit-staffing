@@ -14,11 +14,11 @@ const {
   createAccountLoginLink,
   createPaymentIntent,
   createCheckoutSession,
-  createTransfer,
   verifyWebhookSignature,
 } = require('../services/stripeService');
 const { validateAustralianBankDetails, formatBsbDisplay } = require('../utils/bankAccount');
 const { userFacingPaymentMessage } = require('../utils/userFacingPaymentError');
+const { getWebClientBaseUrl } = require('../utils/clientAppUrl');
 const { classifyStripeSecretKey } = require('../utils/stripeKeyValidation');
 const { stripeActionHint, isStaleConnectAccountError } = require('../utils/paymentErrorHints');
 const { secretKeyCheck } = require('../config/stripe');
@@ -26,6 +26,14 @@ const {
   createBookingAuthorization,
   reconcileFundedStripeInvoicePaid,
 } = require('../services/paymentPipelineService');
+const {
+  ensurePaymentRecordForIntent,
+  transferWorkerPayoutForPaymentIntent,
+  retryTransferFromPlatformBalance,
+  runWorkerPayoutRetryJob,
+  syncBookingPaymentFromStripe,
+  markPaymentSucceeded,
+} = require('../services/workerTransferService');
 
 const respondValidation = (req, res) => {
   const errors = validationResult(req);
@@ -80,44 +88,18 @@ const pickErrorMessage = (err) => {
 
 const { computePlatformFeeBreakdown } = require('../utils/platformFee.cjs');
 
-const ensurePaymentRecordForIntent = async (paymentIntentId, paymentIntent, options = {}) => {
-  const existing = await pool.query(
-    'SELECT id, worker_payout, stripe_transfer_id FROM payments WHERE stripe_payment_intent_id = $1 LIMIT 1',
-    [paymentIntentId]
-  );
-  if (existing.rowCount > 0) return existing.rows[0];
-
-  const pi = paymentIntent || await stripe.paymentIntents.retrieve(paymentIntentId);
-  const fallbackBooking = options.fallbackBookingId != null ? String(options.fallbackBookingId) : '';
-  const bookingId = (pi?.metadata?.bookingId && String(pi.metadata.bookingId)) || fallbackBooking;
-  if (!bookingId) {
-    throw new Error('Missing bookingId metadata');
+const attemptWorkerTransfer = async (paymentIntentId, fallbackBookingId = null) => {
+  try {
+    return await transferWorkerPayoutForPaymentIntent(paymentIntentId, fallbackBookingId);
+  } catch (err) {
+    try {
+      return await retryTransferFromPlatformBalance(paymentIntentId, fallbackBookingId);
+    } catch (retryErr) {
+      // eslint-disable-next-line no-console
+      console.error('[worker-transfer]', paymentIntentId, retryErr.message);
+      throw retryErr;
+    }
   }
-
-  const bookingRes = await pool.query(
-    'SELECT id, total_amount FROM bookings WHERE id = $1 LIMIT 1',
-    [bookingId]
-  );
-  if (bookingRes.rowCount === 0) {
-    throw new Error('Booking not found for PaymentIntent');
-  }
-
-  const { total, commission, workerPayout } = computePlatformFeeBreakdown(bookingRes.rows[0].total_amount);
-  await pool.query(
-    `INSERT INTO payments (booking_id, stripe_payment_intent_id, amount, commission, worker_payout, status, payment_date)
-     VALUES ($1, $2, $3, $4, $5, 'pending', NULL)
-     ON CONFLICT (stripe_payment_intent_id) DO NOTHING`,
-    [bookingId, paymentIntentId, total, commission, workerPayout]
-  );
-
-  const inserted = await pool.query(
-    'SELECT id, worker_payout, stripe_transfer_id FROM payments WHERE stripe_payment_intent_id = $1 LIMIT 1',
-    [paymentIntentId]
-  );
-  if (inserted.rowCount === 0) {
-    throw new Error('Failed to create payment record');
-  }
-  return inserted.rows[0];
 };
 
 /**
@@ -651,9 +633,9 @@ const createCheckoutSessionHandler = async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Invalid booking amount' });
     }
 
-    const appUrl = resolveAppBaseUrl();
-    const successUrl = `${appUrl}/booking/${booking.id}?payment=success`;
-    const cancelUrl = `${appUrl}/booking/${booking.id}?payment=cancelled`;
+    const webAppUrl = getWebClientBaseUrl();
+    const successUrl = `${webAppUrl}/booking/${booking.id}?payment=success`;
+    const cancelUrl = `${webAppUrl}/booking/${booking.id}?payment=cancelled`;
 
     const session = await createCheckoutSession({
       amountCents: toCents(total),
@@ -680,68 +662,48 @@ const createCheckoutSessionHandler = async (req, res) => {
   }
 };
 
-const createTransferForPaymentIntent = async (paymentIntentId, fallbackBookingId = null) => {
-  if (!stripe) {
-    throw new Error('Stripe is not configured');
-  }
-  const pi = await stripe.paymentIntents.retrieve(paymentIntentId, { expand: ['latest_charge'] });
-  if (!pi || pi.status !== 'succeeded') {
-    throw new Error('PaymentIntent not succeeded');
-  }
+const syncBookingPaymentHandler = async (req, res) => {
+  try {
+    if (!ensureStripeConfigured(res)) return;
+    if (respondValidation(req, res)) return;
 
-  let bookingId = (pi.metadata?.bookingId && String(pi.metadata.bookingId)) || fallbackBookingId;
-  if (!bookingId) {
-    const payRes = await pool.query(
-      'SELECT booking_id FROM payments WHERE stripe_payment_intent_id = $1 LIMIT 1',
-      [paymentIntentId]
-    );
-    if (payRes.rowCount > 0) {
-      bookingId = String(payRes.rows[0].booking_id);
+    const { bookingId } = req.body;
+    const participantRes = await pool.query('SELECT id FROM participants WHERE user_id = $1 LIMIT 1', [req.user.userId]);
+    if (participantRes.rowCount === 0) {
+      return res.status(403).json({ ok: false, error: 'Only participants can sync booking payments.' });
     }
+
+    const bookingRes = await pool.query(
+      'SELECT id, participant_id FROM bookings WHERE id = $1 LIMIT 1',
+      [bookingId]
+    );
+    if (bookingRes.rowCount === 0) {
+      return res.status(404).json({ ok: false, error: 'Booking not found' });
+    }
+    if (bookingRes.rows[0].participant_id !== participantRes.rows[0].id) {
+      return res.status(403).json({ ok: false, error: 'You can only sync your own bookings.' });
+    }
+
+    const result = await syncBookingPaymentFromStripe(bookingId);
+    if (!result.ok) {
+      return res.status(202).json({ ok: false, error: result.error, results: result.results || [] });
+    }
+    return res.status(200).json({ ok: true, ...result });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('syncBookingPaymentHandler:', err);
+    return res.status(500).json({ ok: false, error: pickErrorMessage(err) || 'Could not sync payment.' });
   }
-  if (!bookingId) {
-    throw new Error('Missing bookingId metadata');
+};
+
+const retryPendingTransfersHandler = async (req, res) => {
+  try {
+    if (!ensureStripeConfigured(res)) return;
+    const result = await runWorkerPayoutRetryJob({ limit: 100 });
+    return res.status(200).json({ ok: true, ...result });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: pickErrorMessage(err) || 'Retry failed' });
   }
-
-  const bookingRes = await pool.query(
-    `SELECT b.id, b.worker_id, w.stripe_account_id
-     FROM bookings b
-     JOIN workers w ON w.id = b.worker_id
-     WHERE b.id = $1
-     LIMIT 1`,
-    [bookingId]
-  );
-
-  if (bookingRes.rowCount === 0) {
-    throw new Error('Booking not found');
-  }
-
-  const booking = bookingRes.rows[0];
-  if (!booking.stripe_account_id) {
-    throw new Error('Worker Stripe account not set');
-  }
-
-  const payment = await ensurePaymentRecordForIntent(paymentIntentId, pi, { fallbackBookingId: bookingId });
-
-  if (payment.stripe_transfer_id) {
-    return { alreadyTransferred: true, transferId: payment.stripe_transfer_id };
-  }
-
-  const payoutCents = toCents(payment.worker_payout);
-
-  const latestCharge = pi.latest_charge;
-  const sourceTransaction = typeof latestCharge === 'string' ? latestCharge : latestCharge?.id;
-
-  const transfer = await createTransfer({
-    amountCents: payoutCents,
-    destination: booking.stripe_account_id,
-    sourceTransaction,
-    metadata: { bookingId: booking.id, paymentIntentId }
-  });
-
-  await pool.query('UPDATE payments SET stripe_transfer_id = $2 WHERE id = $1', [payment.id, transfer.id]);
-
-  return { alreadyTransferred: false, transferId: transfer.id };
 };
 
 const confirmPayment = async (req, res) => {
@@ -762,19 +724,22 @@ const confirmPayment = async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Payment not successful' });
     }
 
-    await pool.query(
-      "UPDATE payments SET status = 'succeeded', payment_date = now() WHERE stripe_payment_intent_id = $1",
-      [payment_intent_id]
-    );
+    await markPaymentSucceeded(payment_intent_id);
 
-    // Attempt transfer (90% payout)
+    let transfer = null;
+    let transferError = null;
     try {
-      await createTransferForPaymentIntent(payment_intent_id);
+      transfer = await attemptWorkerTransfer(payment_intent_id);
     } catch (err) {
-      // transfer failures are handled later via webhook/retry
+      transferError = pickErrorMessage(err) || err.message;
     }
 
-    return res.status(200).json({ ok: true });
+    return res.status(200).json({
+      ok: true,
+      transfer: transfer || null,
+      transfer_pending: Boolean(transferError),
+      transfer_error: transferError,
+    });
   } catch (err) {
     return res.status(500).json({ ok: false, error: 'Failed to confirm payment' });
   }
@@ -802,14 +767,16 @@ const handleWebhook = async (req, res) => {
         if (pi.metadata?.payment_kind === 'authorization_hold' && pi.capture_method === 'manual') {
           break;
         }
-        await ensurePaymentRecordForIntent(pi.id, pi);
-        await pool.query(
-          "UPDATE payments SET status = 'succeeded', payment_date = now() WHERE stripe_payment_intent_id = $1",
-          [pi.id]
-        );
+        try {
+          await ensurePaymentRecordForIntent(pi.id, pi);
+        } catch (ensureErr) {
+          // eslint-disable-next-line no-console
+          console.warn('payment_intent.succeeded ensure record:', ensureErr.message);
+        }
+        await markPaymentSucceeded(pi.id);
 
         try {
-          await createTransferForPaymentIntent(pi.id);
+          await attemptWorkerTransfer(pi.id);
         } catch (err) {
           // eslint-disable-next-line no-console
           console.error('transfer after payment_intent.succeeded:', err.message);
@@ -833,16 +800,39 @@ const handleWebhook = async (req, res) => {
         const paymentIntentId = typeof session.payment_intent === 'string' ? session.payment_intent : null;
         const sessionBookingId = session.metadata?.bookingId || null;
         if (paymentIntentId) {
-          const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
-          await ensurePaymentRecordForIntent(paymentIntentId, pi, { fallbackBookingId: sessionBookingId });
-          await pool.query(
-            "UPDATE payments SET status = 'succeeded', payment_date = now() WHERE stripe_payment_intent_id = $1",
-            [paymentIntentId]
-          );
           try {
-            await createTransferForPaymentIntent(paymentIntentId, sessionBookingId);
+            const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
+            if (sessionBookingId && !pi.metadata?.bookingId) {
+              await stripe.paymentIntents.update(paymentIntentId, {
+                metadata: { ...pi.metadata, bookingId: String(sessionBookingId) },
+              });
+            }
+            await ensurePaymentRecordForIntent(paymentIntentId, pi, { fallbackBookingId: sessionBookingId });
+          } catch (ensureErr) {
+            // eslint-disable-next-line no-console
+            console.warn('checkout.session.completed ensure record:', ensureErr.message);
+          }
+          await markPaymentSucceeded(paymentIntentId);
+          try {
+            await attemptWorkerTransfer(paymentIntentId, sessionBookingId);
           } catch (err) {
-            // ignore transfer retry failures in webhook path
+            // eslint-disable-next-line no-console
+            console.error('transfer after checkout.session.completed:', err.message);
+          }
+        }
+        break;
+      }
+      case 'charge.updated': {
+        const charge = event.data.object;
+        if (charge.status === 'succeeded' && charge.paid && charge.payment_intent) {
+          const piId = typeof charge.payment_intent === 'string' ? charge.payment_intent : charge.payment_intent?.id;
+          if (piId) {
+            try {
+              await attemptWorkerTransfer(piId);
+            } catch (err) {
+              // eslint-disable-next-line no-console
+              console.warn('transfer after charge.updated:', err.message);
+            }
           }
         }
         break;
@@ -1241,14 +1231,17 @@ module.exports = {
   createPaymentIntent: createPaymentIntentHandler,
   createCheckoutSession: createCheckoutSessionHandler,
   confirmPayment,
+  syncBookingPayment: syncBookingPaymentHandler,
+  retryPendingTransfers: retryPendingTransfersHandler,
   createTransfer: async (req, res) => {
     try {
+      if (!ensureStripeConfigured(res)) return;
       if (respondValidation(req, res)) return;
       const { payment_intent_id } = req.body;
-      const transfer = await createTransferForPaymentIntent(payment_intent_id);
+      const transfer = await attemptWorkerTransfer(payment_intent_id);
       return res.status(200).json({ ok: true, ...transfer });
     } catch (err) {
-      return res.status(500).json({ ok: false, error: 'Failed to create transfer' });
+      return res.status(500).json({ ok: false, error: pickErrorMessage(err) || 'Failed to create transfer' });
     }
   },
   handleWebhook,

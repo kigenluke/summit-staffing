@@ -3,11 +3,11 @@
  * Shows full booking info, clock in/out (worker), leave review (participant), invoice/payment
  */
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { View, Text, ScrollView, Pressable, Alert, TextInput, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, ScrollView, Pressable, Alert, TextInput, ActivityIndicator, Platform, Modal } from 'react-native';
 import { useAuthStore } from '../store/authStore.js';
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
-import { formatDateDMY, formatTime12h } from '../utils/dateFormat.js';
+import { formatDateDMY, formatTime12h, formatDateTimeDMY } from '../utils/dateFormat.js';
 import { workerPayoutFromTotal } from '../utils/platformFee.js';
 import { getDeviceLocation, requestLocationPermission, promptOpenLocationSettings } from '../utils/deviceGeolocation';
 import { StripePayBookingButton } from '../components/StripePayBookingButton';
@@ -87,7 +87,7 @@ const StatusBadge = ({ status }) => {
   );
 };
 
-const DetailRow = ({ label, value, highlight, last }) => (
+const DetailRow = ({ label, value, highlight, last, selectable }) => (
   <View style={{
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -98,14 +98,17 @@ const DetailRow = ({ label, value, highlight, last }) => (
     borderBottomColor: Colors.borderLight,
   }}>
     <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, flex: 0.9 }}>{label}</Text>
-    <Text style={{
-      fontSize: Typography.fontSize.sm,
-      color: highlight ? Colors.primaryDark : Colors.text.primary,
-      flex: 1.1,
-      textAlign: 'right',
-      fontWeight: highlight ? Typography.fontWeight.semibold : Typography.fontWeight.normal,
-      lineHeight: 20,
-    }}>
+    <Text
+      selectable={Boolean(selectable)}
+      style={{
+        fontSize: Typography.fontSize.sm,
+        color: highlight ? Colors.primaryDark : Colors.text.primary,
+        flex: 1.1,
+        textAlign: 'right',
+        fontWeight: highlight ? Typography.fontWeight.semibold : Typography.fontWeight.normal,
+        lineHeight: 20,
+      }}
+    >
       {value || '—'}
     </Text>
   </View>
@@ -186,6 +189,8 @@ export function BookingDetailScreen({ route, navigation }) {
   const [geoStatus, setGeoStatus] = useState('');
   const [currentGps, setCurrentGps] = useState(null);
   const [locationBusy, setLocationBusy] = useState(false);
+  const [disputeModalVisible, setDisputeModalVisible] = useState(false);
+  const [disputeReason, setDisputeReason] = useState('');
 
   const autoClockOutIntervalRef = useRef(null);
   const clockInBusyRef = useRef(false);
@@ -206,6 +211,31 @@ export function BookingDetailScreen({ route, navigation }) {
   }, [bookingId]);
 
   useEffect(() => { loadBooking(); }, [loadBooking]);
+
+  // After Stripe Checkout redirect (?payment=success), sync payment + worker transfer.
+  useEffect(() => {
+    const paymentFlag =
+      route.params?.payment ||
+      (Platform.OS === 'web' && typeof window !== 'undefined'
+        ? new URLSearchParams(window.location.search).get('payment')
+        : null);
+    if (paymentFlag !== 'success' || !canPayForBooking) return;
+
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await api.post('/api/payments/sync-booking', { bookingId });
+      if (cancelled) return;
+      if (data?.ok) {
+        loadBooking();
+      } else if (error?.message) {
+        // Payment may still be processing — cron/webhook will retry transfer.
+        console.warn('[payment-sync]', error.message);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [bookingId, canPayForBooking, loadBooking, route.params?.payment]);
 
   const handleAction = async (action) => {
     const map = {
@@ -501,35 +531,36 @@ export function BookingDetailScreen({ route, navigation }) {
     ]);
   };
 
-  const handleDisputeTimesheet = async () => {
-    const promptDispute = async (reason) => {
-      if (!reason || reason.trim().length < 3) {
-        Alert.alert('Reason required', 'Please describe the issue (at least 3 characters).');
-        return;
-      }
-      setTimesheetActionBusy(true);
-      const { error } = await api.post(`/api/bookings/${bookingId}/timesheet/dispute`, { reason: reason.trim() });
-      setTimesheetActionBusy(false);
-      if (error) Alert.alert('Error', error.message);
-      else {
-        Alert.alert('Dispute lodged', 'Auto-approval is paused while we review.');
-        loadBooking();
-      }
-    };
+  const submitDispute = async (reason) => {
+    if (!reason || reason.trim().length < 3) {
+      Alert.alert('Reason required', 'Please describe the issue (at least 3 characters).');
+      return;
+    }
+    setTimesheetActionBusy(true);
+    const { error } = await api.post(`/api/bookings/${bookingId}/timesheet/dispute`, { reason: reason.trim() });
+    setTimesheetActionBusy(false);
+    if (error) {
+      Alert.alert('Error', error.message);
+      return;
+    }
+    setDisputeModalVisible(false);
+    setDisputeReason('');
+    Alert.alert('Dispute lodged', 'Auto-approval is paused while we review.');
+    loadBooking();
+  };
+
+  const handleDisputeTimesheet = () => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       const reason = window.prompt('Why are you disputing this timesheet?', '');
-      await promptDispute(reason);
+      submitDispute(reason || '');
       return;
     }
     if (Platform.OS === 'ios' && Alert.prompt) {
-      Alert.prompt('Dispute timesheet', 'Describe the issue with logged hours', promptDispute);
-    } else {
-      Alert.alert(
-        'Dispute timesheet',
-        'Open this booking in the web app to lodge a dispute, or contact support with your booking ID.',
-        [{ text: 'OK' }]
-      );
+      Alert.prompt('Dispute timesheet', 'Describe the issue with logged hours', submitDispute);
+      return;
     }
+    setDisputeReason('');
+    setDisputeModalVisible(true);
   };
 
   if (loading) {
@@ -628,6 +659,7 @@ export function BookingDetailScreen({ route, navigation }) {
         : 'info';
 
   return (
+    <>
     <ScrollView style={{ flex: 1, backgroundColor: Colors.background }} contentContainerStyle={{ padding: Spacing.md, paddingBottom: Spacing.xxl }}>
       {/* Hero summary */}
       <View style={{
@@ -691,6 +723,7 @@ export function BookingDetailScreen({ route, navigation }) {
 
       {/* Booking Details */}
       <Section title="Booking details" subtitle="Schedule, location and payment">
+        <DetailRow label="Booking ID" value={b.id} selectable last={false} />
         <DetailRow label="Date" value={formatDateDMY(b.start_time)} />
         <DetailRow
           label="Time"
@@ -777,8 +810,8 @@ export function BookingDetailScreen({ route, navigation }) {
 
       {ts && (
         <Section title="Timesheet" subtitle="Clock-in, clock-out and hours worked">
-          <DetailRow label="Clock in" value={ts.clock_in_time ? new Date(ts.clock_in_time).toLocaleString() : 'Not clocked in'} />
-          <DetailRow label="Clock out" value={ts.clock_out_time ? new Date(ts.clock_out_time).toLocaleString() : 'Not clocked out'} />
+          <DetailRow label="Clock in" value={ts.clock_in_time ? formatDateTimeDMY(ts.clock_in_time) : 'Not clocked in'} />
+          <DetailRow label="Clock out" value={ts.clock_out_time ? formatDateTimeDMY(ts.clock_out_time) : 'Not clocked out'} />
           <DetailRow label="Hours" value={ts.actual_hours ? `${Number(ts.actual_hours).toFixed(1)} hrs` : '—'} highlight={!!ts.actual_hours} />
           {ts.notes ? <DetailRow label="Notes" value={ts.notes} last /> : null}
         </Section>
@@ -886,7 +919,7 @@ export function BookingDetailScreen({ route, navigation }) {
           <Text style={{ color: Colors.text.secondary, marginBottom: Spacing.sm }}>
             Status: {(tsApproval || '').replace('_', ' ')}
             {ts?.auto_approve_at && tsApproval === 'pending_review'
-              ? ` · Auto-approves ${new Date(ts.auto_approve_at).toLocaleString()}`
+              ? ` · Auto-approves ${formatDateTimeDMY(ts.auto_approve_at)}`
               : ''}
           </Text>
           {canReviewTimesheet && (
@@ -1000,7 +1033,7 @@ export function BookingDetailScreen({ route, navigation }) {
             <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.muted }}>No written comment</Text>
           )}
           <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: Spacing.sm }}>
-            Submitted {new Date(b.user_review.created_at).toLocaleDateString()}
+            Submitted {formatDateDMY(b.user_review.created_at)}
           </Text>
         </Section>
       )}
@@ -1083,5 +1116,73 @@ export function BookingDetailScreen({ route, navigation }) {
         </Section>
       )}
     </ScrollView>
+
+    <Modal
+      visible={disputeModalVisible}
+      transparent
+      animationType="fade"
+      onRequestClose={() => !timesheetActionBusy && setDisputeModalVisible(false)}
+    >
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', padding: Spacing.lg }}>
+        <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.md }}>
+          <Text style={{ fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.xs }}>
+            Dispute timesheet
+          </Text>
+          <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: Spacing.sm }}>
+            Describe the issue with logged hours. Booking ID (for support): {bookingId}
+          </Text>
+          <TextInput
+            style={{
+              backgroundColor: Colors.surfaceSecondary,
+              borderRadius: Radius.md,
+              borderWidth: 1,
+              borderColor: Colors.border,
+              padding: Spacing.md,
+              minHeight: 100,
+              textAlignVertical: 'top',
+              color: Colors.text.primary,
+              marginBottom: Spacing.md,
+            }}
+            placeholder="e.g. Worker clocked out early…"
+            placeholderTextColor={Colors.text.muted}
+            value={disputeReason}
+            onChangeText={setDisputeReason}
+            multiline
+            editable={!timesheetActionBusy}
+          />
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: Spacing.sm }}>
+            <Pressable
+              disabled={timesheetActionBusy}
+              onPress={() => setDisputeModalVisible(false)}
+              style={({ pressed }) => ({
+                paddingVertical: Spacing.sm,
+                paddingHorizontal: Spacing.md,
+                borderRadius: Radius.md,
+                backgroundColor: Colors.surfaceSecondary,
+                opacity: pressed ? 0.85 : 1,
+              })}
+            >
+              <Text style={{ color: Colors.text.secondary, fontWeight: Typography.fontWeight.semibold }}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              disabled={timesheetActionBusy}
+              onPress={() => submitDispute(disputeReason)}
+              style={({ pressed }) => ({
+                paddingVertical: Spacing.sm,
+                paddingHorizontal: Spacing.md,
+                borderRadius: Radius.md,
+                backgroundColor: Colors.status.error,
+                opacity: pressed || timesheetActionBusy ? 0.85 : 1,
+              })}
+            >
+              <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>
+                {timesheetActionBusy ? 'Submitting…' : 'Submit dispute'}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+    </>
   );
 }

@@ -227,13 +227,16 @@ const capturePaymentIntent = async (paymentIntentId, amountToCaptureCents = null
 const cancelPaymentIntent = async (paymentIntentId) => stripe.paymentIntents.cancel(paymentIntentId);
 
 const createTransfer = async ({ amountCents, destination, sourceTransaction, metadata = {} }) => {
-  return stripe.transfers.create({
+  const params = {
     amount: amountCents,
     currency: 'aud',
     destination,
-    source_transaction: sourceTransaction,
-    metadata
-  });
+    metadata,
+  };
+  if (sourceTransaction) {
+    params.source_transaction = sourceTransaction;
+  }
+  return stripe.transfers.create(params);
 };
 
 const createCheckoutSession = async ({
@@ -247,9 +250,11 @@ const createCheckoutSession = async ({
 }) => {
   return stripe.checkout.sessions.create({
     mode: 'payment',
+    locale: 'en-AU',
     success_url: successUrl,
     cancel_url: cancelUrl,
     payment_method_types: ['card', 'au_becs_debit'],
+    billing_address_collection: 'auto',
     line_items: [
       {
         quantity: 1,
@@ -266,6 +271,14 @@ const createCheckoutSession = async ({
       bookingId: String(bookingId),
       workerId: String(workerId),
       participantId: String(participantId),
+    },
+    payment_intent_data: {
+      metadata: {
+        bookingId: String(bookingId),
+        workerId: String(workerId),
+        participantId: String(participantId),
+        platform_fee_rate: String(PLATFORM_FEE_RATE),
+      },
     },
   });
 };

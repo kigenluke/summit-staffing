@@ -52,3 +52,12 @@ export function formatTime12h(value) {
   if (!d) return '';
   return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: true });
 }
+
+/** DD/MM/YYYY h:mm AM/PM — avoids US-style locale strings on device. */
+export function formatDateTimeDMY(value) {
+  const d = parseApiDate(value);
+  if (!d) return '';
+  const datePart = formatDateDMY(d);
+  const timePart = formatTime12h(d);
+  return timePart ? `${datePart}, ${timePart}` : datePart;
+}
