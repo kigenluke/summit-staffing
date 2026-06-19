@@ -35,6 +35,13 @@ const formatBsbInput = (raw) => {
 
 const formatAccountInput = (raw) => String(raw || '').replace(/\D/g, '').slice(0, 9);
 
+const formatDobInput = (raw) => {
+  const digits = String(raw || '').replace(/\D/g, '').slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+};
+
 export function PaymentsScreen() {
   const { user } = useAuthStore();
   const insets = useSafeAreaInsets();
@@ -50,6 +57,8 @@ export function PaymentsScreen() {
   const [bankHolderName, setBankHolderName] = useState('');
   const [bankBsb, setBankBsb] = useState('');
   const [bankAccountNumber, setBankAccountNumber] = useState('');
+  const [bankDateOfBirth, setBankDateOfBirth] = useState('');
+  const [personalIdNumber, setPersonalIdNumber] = useState('');
   const [savingBank, setSavingBank] = useState(false);
   const [showBankForm, setShowBankForm] = useState(false);
 
@@ -76,6 +85,15 @@ export function PaymentsScreen() {
   }, [isWorker, isParticipant]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const flag = new URLSearchParams(window.location.search).get('stripe');
+      if (flag === 'verify_done' || flag === 'verify_refresh') {
+        load();
+      }
+    }
+  }, [load]);
   const onRefresh = useCallback(async () => { setRefreshing(true); await load(); setRefreshing(false); }, [load]);
 
   // When user returns from browser (Stripe onboarding), refresh account status automatically.
@@ -147,20 +165,74 @@ export function PaymentsScreen() {
 
   const hasSavedBank = Boolean(connectStatus?.bank_account?.last4);
   const hasLinkedAccount = Boolean(connectStatus?.hasAccount);
-  const showInAppBankForm = showBankForm || !hasSavedBank;
+  const payoutRestricted = connectStatus?.restricted || connectStatus?.account_status === 'restricted';
+  const payoutReady = connectStatus?.payout_ready || connectStatus?.onboardingComplete;
+  const needsBankResave = connectStatus?.needs_bank_resave || connectStatus?.legacy_express_account;
+  const complianceVerified = connectStatus?.compliance_verified;
+  const needsIdentityVerification = connectStatus?.needs_identity_verification;
+  const showInAppBankForm = showBankForm || !hasSavedBank || needsBankResave;
+
+  const openIdentityVerification = async () => {
+    try {
+      const { data, error } = await api.post('/api/payments/connect/verification-link');
+      if (error) {
+        Alert.alert('Verification', error.message || 'Could not open verification page.');
+        return;
+      }
+      const url = data?.verification_url;
+      if (!url) {
+        Alert.alert('Verification', 'Stripe did not return a verification link.');
+        return;
+      }
+      const canOpen = await Linking.canOpenURL(url);
+      if (!canOpen) {
+        Alert.alert('Verification', 'Could not open the verification page on this device.');
+        return;
+      }
+      await Linking.openURL(url);
+      setTimeout(load, 3000);
+    } catch (_) {
+      Alert.alert('Error', 'Failed to start identity verification.');
+    }
+  };
+
+  const refreshPayoutStatus = async () => {
+    try {
+      const { data } = await api.post('/api/payments/connect/refresh');
+      if (data?.ok) {
+        await load();
+        if (data.payout_ready) {
+          Alert.alert('Payouts ready', 'Your account can now receive shift payments.');
+        } else if (data.restricted) {
+          Alert.alert(
+            'Verification needed',
+            data.needs_identity_verification
+              ? 'Stripe needs your ID document and personal ID number. Tap "Verify identity with Stripe" on the Payments screen.'
+              : 'Stripe still needs extra details before payouts start. Ensure your Profile has a full address and phone number, then try again.',
+          );
+        }
+      }
+    } catch (_) {
+      Alert.alert('Error', 'Could not refresh payout status.');
+    }
+  };
 
   const saveBankDetails = async () => {
     const holder = bankHolderName.trim();
     const bsb = bankBsb.trim();
     const acct = bankAccountNumber.trim();
-    if (!holder || bsb.replace(/\D/g, '').length < 6 || acct.replace(/\D/g, '').length < 5) {
-      Alert.alert('Missing details', 'Enter account holder name, 6-digit BSB, and account number.');
+    const dob = bankDateOfBirth.trim();
+    const tfn = personalIdNumber.trim();
+    if (!holder || bsb.replace(/\D/g, '').length < 6 || acct.replace(/\D/g, '').length < 5 || dob.replace(/\D/g, '').length < 8 || tfn.replace(/\D/g, '').length < 8) {
+      Alert.alert('Missing details', 'Enter account holder name, date of birth, TFN (8–9 digits), BSB, and account number.');
       return;
     }
     setSavingBank(true);
     try {
       const { data, error } = await api.post('/api/payments/connect/bank-details', {
         account_holder_name: holder,
+        date_of_birth: dob,
+        personal_id_number: tfn,
         bsb,
         account_number: acct,
       });
@@ -172,6 +244,7 @@ export function PaymentsScreen() {
         return;
       }
       setBankAccountNumber('');
+      setPersonalIdNumber('');
       setShowBankForm(false);
       Alert.alert('Saved', data?.message || 'Bank account saved for payouts.');
       await load();
@@ -186,6 +259,8 @@ export function PaymentsScreen() {
     setBankHolderName('');
     setBankBsb('');
     setBankAccountNumber('');
+    setBankDateOfBirth('');
+    setPersonalIdNumber('');
     setShowBankForm(false);
   };
 
@@ -223,8 +298,80 @@ export function PaymentsScreen() {
           <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.sm }}>
             <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.sm }}>Payout bank account</Text>
             <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, lineHeight: 20, marginBottom: Spacing.md }}>
-              Enter your Australian bank details below. Summit Staffing pays you 85% of each shift (15% platform fee). You do not need to create a Stripe account.
+              One-time payout setup: bank details, date of birth, and TFN are sent securely to Stripe. Your Passport or Driver&apos;s Licence from Profile is uploaded to Stripe automatically — you should not need to use the Stripe website.
             </Text>
+
+            {complianceVerified ? (
+              <View style={{ backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0', borderRadius: Radius.md, padding: Spacing.sm, marginBottom: Spacing.md }}>
+                <Text style={{ color: '#065F46', fontSize: Typography.fontSize.sm }}>
+                  Compliance: Verified (documents approved). This does not automatically enable bank payouts — complete bank setup below.
+                </Text>
+              </View>
+            ) : null}
+
+            {needsBankResave ? (
+              <View style={{ backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A', borderRadius: Radius.md, padding: Spacing.md, marginBottom: Spacing.md }}>
+                <Text style={{ color: '#92400E', fontWeight: Typography.fontWeight.semibold, marginBottom: 4 }}>
+                  Payout account needs update
+                </Text>
+                <Text style={{ color: '#B45309', fontSize: Typography.fontSize.sm, lineHeight: 20 }}>
+                  Your old Stripe payout profile is incomplete. Re-enter bank details and date of birth below to activate transfers.
+                </Text>
+              </View>
+            ) : null}
+
+            {needsIdentityVerification && !connectStatus?.identity_synced ? (
+              <View style={{ backgroundColor: '#F5F3FF', borderWidth: 1, borderColor: '#DDD6FE', borderRadius: Radius.md, padding: Spacing.md, marginBottom: Spacing.md }}>
+                <Text style={{ color: '#5B21B6', fontWeight: Typography.fontWeight.semibold, marginBottom: 4 }}>
+                  Extra Stripe verification needed
+                </Text>
+                <Text style={{ color: '#6D28D9', fontSize: Typography.fontSize.sm, lineHeight: 20, marginBottom: Spacing.sm }}>
+                  Re-save bank details with TFN, or upload Passport / Driver&apos;s Licence in Profile first. If this persists, use the backup button below.
+                </Text>
+                <Pressable
+                  onPress={openIdentityVerification}
+                  style={({ pressed }) => ({
+                    backgroundColor: '#635BFF',
+                    paddingVertical: Spacing.sm,
+                    borderRadius: Radius.md,
+                    alignItems: 'center',
+                    opacity: pressed ? 0.85 : 1,
+                  })}
+                >
+                  <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Backup: Verify on Stripe website</Text>
+                </Pressable>
+              </View>
+            ) : null}
+
+            {payoutRestricted && hasSavedBank && !needsBankResave && !needsIdentityVerification ? (
+              <View style={{ backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA', borderRadius: Radius.md, padding: Spacing.md, marginBottom: Spacing.md }}>
+                <Text style={{ color: '#991B1B', fontWeight: Typography.fontWeight.semibold, marginBottom: 4 }}>
+                  Payouts paused — verification needed
+                </Text>
+                <Text style={{ color: '#B91C1C', fontSize: Typography.fontSize.sm, lineHeight: 20, marginBottom: Spacing.sm }}>
+                  Your bank is saved but Stripe has not enabled transfers yet. Update your Profile (address + phone), then tap Refresh status below.
+                </Text>
+                <Pressable
+                  onPress={refreshPayoutStatus}
+                  style={({ pressed }) => ({
+                    backgroundColor: Colors.primary,
+                    paddingVertical: Spacing.sm,
+                    borderRadius: Radius.md,
+                    alignItems: 'center',
+                    opacity: pressed ? 0.85 : 1,
+                  })}
+                >
+                  <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Refresh payout status</Text>
+                </Pressable>
+              </View>
+            ) : null}
+
+            {payoutReady && hasSavedBank ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm }}>
+                <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.status.success }} />
+                <Text style={{ color: Colors.status.success, fontWeight: Typography.fontWeight.semibold }}>Ready to receive payouts</Text>
+              </View>
+            ) : null}
 
             {connectStatus?.hasWorkerProfile === false ? (
               <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm }}>
@@ -273,6 +420,45 @@ export function PaymentsScreen() {
                       onChangeText={setBankHolderName}
                       placeholder="Name on bank account"
                       autoCapitalize="words"
+                      style={{
+                        borderWidth: 1,
+                        borderColor: Colors.border,
+                        borderRadius: Radius.md,
+                        padding: Spacing.sm,
+                        marginBottom: Spacing.md,
+                        backgroundColor: Colors.surface,
+                        color: Colors.text.primary,
+                      }}
+                    />
+                    <Text style={{ fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.semibold, color: Colors.text.primary, marginBottom: 6 }}>
+                      Personal ID (TFN)
+                    </Text>
+                    <TextInput
+                      value={personalIdNumber}
+                      onChangeText={(text) => setPersonalIdNumber(String(text || '').replace(/\D/g, '').slice(0, 9))}
+                      placeholder="8–9 digits (not stored by Summit)"
+                      keyboardType="number-pad"
+                      maxLength={9}
+                      secureTextEntry
+                      style={{
+                        borderWidth: 1,
+                        borderColor: Colors.border,
+                        borderRadius: Radius.md,
+                        padding: Spacing.sm,
+                        marginBottom: Spacing.md,
+                        backgroundColor: Colors.surface,
+                        color: Colors.text.primary,
+                      }}
+                    />
+                    <Text style={{ fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.semibold, color: Colors.text.primary, marginBottom: 6 }}>
+                      Date of birth
+                    </Text>
+                    <TextInput
+                      value={bankDateOfBirth}
+                      onChangeText={(text) => setBankDateOfBirth(formatDobInput(text))}
+                      placeholder="DD/MM/YYYY"
+                      keyboardType="number-pad"
+                      maxLength={10}
                       style={{
                         borderWidth: 1,
                         borderColor: Colors.border,

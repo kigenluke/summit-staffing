@@ -392,6 +392,11 @@ export function EditProfileScreen({ navigation }) {
             Address
             {needsEmergencyContact ? <Text style={{ color: Colors.status.error }}> *</Text> : null}
           </Text>
+          {isWorker ? (
+            <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginBottom: Spacing.xs }}>
+              Full format for bank payouts: Street, Suburb STATE Postcode (e.g. 12 George St, Sydney NSW 2000)
+            </Text>
+          ) : null}
           {!canUsePlacesAutocomplete ? (
             <>
               <TextInput
@@ -618,9 +623,12 @@ export function EditProfileScreen({ navigation }) {
         </View>
         {isWorker && profile?.verification_status && (
           <View>
-            <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.muted }}>Verification</Text>
+            <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.muted }}>Compliance verification</Text>
             <Text style={{ color: profile.verification_status === 'verified' ? Colors.status.success : Colors.status.warning }}>
-              {profile.verification_status === 'verified' ? 'Verified' : profile.verification_status}
+              {profile.verification_status === 'verified' ? 'Verified (documents approved)' : profile.verification_status}
+            </Text>
+            <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginTop: 4 }}>
+              This is separate from bank payout setup — add bank details under Payments to receive shift pay.
             </Text>
           </View>
         )}

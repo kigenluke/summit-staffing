@@ -11,12 +11,17 @@ const {
   listWorkerBankAccounts,
   createConnectedAccount,
   createAccountLink,
+  createConnectVerificationLink,
   createAccountLoginLink,
   createPaymentIntent,
   createCheckoutSession,
   verifyWebhookSignature,
+  completeCustomWorkerAccountProfile,
+  getConnectAccountHealth,
+  shouldReplaceConnectAccount,
 } = require('../services/stripeService');
 const { validateAustralianBankDetails, formatBsbDisplay } = require('../utils/bankAccount');
+const { validateAddressForStripe } = require('../utils/auAddress');
 const { userFacingPaymentMessage } = require('../utils/userFacingPaymentError');
 const { getWebClientBaseUrl } = require('../utils/clientAppUrl');
 const { classifyStripeSecretKey } = require('../utils/stripeKeyValidation');
@@ -34,6 +39,7 @@ const {
   syncBookingPaymentFromStripe,
   markPaymentSucceeded,
 } = require('../services/workerTransferService');
+const { completeWorkerStripePayoutSetup } = require('../services/stripeConnectSetupService');
 
 const respondValidation = (req, res) => {
   const errors = validationResult(req);
@@ -87,6 +93,44 @@ const pickErrorMessage = (err) => {
 };
 
 const { computePlatformFeeBreakdown } = require('../utils/platformFee.cjs');
+
+const buildWorkerStripeProfile = (worker, dob, idNumber) => ({
+  email: worker.email,
+  firstName: worker.first_name,
+  lastName: worker.last_name,
+  phone: worker.phone,
+  address: worker.address,
+  dob: dob || null,
+  idNumber: idNumber || null,
+});
+
+const assertWorkerProfileForPayouts = (worker) => {
+  if (!String(worker.phone || '').trim()) {
+    return 'Add your phone number in Profile before saving bank details.';
+  }
+  const addressCheck = validateAddressForStripe(worker.address);
+  if (!addressCheck.ok) {
+    return addressCheck.error;
+  }
+  return null;
+};
+
+const createFreshCustomConnectAccount = async (worker, clientIp, dob) => {
+  const account = await createCustomWorkerAccount({
+    email: worker.email,
+    firstName: worker.first_name,
+    lastName: worker.last_name,
+    tosAcceptanceIp: clientIp,
+    phone: worker.phone,
+    address: worker.address,
+    dob,
+  });
+  await pool.query('UPDATE workers SET stripe_account_id = $2, updated_at = now() WHERE id = $1', [
+    worker.id,
+    account.id,
+  ]);
+  return account.id;
+};
 
 const attemptWorkerTransfer = async (paymentIntentId, fallbackBookingId = null) => {
   try {
@@ -148,7 +192,9 @@ const getAccountStatus = async (req, res) => {
   try {
     if (!ensureStripeConfigured(res)) return;
     const workerRes = await pool.query(
-      'SELECT stripe_account_id FROM workers WHERE user_id = $1 LIMIT 1',
+      `SELECT w.stripe_account_id, w.verification_status, w.phone, w.address, w.first_name, w.last_name, u.email
+       FROM workers w JOIN users u ON u.id = w.user_id
+       WHERE w.user_id = $1 LIMIT 1`,
       [req.user.userId]
     );
 
@@ -158,6 +204,7 @@ const getAccountStatus = async (req, res) => {
         hasWorkerProfile: false,
         hasAccount: false,
         onboardingComplete: false,
+        compliance_verified: false,
         connect_mode: 'custom',
         preferred_setup: 'in_app_bank',
         charges_enabled: false,
@@ -166,14 +213,23 @@ const getAccountStatus = async (req, res) => {
       });
     }
 
-    const accountId = workerRes.rows[0].stripe_account_id;
+    const worker = workerRes.rows[0];
+    const complianceVerified = worker.verification_status === 'verified';
+
+    let accountId = worker.stripe_account_id;
     if (!accountId) {
       return res.status(200).json({
         ok: true,
         hasAccount: false,
         onboardingComplete: false,
+        compliance_verified: complianceVerified,
+        payout_ready: false,
+        account_status: 'not_setup',
         connect_mode: 'custom',
         preferred_setup: 'in_app_bank',
+        message: complianceVerified
+          ? 'Compliance verified. Add bank details below to receive shift payments.'
+          : 'Complete compliance verification, then add bank details for payouts.',
       });
     }
 
@@ -190,10 +246,23 @@ const getAccountStatus = async (req, res) => {
           ok: true,
           hasAccount: false,
           onboardingComplete: false,
+          compliance_verified: complianceVerified,
           staleAccountCleared: true,
         });
       }
       throw retrieveErr;
+    }
+
+    const clientIp = req.ip || req.headers['x-forwarded-for']?.split(',')[0]?.trim() || '127.0.0.1';
+    const legacyExpress = account.type === 'express' || account.type === 'standard';
+    if (!legacyExpress && !assertWorkerProfileForPayouts(worker)) {
+      try {
+        await completeCustomWorkerAccountProfile(accountId, buildWorkerStripeProfile(worker), clientIp);
+        account = await stripe.accounts.retrieve(accountId);
+      } catch (healErr) {
+        // eslint-disable-next-line no-console
+        console.warn('[connect] auto-heal profile:', healErr.message);
+      }
     }
 
     let bankAccount = null;
@@ -214,9 +283,11 @@ const getAccountStatus = async (req, res) => {
 
     const transfersActive = account.capabilities?.transfers === 'active';
     const isCustom = account.type === 'custom';
+    const health = getConnectAccountHealth(account, bankAccount);
     const onboardingComplete = isCustom
-      ? Boolean(bankAccount?.last4) && (transfersActive || account.payouts_enabled)
+      ? health.payoutReady
       : Boolean(account.details_submitted) && Boolean(account.charges_enabled) && Boolean(account.payouts_enabled);
+    const needsBankResave = legacyExpress || shouldReplaceConnectAccount(account);
 
     return res.status(200).json({
       ok: true,
@@ -224,7 +295,16 @@ const getAccountStatus = async (req, res) => {
       accountId,
       connect_mode: isCustom ? 'custom' : 'express',
       preferred_setup: isCustom ? 'in_app_bank' : 'stripe_express',
+      compliance_verified: complianceVerified,
+      legacy_express_account: legacyExpress,
+      needs_bank_resave: needsBankResave,
       onboardingComplete,
+      payout_ready: health.payoutReady,
+      account_status: health.account_status,
+      restricted: health.restricted,
+      requirements: health.requirements,
+      needs_dob_for_payout: health.restricted && (health.requirements.currently_due || []).some((f) => /dob/i.test(f)),
+      needs_identity_verification: health.needsIdentityVerification,
       charges_enabled: account.charges_enabled,
       payouts_enabled: account.payouts_enabled,
       details_submitted: account.details_submitted,
@@ -326,7 +406,7 @@ const saveWorkerBankDetails = async (req, res) => {
   let worker = null;
   try {
     const workerRes = await pool.query(
-      `SELECT w.id, w.user_id, w.stripe_account_id, w.first_name, w.last_name, u.email
+      `SELECT w.id, w.user_id, w.stripe_account_id, w.first_name, w.last_name, w.phone, w.address, u.email
        FROM workers w
        JOIN users u ON u.id = w.user_id
        WHERE w.user_id = $1
@@ -338,11 +418,18 @@ const saveWorkerBankDetails = async (req, res) => {
     }
     worker = workerRes.rows[0];
 
+    const profileError = assertWorkerProfileForPayouts(worker);
+    if (profileError) {
+      return res.status(400).json({ ok: false, error: profileError });
+    }
+
+    const clientIp = req.ip || req.headers['x-forwarded-for']?.split(',')[0]?.trim() || '127.0.0.1';
+
     let accountId = worker.stripe_account_id;
     if (accountId) {
       try {
         const existing = await stripe.accounts.retrieve(accountId);
-        if (existing.type === 'express') {
+        if (shouldReplaceConnectAccount(existing)) {
           accountId = null;
         }
       } catch (e) {
@@ -351,20 +438,8 @@ const saveWorkerBankDetails = async (req, res) => {
       }
     }
 
-    const clientIp = req.ip || req.headers['x-forwarded-for']?.split(',')[0]?.trim() || '127.0.0.1';
-
     if (!accountId) {
-      const account = await createCustomWorkerAccount({
-        email: worker.email,
-        firstName: worker.first_name,
-        lastName: worker.last_name,
-        tosAcceptanceIp: clientIp,
-      });
-      accountId = account.id;
-      await pool.query('UPDATE workers SET stripe_account_id = $2, updated_at = now() WHERE id = $1', [
-        worker.id,
-        accountId,
-      ]);
+      accountId = await createFreshCustomConnectAccount(worker, clientIp, validated.dob);
     }
 
     const bank = await replaceWorkerBankAccount(accountId, {
@@ -373,16 +448,38 @@ const saveWorkerBankDetails = async (req, res) => {
       accountNumber: validated.account_number,
     });
 
+    const setup = await completeWorkerStripePayoutSetup({
+      accountId,
+      worker,
+      dob: validated.dob,
+      personalIdNumber: validated.personal_id_number,
+      clientIp,
+    });
+
+    const health = setup.health;
+    const identityOk = setup.identity?.ok;
+
     return res.status(200).json({
       ok: true,
       connect_mode: 'custom',
       accountId,
+      payout_ready: health.payoutReady,
+      account_status: health.account_status,
+      restricted: health.restricted,
+      needs_identity_verification: health.needsIdentityVerification && !identityOk,
+      identity_synced: identityOk,
+      requirements: health.requirements,
       bank_account: {
         last4: bank.last4,
         bsb_display: formatBsbDisplay(validated.bsb),
         account_holder_name: validated.account_holder_name,
       },
-      message: 'Bank account saved. You will receive 85% of each paid shift (15% platform fee). No Stripe account needed.',
+      message: health.payoutReady
+        ? 'Payout setup complete. You will receive 85% of each paid shift (15% platform fee).'
+        : identityOk
+          ? 'Payout details submitted to Stripe. Verification usually completes within a few minutes to 24 hours.'
+          : setup.identity?.error ||
+            'Bank saved. Upload Passport or Driver\'s Licence in Profile, then save bank details again.',
     });
   } catch (err) {
     // eslint-disable-next-line no-console
@@ -393,6 +490,94 @@ const saveWorkerBankDetails = async (req, res) => {
       error: userFacingPaymentMessage(pickErrorMessage(err) || err, 500) || 'Could not save bank details.',
       hint: stripeActionHint(err),
     });
+  }
+};
+
+const createConnectVerificationLinkHandler = async (req, res) => {
+  try {
+    if (!ensureStripeConfigured(res)) return;
+
+    const workerRes = await pool.query(
+      'SELECT w.stripe_account_id FROM workers w WHERE w.user_id = $1 LIMIT 1',
+      [req.user.userId]
+    );
+    if (workerRes.rowCount === 0 || !workerRes.rows[0].stripe_account_id) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Save your bank details first, then complete identity verification.',
+      });
+    }
+
+    const accountId = workerRes.rows[0].stripe_account_id;
+    const link = await createConnectVerificationLink(accountId);
+    return res.status(200).json({
+      ok: true,
+      verification_url: link.url,
+      message: 'Open this secure Stripe page to upload your ID and enter your personal ID number.',
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: pickErrorMessage(err) || 'Could not start identity verification.',
+      hint: stripeActionHint(err),
+    });
+  }
+};
+
+const refreshConnectAccountHandler = async (req, res) => {
+  try {
+    if (!ensureStripeConfigured(res)) return;
+
+    const workerRes = await pool.query(
+      `SELECT w.id, w.stripe_account_id, w.first_name, w.last_name, w.phone, w.address, u.email
+       FROM workers w JOIN users u ON u.id = w.user_id
+       WHERE w.user_id = $1 LIMIT 1`,
+      [req.user.userId]
+    );
+    if (workerRes.rowCount === 0 || !workerRes.rows[0].stripe_account_id) {
+      return res.status(400).json({ ok: false, error: 'No payout account linked yet. Save your bank details first.' });
+    }
+
+    const worker = workerRes.rows[0];
+    const profileError = assertWorkerProfileForPayouts(worker);
+    if (profileError) {
+      return res.status(400).json({ ok: false, error: profileError });
+    }
+
+    const clientIp = req.ip || req.headers['x-forwarded-for']?.split(',')[0]?.trim() || '127.0.0.1';
+    let accountId = worker.stripe_account_id;
+    let account = await stripe.accounts.retrieve(accountId);
+    if (shouldReplaceConnectAccount(account)) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Your payout profile needs to be updated. Re-enter bank details and date of birth on this screen.',
+        needs_bank_resave: true,
+      });
+    }
+
+    await completeCustomWorkerAccountProfile(accountId, buildWorkerStripeProfile(worker), clientIp);
+
+    account = await stripe.accounts.retrieve(accountId);
+    let bankAccount = null;
+    try {
+      const banks = await listWorkerBankAccounts(accountId);
+      const primary = banks.find((b) => b.default_for_currency) || banks[0];
+      if (primary) {
+        bankAccount = { last4: primary.last4, account_holder_name: primary.account_holder_name || null };
+      }
+    } catch (_) {}
+
+    const health = getConnectAccountHealth(account, bankAccount);
+    return res.status(200).json({
+      ok: true,
+      account_status: health.account_status,
+      payout_ready: health.payoutReady,
+      restricted: health.restricted,
+      needs_identity_verification: health.needsIdentityVerification,
+      requirements: health.requirements,
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: pickErrorMessage(err) || 'Could not refresh payout status.' });
   }
 };
 
@@ -1251,4 +1436,6 @@ module.exports = {
   detachCustomerPaymentMethod,
   authorizeBooking: authorizeBookingHandler,
   saveWorkerBankDetails,
+  refreshConnectAccount: refreshConnectAccountHandler,
+  createConnectVerificationLink: createConnectVerificationLinkHandler,
 };

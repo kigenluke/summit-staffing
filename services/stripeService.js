@@ -1,6 +1,33 @@
 require('dotenv').config();
 
 const { stripe, webhookSecret } = require('../config/stripe');
+const { getWebClientBaseUrl } = require('../utils/clientAppUrl');
+const { toStripeConnectAddress } = require('../utils/auAddress');
+
+const getConnectBusinessUrl = () => {
+  const fromEnv = process.env.STRIPE_CONNECT_BUSINESS_URL || process.env.WEB_APP_URL;
+  if (fromEnv) return String(fromEnv).trim().replace(/\/$/, '');
+  return getWebClientBaseUrl();
+};
+
+/** NDIS / disability support — Stripe merchant category code for connected worker profiles. */
+const CONNECT_MCC = process.env.STRIPE_CONNECT_MCC || '8398';
+
+const formatAuPhone = (phone) => {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (!digits) return undefined;
+  if (digits.startsWith('61')) return `+${digits}`;
+  if (digits.startsWith('0')) return `+61${digits.slice(1)}`;
+  return `+61${digits}`;
+};
+
+const buildIndividualAddress = (addressText) => {
+  const { address, error } = toStripeConnectAddress(addressText);
+  if (address) return address;
+  const line1 = String(addressText || '').trim().slice(0, 200);
+  if (!line1) return { line1: 'Unknown', city: 'Sydney', state: 'NSW', postal_code: '2000', country: 'AU' };
+  throw new Error(error || 'Invalid address for Stripe payouts.');
+};
 
 /**
  * Base URL for Stripe Connect return/refresh redirects.
@@ -23,18 +50,38 @@ const resolveAppBaseUrl = () => {
 /** Custom Connect (in-app BSB) is default — worker never signs up for Stripe. Set STRIPE_CONNECT_MODE=express for hosted onboarding. */
 const useCustomConnect = () => String(process.env.STRIPE_CONNECT_MODE || 'custom').toLowerCase() !== 'express';
 
-const buildCustomWorkerAccountBase = ({ email, firstName, lastName, tosAcceptanceIp }) => ({
-  country: 'AU',
-  email: String(email || '').trim(),
-  business_type: 'individual',
-  capabilities: {
-    transfers: { requested: true },
-  },
-  individual: {
+const buildIndividualPayload = ({ email, firstName, lastName, phone, address, dob, idNumber }) => {
+  const individual = {
     first_name: String(firstName || '').trim() || 'Worker',
     last_name: String(lastName || '').trim() || 'User',
     email: String(email || '').trim(),
+    address: buildIndividualAddress(address),
+  };
+  const ph = formatAuPhone(phone);
+  if (ph) individual.phone = ph;
+  if (dob?.day && dob?.month && dob?.year) {
+    individual.dob = { day: dob.day, month: dob.month, year: dob.year };
+  }
+  const idDigits = String(idNumber || '').replace(/\D/g, '');
+  if (idDigits.length >= 8 && idDigits.length <= 9) {
+    individual.id_number = idDigits;
+  }
+  return individual;
+};
+
+const buildCustomWorkerAccountBase = ({ email, firstName, lastName, tosAcceptanceIp, phone, address, dob }) => ({
+  country: 'AU',
+  email: String(email || '').trim(),
+  business_type: 'individual',
+  business_profile: {
+    url: getConnectBusinessUrl(),
+    mcc: CONNECT_MCC,
+    product_description: 'Disability and community support services via Summit Staffing.',
   },
+  capabilities: {
+    transfers: { requested: true },
+  },
+  individual: buildIndividualPayload({ email, firstName, lastName, phone, address, dob }),
   // AU platform + AU connected accounts must use `full`, not `recipient` (recipient is cross-border only).
   tos_acceptance: {
     date: Math.floor(Date.now() / 1000),
@@ -52,8 +99,8 @@ const buildCustomWorkerAccountBase = ({ email, firstName, lastName, tosAcceptanc
  * Custom Connect worker (no Stripe dashboard). Uses controller properties — do NOT pass `type` with `controller`.
  * @see https://docs.stripe.com/connect/migrate-to-controller-properties
  */
-const createCustomWorkerAccount = async ({ email, firstName, lastName, tosAcceptanceIp }) => {
-  const base = buildCustomWorkerAccountBase({ email, firstName, lastName, tosAcceptanceIp });
+const createCustomWorkerAccount = async ({ email, firstName, lastName, tosAcceptanceIp, phone, address, dob }) => {
+  const base = buildCustomWorkerAccountBase({ email, firstName, lastName, tosAcceptanceIp, phone, address, dob });
 
   try {
     return await stripe.accounts.create({
@@ -122,6 +169,85 @@ const listWorkerBankAccounts = async (accountId) => {
   return list.data || [];
 };
 
+/** Fill Stripe Connect requirements for AU custom worker accounts (platform-collected). */
+const completeCustomWorkerAccountProfile = async (
+  accountId,
+  { email, firstName, lastName, phone, address, dob, idNumber },
+  clientIp
+) => {
+  const payload = {
+    business_type: 'individual',
+    business_profile: {
+      url: getConnectBusinessUrl(),
+      mcc: CONNECT_MCC,
+      product_description: 'Disability and community support services engaged via Summit Staffing.',
+    },
+    individual: buildIndividualPayload({ email, firstName, lastName, phone, address, dob, idNumber }),
+    tos_acceptance: {
+      date: Math.floor(Date.now() / 1000),
+      ip: clientIp || '127.0.0.1',
+      service_agreement: 'full',
+    },
+  };
+  return stripe.accounts.update(accountId, payload);
+};
+
+/** Old Express / broken Custom accounts cannot receive transfers — create a fresh Custom account. */
+const shouldReplaceConnectAccount = (account) => {
+  if (!account) return true;
+  if (account.type === 'express' || account.type === 'standard') return true;
+  const transfersCap = account.capabilities?.transfers;
+  if (transfersCap === 'inactive') return true;
+  const pastDue = account.requirements?.past_due || [];
+  if (pastDue.includes('tos_acceptance.date') || pastDue.includes('tos_acceptance.ip')) return true;
+  return false;
+};
+
+const summarizeAccountRequirements = (account) => {
+  const req = account?.requirements || {};
+  return {
+    disabled_reason: req.disabled_reason || null,
+    currently_due: req.currently_due || [],
+    eventually_due: req.eventually_due || [],
+    past_due: req.past_due || [],
+    pending_verification: req.pending_verification || [],
+  };
+};
+
+const getConnectAccountHealth = (account, bankAccount) => {
+  const transfersCap = account.capabilities?.transfers;
+  const transfersActive = transfersCap === 'active';
+  const requirements = summarizeAccountRequirements(account);
+  const allReqFields = [
+    ...(requirements.currently_due || []),
+    ...(requirements.eventually_due || []),
+    ...(requirements.past_due || []),
+    ...(requirements.pending_verification || []),
+  ];
+  const needsIdentityVerification = allReqFields.some((field) =>
+    /verification\.document|verification\.additional_document|id_number|identity|document/i.test(String(field))
+  );
+  const hasPastDue = (requirements.past_due || []).length > 0;
+  const restricted =
+    Boolean(requirements.disabled_reason) ||
+    hasPastDue ||
+    transfersCap === 'inactive' ||
+    (account.payouts_enabled === false && Boolean(bankAccount?.last4));
+  const payoutReady = transfersActive && Boolean(bankAccount?.last4) && account.payouts_enabled !== false;
+  let accountStatus = 'pending';
+  if (restricted) accountStatus = 'restricted';
+  else if (payoutReady) accountStatus = 'enabled';
+
+  return {
+    transfersActive,
+    restricted,
+    payoutReady,
+    account_status: accountStatus,
+    requirements,
+    needsIdentityVerification,
+  };
+};
+
 const createConnectedAccount = async (workerEmail) => {
   const email = String(workerEmail || '').trim();
   if (!email || !email.includes('@')) {
@@ -168,6 +294,21 @@ const createAccountLink = async (accountId) => {
     refresh_url: refreshUrl,
     return_url: returnUrl,
     type: 'account_onboarding'
+  });
+};
+
+/** Hosted Stripe page for ID document + personal ID number (Custom Connect workers). */
+const createConnectVerificationLink = async (accountId) => {
+  const webAppUrl = getWebClientBaseUrl();
+  const refreshUrl = `${webAppUrl}/payments?stripe=verify_refresh`;
+  const returnUrl = `${webAppUrl}/payments?stripe=verify_done`;
+
+  return stripe.accountLinks.create({
+    account: accountId,
+    refresh_url: refreshUrl,
+    return_url: returnUrl,
+    type: 'account_onboarding',
+    collection_options: { fields: 'currently_due' },
   });
 };
 
@@ -301,6 +442,7 @@ module.exports = {
   listWorkerBankAccounts,
   createConnectedAccount,
   createAccountLink,
+  createConnectVerificationLink,
   createAccountLoginLink,
   createPaymentIntent,
   createAuthorizationHold,
@@ -309,5 +451,9 @@ module.exports = {
   cancelPaymentIntent,
   createCheckoutSession,
   createTransfer,
-  verifyWebhookSignature
+  verifyWebhookSignature,
+  completeCustomWorkerAccountProfile,
+  summarizeAccountRequirements,
+  getConnectAccountHealth,
+  shouldReplaceConnectAccount,
 };

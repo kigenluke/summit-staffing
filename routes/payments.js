@@ -25,6 +25,9 @@ router.post('/connect/login-link', [auth, checkWorker], paymentController.create
 router.post('/connect/disconnect', [auth, checkWorker], paymentController.disconnectConnectAccount);
 router.post('/connect/express/onboarding', [auth, checkWorker], paymentController.getExpressOnboardingUrl);
 
+router.post('/connect/refresh', [auth, checkWorker], paymentController.refreshConnectAccount);
+router.post('/connect/verification-link', [auth, checkWorker], paymentController.createConnectVerificationLink);
+
 router.post(
   '/connect/bank-details',
   [
@@ -33,6 +36,8 @@ router.post(
     body('account_holder_name').isString().trim().isLength({ min: 2, max: 120 }),
     body('bsb').isString().trim().isLength({ min: 6, max: 8 }),
     body('account_number').isString().trim().isLength({ min: 5, max: 12 }),
+    body('date_of_birth').isString().trim().isLength({ min: 8, max: 12 }),
+    body('personal_id_number').isString().trim().isLength({ min: 8, max: 11 }),
   ],
   paymentController.saveWorkerBankDetails
 );
