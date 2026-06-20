@@ -60,10 +60,15 @@ export function InvoicesScreen() {
         { timeoutMs: 120000 },
       );
       if (error) {
-        const msg =
-          error.status === 403
-            ? error.message || 'You do not have permission to send this invoice.'
-            : error.message || 'Failed to send invoice email';
+        let msg = error.message || 'Failed to send invoice email';
+        if (error.status === 403) {
+          msg = error.message || 'You do not have permission to send this invoice.';
+        } else if (error.status === 502 || /mailgun|email could not be sent/i.test(msg)) {
+          msg = error.message || 'Invoice email could not be sent.';
+        }
+        if (error.response?.hint) {
+          msg = `${msg}\n\n${error.response.hint}`;
+        }
         showUserAlert('Could not send', msg);
         return;
       }

@@ -3,6 +3,10 @@ import { View, Text, ScrollView, TextInput, Pressable, Alert, Platform, Activity
 import { api } from '../services/api.js';
 import { useAuthStore } from '../store/authStore.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
+import { MinLengthHint, SubmitRequirements } from '../components/MinLengthHint.js';
+
+const MIN_NAME_LEN = 2;
+const MIN_DETAILS_LEN = 5;
 
 export function AddIncidentScreen({ navigation }) {
   const { user } = useAuthStore();
@@ -22,10 +26,15 @@ export function AddIncidentScreen({ navigation }) {
   const [selectedImages, setSelectedImages] = useState([]);
 
   const canSubmit = useMemo(() => {
-    const nameOk = incidentName.trim().length >= 2;
-    const detailsOk = incidentDetails.trim().length >= 5;
+    const nameOk = incidentName.trim().length >= MIN_NAME_LEN;
+    const detailsOk = incidentDetails.trim().length >= MIN_DETAILS_LEN;
     return canUse && nameOk && detailsOk && !!triageCategory && typeof called000 === 'boolean' && !loading;
   }, [incidentName, incidentDetails, canUse, loading, triageCategory, called000]);
+
+  const submitRequirements = useMemo(() => [
+    { label: `Incident name — at least ${MIN_NAME_LEN} characters`, met: incidentName.trim().length >= MIN_NAME_LEN },
+    { label: `Incident details — at least ${MIN_DETAILS_LEN} characters`, met: incidentDetails.trim().length >= MIN_DETAILS_LEN },
+  ], [incidentName, incidentDetails]);
 
   const imageInputRef = useRef(null);
 
@@ -52,12 +61,12 @@ export function AddIncidentScreen({ navigation }) {
 
   const submit = async () => {
     if (!canUse) return;
-    if (incidentName.trim().length < 2) {
-      Alert.alert('Missing name', 'Please enter incident name.');
+    if (incidentName.trim().length < MIN_NAME_LEN) {
+      Alert.alert('Missing name', `Please enter incident name (minimum ${MIN_NAME_LEN} characters).`);
       return;
     }
-    if (incidentDetails.trim().length < 5) {
-      Alert.alert('Missing details', 'Please enter incident details (min 5 characters).');
+    if (incidentDetails.trim().length < MIN_DETAILS_LEN) {
+      Alert.alert('Missing details', `Please enter incident details (minimum ${MIN_DETAILS_LEN} characters).`);
       return;
     }
 
@@ -192,11 +201,13 @@ export function AddIncidentScreen({ navigation }) {
       </View>
 
       <View style={{ marginBottom: Spacing.lg }}>
-        <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, marginBottom: 6 }}>Incident Name</Text>
+        <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, marginBottom: 6 }}>
+          Incident Name <Text style={{ color: Colors.text.muted }}>(minimum {MIN_NAME_LEN} characters)</Text>
+        </Text>
         <TextInput
           value={incidentName}
           onChangeText={setIncidentName}
-          placeholder="e.g. Slip and fall"
+          placeholder={`e.g. Slip and fall (min ${MIN_NAME_LEN} characters)`}
           placeholderTextColor={Colors.text.muted}
           style={{
             backgroundColor: Colors.surface,
@@ -208,6 +219,7 @@ export function AddIncidentScreen({ navigation }) {
             color: Colors.text.primary,
           }}
         />
+        <MinLengthHint value={incidentName} min={MIN_NAME_LEN} />
       </View>
 
       <View style={{ marginBottom: Spacing.lg }}>
@@ -312,11 +324,13 @@ export function AddIncidentScreen({ navigation }) {
       </View>
 
       <View style={{ marginBottom: Spacing.xl }}>
-        <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, marginBottom: 6 }}>Incident Details</Text>
+        <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, marginBottom: 6 }}>
+          Incident Details <Text style={{ color: Colors.text.muted }}>(minimum {MIN_DETAILS_LEN} characters)</Text>
+        </Text>
         <TextInput
           value={incidentDetails}
           onChangeText={setIncidentDetails}
-          placeholder="Describe what happened, location, and any relevant notes..."
+          placeholder={`Describe what happened, location, and notes (min ${MIN_DETAILS_LEN} characters)...`}
           placeholderTextColor={Colors.text.muted}
           multiline
           numberOfLines={6}
@@ -329,8 +343,10 @@ export function AddIncidentScreen({ navigation }) {
             paddingHorizontal: Spacing.md,
             color: Colors.text.primary,
             minHeight: 130,
+            textAlignVertical: 'top',
           }}
         />
+        <MinLengthHint value={incidentDetails} min={MIN_DETAILS_LEN} />
       </View>
 
       <View style={{ marginBottom: Spacing.lg }}>
@@ -419,6 +435,8 @@ export function AddIncidentScreen({ navigation }) {
         </Text>
       </View>
 
+      {!canSubmit && !loading ? <SubmitRequirements items={submitRequirements} /> : null}
+
       <Pressable
         onPress={submit}
         disabled={!canSubmit}
@@ -434,7 +452,9 @@ export function AddIncidentScreen({ navigation }) {
         {loading ? (
           <ActivityIndicator size="small" color={Colors.text.white} />
         ) : (
-          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Submit Incident</Text>
+          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>
+            {canSubmit ? 'Submit Incident' : 'Complete required fields to send'}
+          </Text>
         )}
       </Pressable>
     </ScrollView>

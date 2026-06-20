@@ -41,7 +41,18 @@ const sendEmail = async (to, subject, html, attachments = [], text = null) => {
   };
   if (text) data.text = text;
 
-  return mg.messages().send(data);
+  try {
+    return await mg.messages().send(data);
+  } catch (err) {
+    const status = err?.statusCode || err?.status;
+    const msg = String(err?.message || err || 'Email send failed');
+    if (status === 401 || status === 403 || /forbidden|unauthorized/i.test(msg)) {
+      const e = new Error(`Mailgun rejected the send (${msg})`);
+      e.code = 'MAILGUN_AUTH';
+      throw e;
+    }
+    throw err;
+  }
 };
 
 const createAttachment = (buffer, filename, contentType = 'application/octet-stream') => {

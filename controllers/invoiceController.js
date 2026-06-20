@@ -25,7 +25,10 @@ const formatDateYYYYMMDD = (date) => {
 
 const assertInvoiceAccess = async (req, invoiceId) => {
   const invRes = await pool.query(
-    `SELECT i.*, b.worker_id, b.participant_id
+    `SELECT
+       i.*,
+       b.worker_id AS booking_worker_id,
+       b.participant_id AS booking_participant_id
      FROM invoices i
      JOIN bookings b ON b.id = i.booking_id
      WHERE i.id = $1
@@ -39,29 +42,37 @@ const assertInvoiceAccess = async (req, invoiceId) => {
   const userId = req.user?.userId;
   const role = req.user?.role;
   const email = String(req.user?.email || '').toLowerCase();
+  const bookingWorkerId = invoice.booking_worker_id;
+  const bookingParticipantId = invoice.booking_participant_id;
 
   if (role === 'admin' || email.endsWith('@summitstaffing.com.au')) {
     return { ok: true, invoice };
   }
 
-  if (role === 'worker') {
-    const workerRes = await pool.query('SELECT id FROM workers WHERE user_id = $1 LIMIT 1', [userId]);
-    if (workerRes.rowCount > 0 && workerRes.rows[0].id === invoice.worker_id) {
-      return { ok: true, invoice };
-    }
+  if (role === 'worker' && userId) {
+    const workerRes = await pool.query(
+      `SELECT w.id FROM workers w
+       WHERE w.user_id = $1 AND w.id = $2
+       LIMIT 1`,
+      [userId, bookingWorkerId]
+    );
+    if (workerRes.rowCount > 0) return { ok: true, invoice };
   }
 
-  if (role === 'participant') {
-    const participantRes = await pool.query('SELECT id FROM participants WHERE user_id = $1 LIMIT 1', [userId]);
-    if (participantRes.rowCount > 0 && participantRes.rows[0].id === invoice.participant_id) {
-      return { ok: true, invoice };
-    }
+  if (role === 'participant' && userId) {
+    const participantRes = await pool.query(
+      `SELECT p.id FROM participants p
+       WHERE p.user_id = $1 AND p.id = $2
+       LIMIT 1`,
+      [userId, bookingParticipantId]
+    );
+    if (participantRes.rowCount > 0) return { ok: true, invoice };
   }
 
-  if (role === 'coordinator') {
+  if (role === 'coordinator' && userId) {
     const participantRes = await pool.query(
       'SELECT user_id FROM participants WHERE id = $1 LIMIT 1',
-      [invoice.participant_id]
+      [bookingParticipantId]
     );
     if (participantRes.rowCount > 0) {
       const accessRes = await pool.query(
@@ -441,7 +452,30 @@ const sendInvoiceEmailHandler = async (req, res) => {
     const emailResult = await emailInvoiceToPlanManager(access.invoice.id, { resend: isResend });
     return res.status(200).json({ ok: true, emailedTo: emailResult.to, resent: emailResult.resent === true });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message || 'Failed to send invoice email' });
+    // eslint-disable-next-line no-console
+    console.error('[invoice send]', err);
+    const raw = String(err?.message || err || '');
+    const isMailgunForbidden = /^forbidden$/i.test(raw.trim());
+    const isMailgunAuth = /forbidden|unauthorized|401|403/i.test(raw);
+
+    let error = raw || 'Failed to send invoice email';
+    let hint;
+    if (isMailgunForbidden || (isMailgunAuth && /mailgun|domain|api/i.test(raw))) {
+      error = 'Invoice email could not be sent — the mail server rejected the request.';
+      hint = 'Check MAILGUN_API_KEY and MAILGUN_DOMAIN on the server (Railway → Variables). For local testing, run npm run dev and set VITE_PROXY_TARGET=http://localhost:3000 in .env.';
+    } else if (/MAILGUN/i.test(raw)) {
+      error = 'Invoice email is not configured on this server.';
+      hint = 'Add MAILGUN_API_KEY and MAILGUN_DOMAIN to the server environment.';
+    } else if (/plan manager|participant email/i.test(raw)) {
+      hint = 'Open the participant profile and add a plan manager email or participant email, then try again.';
+    } else if (/chrome|puppeteer|pdf/i.test(raw)) {
+      error = 'Invoice PDF could not be generated on the server.';
+      hint = process.env.NODE_ENV === 'production'
+        ? 'Ensure Chrome/Chromium is available on Railway, or set PUPPETEER_EXECUTABLE_PATH.'
+        : 'Install Google Chrome, or run: npx puppeteer browsers install chrome — then restart npm run dev.';
+    }
+
+    return res.status(502).json({ ok: false, error, hint });
   }
 };
 

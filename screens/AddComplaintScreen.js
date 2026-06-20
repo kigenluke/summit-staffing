@@ -3,6 +3,9 @@ import { View, Text, ScrollView, TextInput, Pressable, Alert, Platform, Activity
 import { api } from '../services/api.js';
 import { useAuthStore } from '../store/authStore.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
+import { MinLengthHint, SubmitRequirements } from '../components/MinLengthHint.js';
+
+const MIN_DETAILS_LEN = 5;
 
 export function AddComplaintScreen({ navigation }) {
   const { user } = useAuthStore();
@@ -17,9 +20,13 @@ export function AddComplaintScreen({ navigation }) {
   const imageInputRef = useRef(null);
 
   const canSubmit = useMemo(() => {
-    const detailsOk = complaintDetails.trim().length >= 5;
+    const detailsOk = complaintDetails.trim().length >= MIN_DETAILS_LEN;
     return canUse && detailsOk && !loading;
   }, [complaintDetails, canUse, loading]);
+
+  const submitRequirements = useMemo(() => [
+    { label: `Complaint details — at least ${MIN_DETAILS_LEN} characters`, met: complaintDetails.trim().length >= MIN_DETAILS_LEN },
+  ], [complaintDetails]);
 
   const onPickFilesWeb = (files) => {
     const list = Array.from(files || []);
@@ -78,8 +85,8 @@ export function AddComplaintScreen({ navigation }) {
 
   const submit = async () => {
     if (!canUse) return;
-    if (complaintDetails.trim().length < 5) {
-      Alert.alert('Missing details', 'Please enter complaint details (min 5 characters).');
+    if (complaintDetails.trim().length < MIN_DETAILS_LEN) {
+      Alert.alert('Missing details', `Please enter complaint details (minimum ${MIN_DETAILS_LEN} characters).`);
       return;
     }
 
@@ -235,11 +242,13 @@ export function AddComplaintScreen({ navigation }) {
       </View>
 
       <View style={{ marginBottom: Spacing.xl }}>
-        <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, marginBottom: 6 }}>Complaint details</Text>
+        <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, marginBottom: 6 }}>
+          Complaint details <Text style={{ color: Colors.text.muted }}>(minimum {MIN_DETAILS_LEN} characters)</Text>
+        </Text>
         <TextInput
           value={complaintDetails}
           onChangeText={setComplaintDetails}
-          placeholder="Describe your complaint in detail..."
+          placeholder={`Describe your complaint in detail (min ${MIN_DETAILS_LEN} characters)...`}
           placeholderTextColor={Colors.text.muted}
           multiline
           numberOfLines={8}
@@ -252,9 +261,13 @@ export function AddComplaintScreen({ navigation }) {
             paddingHorizontal: Spacing.md,
             color: Colors.text.primary,
             minHeight: 150,
+            textAlignVertical: 'top',
           }}
         />
+        <MinLengthHint value={complaintDetails} min={MIN_DETAILS_LEN} />
       </View>
+
+      {!canSubmit && !loading ? <SubmitRequirements items={submitRequirements} /> : null}
 
       <Pressable
         onPress={submit}
@@ -271,7 +284,9 @@ export function AddComplaintScreen({ navigation }) {
         {loading ? (
           <ActivityIndicator size="small" color={Colors.text.white} />
         ) : (
-          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Submit Complaint</Text>
+          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>
+            {canSubmit ? 'Submit Complaint' : `Write at least ${MIN_DETAILS_LEN} characters to send`}
+          </Text>
         )}
       </Pressable>
     </ScrollView>

@@ -98,6 +98,8 @@ export default defineConfig(({ mode }) => {
     mode === 'development'
       ? 'http://localhost:3000'
       : 'https://athletic-heart-backend-production.up.railway.app';
+  // Local web dev: use localhost backend when running `npm run dev` alongside `npm run web`.
+  // Set VITE_PROXY_TARGET in .env only when you intentionally want to hit Railway from the browser.
   const RAILWAY_API_TARGET =
     env.VITE_PROXY_TARGET ||
     process.env.VITE_PROXY_TARGET ||
