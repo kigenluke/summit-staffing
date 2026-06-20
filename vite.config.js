@@ -152,11 +152,18 @@ export default defineConfig(({ mode }) => {
           target: RAILWAY_API_TARGET,
           changeOrigin: true,
           secure: RAILWAY_API_TARGET.startsWith('https'),
-          // Multipart (complaints/incidents) can be slow; avoid premature socket close / ECONNRESET on large uploads.
           timeout: 120000,
           proxyTimeout: 120000,
         },
       },
+    },
+    configureServer(server) {
+      server.httpServer?.once('listening', () => {
+        // eslint-disable-next-line no-console
+        console.log(`[vite] API proxy /api → ${RAILWAY_API_TARGET}`);
+        // eslint-disable-next-line no-console
+        console.log('[vite] Set VITE_API_URL in .env to call Railway directly (no proxy).');
+      });
     },
   };
 });

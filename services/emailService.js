@@ -6,19 +6,58 @@ const { getWebClientBaseUrl, getPasswordResetUrl } = require('../utils/clientApp
 /** Railway / some hosts use MAILGUN_FROM_EMAIL; local .env often uses MAILGUN_FROM. */
 const getMailgunFrom = () => {
   const raw = String(process.env.MAILGUN_FROM || process.env.MAILGUN_FROM_EMAIL || '').trim();
-  return raw || 'Summit Staffing <info@summitstaffing.com.au>';
+  if (raw) return raw;
+  const domain = String(process.env.MAILGUN_DOMAIN || '').trim();
+  if (domain) return `Summit Staffing <noreply@${domain}>`;
+  return 'Summit Staffing <info@summitstaffing.com.au>';
 };
+
+function buildMailgunClient(host) {
+  const apiKey = String(process.env.MAILGUN_API_KEY || '').trim();
+  const domain = String(process.env.MAILGUN_DOMAIN || '').trim();
+  if (!apiKey || !domain) {
+    throw new Error('MAILGUN_API_KEY and/or MAILGUN_DOMAIN not set on the server');
+  }
+  return mailgun({ apiKey, domain, host });
+}
 
 const getClient = () => {
-  const apiKey = process.env.MAILGUN_API_KEY;
-  const domain = process.env.MAILGUN_DOMAIN;
+  const region = String(process.env.MAILGUN_REGION || '').trim().toLowerCase();
+  const host = String(process.env.MAILGUN_API_HOST || '').trim()
+    || (region === 'eu' ? 'api.eu.mailgun.net' : 'api.mailgun.net');
+  return buildMailgunClient(host);
+};
 
-  if (!apiKey || !domain) {
-    throw new Error('MAILGUN_API_KEY and/or MAILGUN_DOMAIN not set in .env');
+function isMailgunAuthError(err) {
+  const status = err?.statusCode || err?.status;
+  const msg = String(err?.message || err || '');
+  return status === 401 || status === 403 || /forbidden|unauthorized|mailgun rejected/i.test(msg);
+}
+
+async function sendWithMailgun(data) {
+  const hostsToTry = [];
+  const region = String(process.env.MAILGUN_REGION || '').trim().toLowerCase();
+  const explicitHost = String(process.env.MAILGUN_API_HOST || '').trim();
+  if (explicitHost) {
+    hostsToTry.push(explicitHost);
+  } else if (region === 'eu') {
+    hostsToTry.push('api.eu.mailgun.net', 'api.mailgun.net');
+  } else {
+    hostsToTry.push('api.mailgun.net', 'api.eu.mailgun.net');
   }
 
-  return mailgun({ apiKey, domain });
-};
+  let lastError = null;
+  for (const host of hostsToTry) {
+    try {
+      const mg = buildMailgunClient(host);
+      return await mg.messages().send(data);
+    } catch (err) {
+      lastError = err;
+      if (!isMailgunAuthError(err)) throw err;
+    }
+  }
+  throw lastError || new Error('Mailgun send failed');
+}
 
 /** mailgun-js ignores non-Buffer attachment data (e.g. Puppeteer Uint8Array). */
 const toNodeBuffer = (data) => {
@@ -29,7 +68,6 @@ const toNodeBuffer = (data) => {
 };
 
 const sendEmail = async (to, subject, html, attachments = [], text = null) => {
-  const mg = getClient();
   const from = getMailgunFrom();
 
   const data = {
@@ -37,18 +75,19 @@ const sendEmail = async (to, subject, html, attachments = [], text = null) => {
     to,
     subject,
     html,
-    attachment: attachments
+    attachment: attachments,
   };
   if (text) data.text = text;
 
   try {
-    return await mg.messages().send(data);
+    return await sendWithMailgun(data);
   } catch (err) {
     const status = err?.statusCode || err?.status;
     const msg = String(err?.message || err || 'Email send failed');
-    if (status === 401 || status === 403 || /forbidden|unauthorized/i.test(msg)) {
+    if (isMailgunAuthError(err)) {
       const e = new Error(`Mailgun rejected the send (${msg})`);
       e.code = 'MAILGUN_AUTH';
+      e.statusCode = status;
       throw e;
     }
     throw err;

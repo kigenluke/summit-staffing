@@ -374,8 +374,10 @@ const forgotPassword = async (req, res) => {
           'Mailgun sandbox: add this exact email under Sending → your sandbox domain → Authorized recipients, then try again.';
       } else if (/401|403|forbidden|unauthorized|invalid\s+private\s+key/i.test(msg)) {
         hint =
-          'Mailgun rejected the request: check MAILGUN_API_KEY (Sending → Domain → API keys) and MAILGUN_DOMAIN on the server that handled this request. '
-          + 'If you use npm run web on localhost:5173, set VITE_PROXY_TARGET=http://localhost:3000 and run npm run dev so your local .env is used—not Railway.';
+          'Mailgun rejected the request on the server that handled this call (e.g. Railway production). '
+          + 'In Railway → Variables, verify MAILGUN_API_KEY, MAILGUN_DOMAIN, and MAILGUN_FROM_EMAIL. '
+          + 'The FROM address must use your Mailgun domain (e.g. noreply@mg.summitstaffing.com.au). '
+          + 'EU Mailgun accounts: add MAILGUN_REGION=eu and redeploy.';
       }
       if (/domain\s+not\s+found|does not exist|not\s+found/i.test(msg)) {
         hint = 'MAILGUN_DOMAIN must exactly match the domain shown in Mailgun (often mg.yourdomain.com).';

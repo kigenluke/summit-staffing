@@ -28,6 +28,16 @@ export function resolveApiBaseUrl() {
     try {
       const host = typeof window !== 'undefined' ? window.location.hostname : '';
       if (host === 'localhost' || host === '127.0.0.1') {
+        // When set, web dev calls Railway (or another API) directly — shows in Network tab.
+        const directApi = pickFirstUrl(
+          readViteEnv('VITE_API_URL'),
+          readViteEnv('VITE_PROXY_TARGET'),
+        );
+        if (directApi) {
+          cachedApiBaseUrl = directApi.replace(/\/$/, '');
+          return cachedApiBaseUrl;
+        }
+        // Fallback: relative /api → Vite dev-server proxy (see vite.config.js).
         cachedApiBaseUrl = '';
         return cachedApiBaseUrl;
       }

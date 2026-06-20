@@ -4,6 +4,7 @@ const pool = require('../config/database');
 const { getNDISItemCode } = require('../utils/ndisHelper');
 const { generateInvoicePDF } = require('../services/pdfService');
 const { emailInvoiceToPlanManager } = require('../services/invoicePipelineService');
+const { isOutboundEmailConfigured } = require('../services/emailService');
 
 const respondValidation = (req, res) => {
   const errors = validationResult(req);
@@ -461,8 +462,25 @@ const sendInvoiceEmailHandler = async (req, res) => {
     let error = raw || 'Failed to send invoice email';
     let hint;
     if (isMailgunForbidden || (isMailgunAuth && /mailgun|domain|api/i.test(raw))) {
-      error = 'Invoice email could not be sent — the mail server rejected the request.';
-      hint = 'Check MAILGUN_API_KEY and MAILGUN_DOMAIN on the server (Railway → Variables). For local testing, run npm run dev and set VITE_PROXY_TARGET=http://localhost:3000 in .env.';
+      error = 'Invoice email could not be sent — Mailgun rejected the request.';
+      if (isOutboundEmailConfigured()) {
+        hint = [
+          'MAILGUN variables are set on Railway but Mailgun still rejected the send. Check:',
+          '• MAILGUN_API_KEY matches mg.summitstaffing.com.au (Mailgun → Sending → Domain → API keys)',
+          '• MAILGUN_FROM_EMAIL is noreply@mg.summitstaffing.com.au (same domain as MAILGUN_DOMAIN)',
+          '• EU Mailgun account: add MAILGUN_REGION=eu, then redeploy',
+          'Push latest code to Railway so auto EU/US retry is active, then try Send again.',
+        ].join('\n');
+      } else {
+        hint = [
+          'In Railway → your service → Variables, set:',
+          '• MAILGUN_API_KEY (starts with key-… from Mailgun → Sending → Domain → API keys)',
+          '• MAILGUN_DOMAIN (exactly mg.summitstaffing.com.au)',
+          '• MAILGUN_FROM_EMAIL = Summit Staffing <noreply@mg.summitstaffing.com.au>',
+          'If your Mailgun account is EU region, add MAILGUN_REGION=eu',
+          'Then redeploy Railway and try again.',
+        ].join('\n');
+      }
     } else if (/MAILGUN/i.test(raw)) {
       error = 'Invoice email is not configured on this server.';
       hint = 'Add MAILGUN_API_KEY and MAILGUN_DOMAIN to the server environment.';
