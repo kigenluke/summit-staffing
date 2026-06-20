@@ -716,7 +716,7 @@ const clockIn = async (req, res) => {
       const within = isWithinRadius(Number(lat), Number(lng), Number(booking.location_lat), Number(booking.location_lng), 100);
       if (!within) {
         await client.query('ROLLBACK');
-        return res.status(400).json({ ok: false, error: 'Clock-in location is not within 100m of booking location' });
+        return res.status(400).json({ ok: false, error: 'You must be within 100 metres of the shift location to clock in. Move closer and try again.' });
       }
 
       const timesheetRes = await client.query('SELECT * FROM booking_timesheets WHERE booking_id = $1 LIMIT 1', [id]);
@@ -809,7 +809,7 @@ const clockOut = async (req, res) => {
       const within = isWithinRadius(Number(lat), Number(lng), Number(booking.location_lat), Number(booking.location_lng), 100);
       if (!within) {
         await client.query('ROLLBACK');
-        return res.status(400).json({ ok: false, error: 'Clock-out location is not within 100m of booking location' });
+        return res.status(400).json({ ok: false, error: 'You must be within 100 metres of the shift location to clock out. Move closer and try again.' });
       }
 
       const timesheetRes = await client.query('SELECT * FROM booking_timesheets WHERE booking_id = $1 LIMIT 1 FOR UPDATE', [id]);

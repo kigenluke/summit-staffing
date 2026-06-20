@@ -3,6 +3,7 @@
  * Uses base URL from ApiConfig; supports auth token and consistent error handling.
  */
 
+import { Platform } from 'react-native';
 import { getState, logout } from '../store/authStore.js';
 import {
   resolveApiBaseUrl,
@@ -11,11 +12,14 @@ import {
   sanitizeUserFacingMessage,
 } from '../constants/apiPublic.js';
 
+const RETRYABLE_STATUSES = new Set([0, 408, 502, 503, 504]);
+
 export const ApiConfig = {
   get baseURL() {
     return resolveApiBaseUrl();
   },
-  timeout: 30000,
+  /** Native builds use a longer default — GPS + Railway cold starts can exceed 30s. */
+  timeout: Platform.OS === 'android' || Platform.OS === 'ios' ? 60000 : 30000,
 };
 
 export function getAuthToken() {
@@ -53,16 +57,43 @@ function coerceBodyErrorMessage(value) {
   return null;
 }
 
+function isRetryableResult(result) {
+  return Boolean(result?.error && RETRYABLE_STATUSES.has(result.status));
+}
+
+function retryDelayMs(attemptIndex) {
+  return 800 * (attemptIndex + 1);
+}
+
 /**
  * Low-level request helper. Returns { data, error, status }.
  * Does not throw; parse response and surface errors for callers.
+ * Pass `retries: N` to retry transient network/timeout failures (N extra attempts).
  */
 export async function request(method, path, body = null, options = {}) {
+  const defaultRetries = method === 'GET' ? 1 : 0;
+  const maxAttempts = 1 + Math.max(0, Number(options.retries ?? defaultRetries) || 0);
+  let lastResult = null;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs(attempt - 1)));
+    }
+    lastResult = await requestOnce(method, path, body, options);
+    if (!isRetryableResult(lastResult) || attempt === maxAttempts - 1) {
+      return lastResult;
+    }
+  }
+
+  return lastResult;
+}
+
+async function requestOnce(method, path, body = null, options = {}) {
   const baseURL = resolveApiBaseUrl();
   const url = path.startsWith('http') ? path : `${baseURL.replace(/\/$/, '')}${path}`;
   const controller = new AbortController();
   const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
-  const timeoutMs = isFormData ? Math.max(ApiConfig.timeout, 120000) : ApiConfig.timeout;
+  const timeoutMs = options.timeoutMs ?? (isFormData ? Math.max(ApiConfig.timeout, 120000) : ApiConfig.timeout);
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   const { headers: headerOverrides, signal: callerSignal, ...restFetchOptions } = options;
@@ -144,7 +175,7 @@ export async function request(method, path, body = null, options = {}) {
       err?.name === 'TypeError'
       || /failed to fetch|network|econnrefused|proxy/i.test(String(err?.message || ''));
     const error = err.name === 'AbortError'
-      ? Object.assign(new Error('Request timed out'), { status: 408 })
+      ? Object.assign(new Error('The request took too long. Please try again — the server may still be processing.'), { status: 408 })
       : isNetwork
         ? Object.assign(
             new Error(sanitizeUserFacingMessage(getNetworkErrorMessage())),

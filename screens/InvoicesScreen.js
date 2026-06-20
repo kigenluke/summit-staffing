@@ -6,6 +6,8 @@ import { View, Text, FlatList, Pressable, RefreshControl, ActivityIndicator, Ale
 import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { formatDateDMY } from '../utils/dateFormat.js';
+import { LoadErrorBanner } from '../components/LoadErrorBanner.js';
+import { alertApiError } from '../utils/userAlert.js';
 
 const STATUS_COLORS = { draft: Colors.text.muted, sent: Colors.status.info, paid: Colors.status.success };
 
@@ -22,13 +24,25 @@ export function InvoicesScreen() {
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState(null);
   const [sendingId, setSendingId] = useState(null);
 
   const load = useCallback(async () => {
+    setLoadError(null);
     try {
-      const { data } = await api.get('/api/invoices?limit=50');
+      const { data, error } = await api.get('/api/invoices?limit=50', { retries: 2 });
+      if (error) {
+        const msg = error.status === 403
+          ? (error.message || 'Your profile may not be set up to view invoices yet.')
+          : (error.message || 'Could not load invoices.');
+        setLoadError(msg);
+        setLoading(false);
+        return;
+      }
       if (data?.ok && data?.invoices) setInvoices(data.invoices);
-    } catch (e) {}
+    } catch (e) {
+      setLoadError(e?.message || 'Could not load invoices.');
+    }
     setLoading(false);
   }, []);
 
@@ -40,9 +54,17 @@ export function InvoicesScreen() {
     setSendingId(id);
     try {
       const suffix = resend ? '?resend=true' : '';
-      const { data, error } = await api.post(`/api/invoices/${id}/send${suffix}`, resend ? { resend: true } : {});
+      const { data, error } = await api.post(
+        `/api/invoices/${id}/send${suffix}`,
+        resend ? { resend: true } : {},
+        { timeoutMs: 120000 },
+      );
       if (error) {
-        showUserAlert('Could not send', error.message || 'Failed to send invoice email');
+        const msg =
+          error.status === 403
+            ? error.message || 'You do not have permission to send this invoice.'
+            : error.message || 'Failed to send invoice email';
+        showUserAlert('Could not send', msg);
         return;
       }
       const to = data?.emailedTo ? ` to ${data.emailedTo}` : '';
@@ -88,8 +110,14 @@ export function InvoicesScreen() {
         <FlatList
           data={invoices}
           keyExtractor={item => item.id}
-          contentContainerStyle={{ padding: Spacing.md, paddingBottom: Spacing.xxl }}
+          contentContainerStyle={{ padding: Spacing.md, paddingBottom: Spacing.xxl, flexGrow: 1 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
+          ListHeaderComponent={loadError ? (
+            <LoadErrorBanner message={loadError} onRetry={() => { setLoading(true); load(); }} retrying={refreshing} />
+          ) : null}
+          ListEmptyComponent={!loadError ? (
+            <Text style={{ color: Colors.text.secondary, textAlign: 'center', marginTop: Spacing.xl }}>No invoices yet</Text>
+          ) : null}
           renderItem={({ item: inv }) => {
             const busy = sendingId === inv.id;
             const canSend = inv.status === 'draft';

@@ -9,6 +9,7 @@
     "start:app": "react-native start",
     "android": "react-native run-android",
     "android:release": "cd android && gradlew.bat bundleRelease",
+    "android:apk": "cd android && gradlew.bat assembleRelease",
     "ios": "react-native run-ios",
     "web": "vite"
   },

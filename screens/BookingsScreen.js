@@ -17,6 +17,7 @@ import {
   STATUS_TONE_COLORS,
 } from '../utils/bookingDisplayStatus.js';
 import { VerificationBanner } from '../components/VerificationBanner.js';
+import { LoadErrorBanner } from '../components/LoadErrorBanner.js';
 
 const TABS = ['all', 'pending', 'confirmed', 'in_progress'];
 
@@ -28,16 +29,26 @@ export function BookingsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState('all');
   const [deleteConfirmTarget, setDeleteConfirmTarget] = useState(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [loadError, setLoadError] = useState(null);
   const isWorker = user?.role === 'worker';
   const isParticipant = user?.role === 'participant';
 
   const loadBookings = useCallback(async (force = false) => {
+    setLoadError(null);
     try {
-      const { data } = await cachedApiGet('/api/bookings?limit=100', 30000, { force });
+      const { data, error } = await cachedApiGet('/api/bookings?limit=100', 30000, { force });
+      if (error) {
+        setLoadError(error.message || 'Could not load bookings. Check your connection and try again.');
+        setLoading(false);
+        return;
+      }
       if (data?.ok && data?.bookings) {
         setAllBookings(data.bookings);
       }
-    } catch (e) {}
+    } catch (e) {
+      setLoadError(e?.message || 'Could not load bookings.');
+    }
     setLoading(false);
   }, []);
 
@@ -64,22 +75,28 @@ export function BookingsScreen() {
   }, [loadBookings]);
 
   const deleteOldShift = useCallback(async (target) => {
+    if (deleteBusy) return;
     const id = typeof target === 'object' ? target?.id : target;
     const isOpenShift = typeof target === 'object' && Boolean(target?.is_open_shift);
     if (!id) return;
 
-    const { error } = isOpenShift
-      ? await api.put(`/api/shifts/${id}/cancel`)
-      : await api.put(`/api/bookings/${id}/cancel`);
+    setDeleteBusy(true);
+    try {
+      const { error } = isOpenShift
+        ? await api.put(`/api/shifts/${id}/cancel`, null, { retries: 1 })
+        : await api.put(`/api/bookings/${id}/cancel`, null, { retries: 1 });
 
-    if (error) {
-      Alert.alert('Error', error.message || 'Failed to delete old shift');
-      return;
+      if (error) {
+        Alert.alert('Error', error.message || 'Failed to delete old shift');
+        return;
+      }
+      Alert.alert('Deleted', 'Old shift deleted successfully.');
+      invalidateCachedGet('/api/bookings');
+      await loadBookings(true);
+    } finally {
+      setDeleteBusy(false);
     }
-    Alert.alert('Deleted', 'Old shift deleted successfully.');
-    invalidateCachedGet('/api/bookings');
-    loadBookings(true);
-  }, [loadBookings]);
+  }, [deleteBusy, loadBookings]);
 
   const openDeleteConfirm = useCallback((target) => {
     setDeleteConfirmTarget(typeof target === 'object' ? target : { id: target, is_open_shift: false });
@@ -184,6 +201,14 @@ export function BookingsScreen() {
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
       <View style={{ paddingHorizontal: Spacing.md, paddingTop: Spacing.sm }}>
         <VerificationBanner />
+        <LoadErrorBanner
+          message={loadError}
+          onRetry={() => {
+            setLoading(true);
+            loadBookings(true);
+          }}
+          retrying={loading && refreshing}
+        />
       </View>
       {/* Tabs */}
       <View style={{ backgroundColor: Colors.surface, ...Shadows.sm, padding: Spacing.sm }}>
@@ -269,20 +294,23 @@ export function BookingsScreen() {
                 <Text style={{ color: Colors.text.secondary, fontWeight: Typography.fontWeight.semibold }}>Cancel</Text>
               </Pressable>
               <Pressable
+                disabled={deleteBusy}
                 onPress={async () => {
                   const target = deleteConfirmTarget;
-                  closeDeleteConfirm();
                   if (target) await deleteOldShift(target);
+                  closeDeleteConfirm();
                 }}
                 style={({ pressed }) => ({
                   paddingVertical: Spacing.xs,
                   paddingHorizontal: Spacing.md,
                   borderRadius: Radius.md,
                   backgroundColor: Colors.status.error,
-                  opacity: pressed ? 0.85 : 1,
+                  opacity: pressed || deleteBusy ? 0.85 : 1,
                 })}
               >
-                <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Delete</Text>
+                <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>
+                  {deleteBusy ? 'Deleting…' : 'Delete'}
+                </Text>
               </Pressable>
             </View>
           </View>

@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {Platform} from 'react-native';
+import { Platform } from 'react-native';
 
-import {api, safeRequest} from '../services/api';
+import { api } from '../services/api';
 
 const TERMS_VERSION = '1.0';
 
@@ -9,7 +9,6 @@ const storageKey = (userId) => `summitstaffing.termsAcceptance.${userId || 'unkn
 
 const getDeviceInfo = () => {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const DeviceInfo = require('react-native-device-info');
     if (DeviceInfo) {
       const brand = DeviceInfo.getBrand?.() || '';
@@ -17,17 +16,15 @@ const getDeviceInfo = () => {
       const systemVersion = DeviceInfo.getSystemVersion?.() || '';
       const appVersion = DeviceInfo.getVersion?.() || '';
       const buildNumber = DeviceInfo.getBuildNumber?.() || '';
-      return `${brand} ${model} (${Platform.OS} ${systemVersion}) app ${appVersion} (${buildNumber})`;
+      return `${brand} ${model} (${Platform.OS} ${systemVersion}) app ${appVersion} (${buildNumber})`.trim();
     }
-  } catch (e) {
+  } catch (_) {
     // ignore
   }
 
-  return `${Platform.OS}`;
-};
-
-const getIPAddress = async () => {
-  return null;
+  if (Platform.OS === 'android') return 'Summit Staffing Android App';
+  if (Platform.OS === 'ios') return 'Summit Staffing iOS App';
+  return `Summit Staffing ${Platform.OS} App`;
 };
 
 export const getCurrentTermsVersion = () => TERMS_VERSION;
@@ -40,7 +37,7 @@ export const hasAcceptedTerms = async (userId) => {
     if (!raw) return false;
     const parsed = JSON.parse(raw);
     return Boolean(parsed?.acceptedAt) && parsed?.termsVersion === TERMS_VERSION;
-  } catch (e) {
+  } catch (_) {
     return false;
   }
 };
@@ -53,32 +50,54 @@ export const requiresReacceptance = async (userId) => {
     if (!raw) return true;
     const parsed = JSON.parse(raw);
     return parsed?.termsVersion !== TERMS_VERSION;
-  } catch (e) {
+  } catch (_) {
     return true;
   }
 };
 
+async function saveLocalAcceptance(userId, acceptance) {
+  try {
+    await AsyncStorage.setItem(storageKey(userId), JSON.stringify({ ...acceptance, userId }));
+  } catch (_) {
+    // ignore
+  }
+}
+
+function isTransientError(message) {
+  return /timeout|connect|network|502|503|504|408|too long|offline/i.test(String(message || ''));
+}
+
 export const acceptTerms = async (userId) => {
-  if (!userId) return false;
+  if (!userId) return { ok: false, error: 'Not signed in' };
 
   const acceptance = {
-    userId,
     termsVersion: TERMS_VERSION,
     acceptedAt: new Date().toISOString(),
-    ipAddress: await getIPAddress(),
     deviceInfo: getDeviceInfo(),
   };
 
-  try {
-    await AsyncStorage.setItem(storageKey(userId), JSON.stringify(acceptance));
-  } catch (e) {
-    // ignore
+  await saveLocalAcceptance(userId, acceptance);
+
+  const { data, error } = await api.post('/api/legal/terms-acceptance', acceptance, {
+    retries: 2,
+    timeoutMs: 60000,
+  });
+
+  if (!error && data?.ok) {
+    return { ok: true, synced: true };
   }
 
-  const res = await safeRequest('POST', '/api/legal/terms-acceptance', acceptance);
-  if (!res.success) {
-    return false;
+  if (error && isTransientError(error.message)) {
+    return {
+      ok: true,
+      synced: false,
+      warning: 'Saved on this device. We will sync your acceptance when the connection is stable.',
+    };
   }
 
-  return true;
+  return {
+    ok: false,
+    error: error?.message || 'Could not save terms acceptance',
+    hint: error?.response?.hint,
+  };
 };

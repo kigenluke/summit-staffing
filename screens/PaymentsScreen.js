@@ -11,6 +11,8 @@ import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme
 import { formatDateDMY } from '../utils/dateFormat.js';
 import { getMainTabFooterHeight } from '../components/MainTabFooter.js';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LoadErrorBanner } from '../components/LoadErrorBanner.js';
+import { alertApiError } from '../utils/userAlert.js';
 
 const STATUS_COLORS = { pending: Colors.status.warning, succeeded: Colors.status.success, failed: Colors.status.error, refunded: Colors.text.muted };
 
@@ -61,25 +63,39 @@ export function PaymentsScreen() {
   const [personalIdNumber, setPersonalIdNumber] = useState('');
   const [savingBank, setSavingBank] = useState(false);
   const [showBankForm, setShowBankForm] = useState(false);
+  const [loadError, setLoadError] = useState(null);
+  const [refreshingPayout, setRefreshingPayout] = useState(false);
+  const [removingCardId, setRemovingCardId] = useState(null);
 
   const load = useCallback(async () => {
+    setLoadError(null);
+    let hadError = false;
     try {
-      const { data } = await api.get('/api/payments/history?limit=50');
-      if (data?.ok && data?.payments) setPayments(data.payments);
-    } catch (e) {}
+      const { data, error } = await api.get('/api/payments/history?limit=50', { retries: 2 });
+      if (error) {
+        hadError = true;
+        setLoadError(error.message || 'Could not load payments.');
+      } else if (data?.ok && data?.payments) {
+        setPayments(data.payments);
+      }
+    } catch (e) {
+      hadError = true;
+      setLoadError(e?.message || 'Could not load payments.');
+    }
     if (isWorker) {
       try {
-        const { data } = await api.get('/api/payments/connect/status');
-        if (data?.ok) setConnectStatus(data);
-      } catch (e) {}
+        const { data, error } = await api.get('/api/payments/connect/status', { retries: 2 });
+        if (!error && data?.ok) setConnectStatus(data);
+        else if (error && !hadError) setLoadError(error.message || 'Could not load payout status.');
+      } catch (_) {}
     } else {
       setConnectStatus(null);
     }
     if (isParticipant) {
       try {
-        const { data } = await api.get('/api/payments/customer/payment-methods');
-        if (data?.ok) setSavedCards(data.paymentMethods || []);
-      } catch (e) {}
+        const { data, error } = await api.get('/api/payments/customer/payment-methods', { retries: 2 });
+        if (!error && data?.ok) setSavedCards(data.paymentMethods || []);
+      } catch (_) {}
     }
     setLoading(false);
   }, [isWorker, isParticipant]);
@@ -142,6 +158,7 @@ export function PaymentsScreen() {
   };
 
   const removeCard = (pmId) => {
+    if (removingCardId) return;
     Alert.alert(
       'Remove card?',
       'You can add another card at any time.',
@@ -151,12 +168,17 @@ export function PaymentsScreen() {
           text: 'Remove',
           style: 'destructive',
           onPress: async () => {
-            const { error } = await api.delete(`/api/payments/customer/payment-methods/${pmId}`);
-            if (error) {
-              Alert.alert('Error', error.message || 'Could not remove card.');
-              return;
+            setRemovingCardId(pmId);
+            try {
+              const { error } = await api.delete(`/api/payments/customer/payment-methods/${pmId}`, { retries: 1 });
+              if (error) {
+                alertApiError(error, 'Could not remove card');
+                return;
+              }
+              await load();
+            } finally {
+              setRemovingCardId(null);
             }
-            await load();
           },
         },
       ],
@@ -197,8 +219,14 @@ export function PaymentsScreen() {
   };
 
   const refreshPayoutStatus = async () => {
+    if (refreshingPayout) return;
+    setRefreshingPayout(true);
     try {
-      const { data } = await api.post('/api/payments/connect/refresh');
+      const { data, error } = await api.post('/api/payments/connect/refresh', null, { retries: 1 });
+      if (error) {
+        alertApiError(error, 'Could not refresh payout status');
+        return;
+      }
       if (data?.ok) {
         await load();
         if (data.payout_ready) {
@@ -214,6 +242,8 @@ export function PaymentsScreen() {
       }
     } catch (_) {
       Alert.alert('Error', 'Could not refresh payout status.');
+    } finally {
+      setRefreshingPayout(false);
     }
   };
 
@@ -293,6 +323,11 @@ export function PaymentsScreen() {
 
   const renderListHeader = useCallback(() => (
     <View style={{ paddingTop: Spacing.md }}>
+      {loadError ? (
+        <View style={{ paddingHorizontal: Spacing.md, marginBottom: Spacing.sm }}>
+          <LoadErrorBanner message={loadError} onRetry={() => { setLoading(true); load(); }} retrying={refreshing} />
+        </View>
+      ) : null}
       {isWorker && (
         <View style={{ paddingHorizontal: Spacing.md, marginBottom: Spacing.sm }}>
           <View style={{ backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.sm }}>
@@ -353,15 +388,18 @@ export function PaymentsScreen() {
                 </Text>
                 <Pressable
                   onPress={refreshPayoutStatus}
+                  disabled={refreshingPayout}
                   style={({ pressed }) => ({
                     backgroundColor: Colors.primary,
                     paddingVertical: Spacing.sm,
                     borderRadius: Radius.md,
                     alignItems: 'center',
-                    opacity: pressed ? 0.85 : 1,
+                    opacity: pressed || refreshingPayout ? 0.85 : 1,
                   })}
                 >
-                  <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>Refresh payout status</Text>
+                  <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>
+                    {refreshingPayout ? 'Refreshing…' : 'Refresh payout status'}
+                  </Text>
                 </Pressable>
               </View>
             ) : null}
@@ -674,6 +712,10 @@ export function PaymentsScreen() {
     saveBankDetails,
     addCard,
     removeCard,
+    loadError,
+    load,
+    refreshing,
+    refreshingPayout,
   ]);
 
   const renderPaymentItem = useCallback(({ item: p }) => {

@@ -9,8 +9,13 @@ import { api } from '../services/api.js';
 import { Colors, Spacing, Typography, Radius, Shadows } from '../constants/theme.js';
 import { formatDateDMY, formatTime12h, formatDateTimeDMY } from '../utils/dateFormat.js';
 import { workerPayoutFromTotal } from '../utils/platformFee.js';
-import { getDeviceLocation, requestLocationPermission, promptOpenLocationSettings } from '../utils/deviceGeolocation';
+import { getDeviceLocation, getDeviceLocationForClock, requestLocationPermission, promptOpenLocationSettings, startLocationWatch, stopLocationWatch } from '../utils/deviceGeolocation';
 import { StripePayBookingButton } from '../components/StripePayBookingButton';
+import { LoadErrorBanner } from '../components/LoadErrorBanner.js';
+import { saveShiftGps, readShiftGps, clearShiftGps } from '../utils/shiftGpsCache.js';
+import { alertApiError } from '../utils/userAlert.js';
+
+const CLOCK_API_OPTS = { timeoutMs: 60000, retries: 2 };
 
 const STATUS_THEME = {
   pending: { bg: '#FFFBEB', text: '#B45309', border: '#FDE68A', dot: Colors.status.warning },
@@ -180,6 +185,9 @@ export function BookingDetailScreen({ route, navigation }) {
   const [timesheetActionBusy, setTimesheetActionBusy] = useState(false);
   const [booking, setBooking] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [reloadBusy, setReloadBusy] = useState(false);
+  const [generatingInvoice, setGeneratingInvoice] = useState(false);
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewComment, setReviewComment] = useState('');
   const [incidentReported, setIncidentReported] = useState(false);
@@ -189,28 +197,76 @@ export function BookingDetailScreen({ route, navigation }) {
   const [geoStatus, setGeoStatus] = useState('');
   const [currentGps, setCurrentGps] = useState(null);
   const [locationBusy, setLocationBusy] = useState(false);
+  const [clockActionBusy, setClockActionBusy] = useState(false);
+  const [clockActionLabel, setClockActionLabel] = useState('');
+  const [bookingActionBusy, setBookingActionBusy] = useState(false);
   const [disputeModalVisible, setDisputeModalVisible] = useState(false);
   const [disputeReason, setDisputeReason] = useState('');
 
   const autoClockOutIntervalRef = useRef(null);
   const clockInBusyRef = useRef(false);
   const clockOutBusyRef = useRef(false);
+  const gpsFetchedAtRef = useRef(0);
+  const currentGpsRef = useRef(null);
+  const locationWatchIdRef = useRef(null);
+
+  const rememberGps = useCallback((gps) => {
+    setCurrentGps(gps);
+    currentGpsRef.current = gps;
+    gpsFetchedAtRef.current = Date.now();
+    if (bookingId && gps?.lat != null && gps?.lng != null) {
+      saveShiftGps(bookingId, gps);
+    }
+  }, [bookingId]);
 
   const loadBooking = useCallback(async () => {
+    setLoadError(null);
     try {
-      const { data } = await api.get(`/api/bookings/${bookingId}`);
+      const { data, error } = await api.get(`/api/bookings/${bookingId}`, { retries: 2 });
+      if (error) {
+        setLoadError(error.message || 'Could not load this booking. Check your connection and try again.');
+        setLoading(false);
+        return;
+      }
       if (data?.ok) {
         const b = data.booking;
         if (data.timesheet) b.timesheet = data.timesheet;
         if (data.payment) b.payment = data.payment;
         if (data.user_review) b.user_review = data.user_review;
         setBooking(b);
+      } else {
+        setLoadError('Could not load this booking.');
       }
-    } catch (e) {}
+    } catch (e) {
+      setLoadError(e?.message || 'Could not load this booking.');
+    }
     setLoading(false);
   }, [bookingId]);
 
+  const retryLoadBooking = useCallback(async () => {
+    setReloadBusy(true);
+    setLoading(true);
+    await loadBooking();
+    setReloadBusy(false);
+  }, [loadBooking]);
+
   useEffect(() => { loadBooking(); }, [loadBooking]);
+
+  useEffect(() => {
+    let alive = true;
+    readShiftGps(bookingId).then((stored) => {
+      if (!alive || !stored || currentGpsRef.current) return;
+      rememberGps({ lat: stored.lat, lng: stored.lng });
+    });
+    return () => { alive = false; };
+  }, [bookingId, rememberGps]);
+
+  // Wake Railway before clock actions so the first tap is less likely to time out.
+  useEffect(() => {
+    if (!isWorker) return;
+    if (!booking?.status || !['confirmed', 'in_progress'].includes(booking.status)) return;
+    api.get('/health', { timeoutMs: 15000, retries: 1 }).catch(() => {});
+  }, [isWorker, booking?.status]);
 
   // After Stripe Checkout redirect (?payment=success), sync payment + worker transfer.
   useEffect(() => {
@@ -246,9 +302,15 @@ export function BookingDetailScreen({ route, navigation }) {
     };
     const a = map[action];
     const runAction = async (body) => {
-      const { error } = await api[a.method](a.path, body);
-      if (error) Alert.alert('Error', error.message);
-      else loadBooking();
+      if (bookingActionBusy) return;
+      setBookingActionBusy(true);
+      try {
+        const { error } = await api[a.method](a.path, body, { retries: 1 });
+        if (error) Alert.alert('Error', error.message);
+        else loadBooking();
+      } finally {
+        setBookingActionBusy(false);
+      }
     };
 
     if (action === 'decline') {
@@ -279,16 +341,51 @@ export function BookingDetailScreen({ route, navigation }) {
     setLocationBusy(true);
     try {
       const gps = await getDeviceLocation({ requestPermission: true });
-      setCurrentGps(gps);
+      rememberGps(gps);
       setGeoStatus('');
       return gps;
     } catch (e) {
       setCurrentGps(null);
+      currentGpsRef.current = null;
+      gpsFetchedAtRef.current = 0;
       setGeoStatus(e?.message || 'Could not read your location.');
       return null;
     } finally {
       setLocationBusy(false);
     }
+  }, [rememberGps]);
+
+  const resolveClockGps = useCallback(async (statusLabel, { forClockOut = false } = {}) => {
+    setClockActionLabel(statusLabel);
+    const cached = currentGpsRef.current
+      ? { ...currentGpsRef.current, fetchedAt: gpsFetchedAtRef.current }
+      : null;
+
+    try {
+      const gps = await getDeviceLocationForClock({ cached, forClockOut });
+      rememberGps(gps);
+      return gps;
+    } catch (err) {
+      const stored = await readShiftGps(bookingId, forClockOut ? 8 * 60 * 60 * 1000 : 4 * 60 * 60 * 1000);
+      if (stored) {
+        const gps = { lat: stored.lat, lng: stored.lng, usedStoredShiftGps: true };
+        rememberGps(gps);
+        return gps;
+      }
+      throw err;
+    }
+  }, [bookingId, rememberGps]);
+
+  const showLocationFailure = useCallback((actionLabel, retryFn) => {
+    Alert.alert(
+      'Location needed',
+      `${actionLabel} needs your location. Turn on GPS in Settings, move near a window, then try again.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Open Settings', onPress: () => { try { promptOpenLocationSettings(); } catch (_) {} } },
+        { text: 'Retry', onPress: () => { retryFn(); } },
+      ],
+    );
   }, []);
 
   const tryClockIn = useCallback(
@@ -297,11 +394,32 @@ export function BookingDetailScreen({ route, navigation }) {
       if (!bookingId) return;
 
       clockInBusyRef.current = true;
+      if (mode !== 'auto') {
+        setClockActionBusy(true);
+        setClockActionLabel('Connecting…');
+      }
       try {
-        const gps = await getDeviceLocation({ requestPermission: true });
-        setCurrentGps(gps);
-        const { error } = await api.post(`/api/bookings/${bookingId}/clock-in`, { lat: gps.lat, lng: gps.lng });
+        await api.get('/health', { timeoutMs: 15000, retries: 1 }).catch(() => {});
+        const gps = await resolveClockGps(
+          mode === 'auto' ? 'Waiting for GPS…' : 'Getting your location…',
+          { forClockOut: false },
+        );
+        setClockActionLabel('Clocking in…');
+        const { data, error } = await api.post(
+          `/api/bookings/${bookingId}/clock-in`,
+          { lat: gps.lat, lng: gps.lng },
+          CLOCK_API_OPTS,
+        );
         if (error) {
+          const msg = String(error.message || '');
+          if (/already clocked in/i.test(msg)) {
+            setGeoStatus('');
+            await loadBooking();
+            if (mode === 'manual') {
+              Alert.alert('Already clocked in', 'Your shift is already running.');
+            }
+            return;
+          }
           if (mode !== 'auto') Alert.alert('Error', error.message);
           else setGeoStatus(error.message);
           return;
@@ -309,15 +427,25 @@ export function BookingDetailScreen({ route, navigation }) {
 
         setGeoStatus('');
         if (mode === 'manual') Alert.alert('Success', 'Clocked in!');
-        loadBooking();
+        await loadBooking();
       } catch (e) {
-        if (mode !== 'auto') Alert.alert('Error', e?.message || 'Failed to clock in');
-        else setGeoStatus(e?.message || 'Waiting for GPS…');
+        const msg = String(e?.message || '');
+        if (mode !== 'auto' && /timeout|location|gps|permission/i.test(msg)) {
+          showLocationFailure('Clock in', () => tryClockIn('manual'));
+        } else if (mode !== 'auto') {
+          Alert.alert('Error', msg || 'Failed to clock in');
+        } else {
+          setGeoStatus(msg || 'Waiting for GPS…');
+        }
       } finally {
         clockInBusyRef.current = false;
+        if (mode !== 'auto') {
+          setClockActionBusy(false);
+          setClockActionLabel('');
+        }
       }
     },
-    [bookingId, loadBooking],
+    [bookingId, loadBooking, resolveClockGps, showLocationFailure],
   );
 
   const tryClockOut = useCallback(
@@ -326,37 +454,66 @@ export function BookingDetailScreen({ route, navigation }) {
       if (!bookingId) return;
 
       clockOutBusyRef.current = true;
+      if (mode !== 'auto') {
+        setClockActionBusy(true);
+        setClockActionLabel('Connecting…');
+      }
       try {
-        const gps = await getDeviceLocation({ requestPermission: true });
-        setCurrentGps(gps);
+        await api.get('/health', { timeoutMs: 15000, retries: 1 }).catch(() => {});
+        const gps = await resolveClockGps(
+          mode === 'auto' ? 'Waiting for GPS…' : 'Getting your location…',
+          { forClockOut: true },
+        );
+        setClockActionLabel('Clocking out…');
         const useScheduledEndTime = mode === 'auto';
-        const { error } = await api.post(`/api/bookings/${bookingId}/clock-out`, {
-          lat: gps.lat,
-          lng: gps.lng,
-          useScheduledEndTime,
-          mode,
-        });
+        const { data, error } = await api.post(
+          `/api/bookings/${bookingId}/clock-out`,
+          {
+            lat: gps.lat,
+            lng: gps.lng,
+            useScheduledEndTime,
+            mode,
+          },
+          CLOCK_API_OPTS,
+        );
 
         if (error) {
+          const msg = String(error.message || '');
           if (mode !== 'auto') Alert.alert('Error', error.message);
           else setGeoStatus(error.message);
-          if (String(error.message || '').toLowerCase().includes('already clocked out')) {
-            loadBooking();
+          if (/already clocked out/i.test(msg)) {
+            await loadBooking();
           }
           return;
         }
 
         setGeoStatus('');
-        if (mode === 'manual') Alert.alert('Success', 'Clocked out! Shift marked complete.');
-        loadBooking();
+        if (mode === 'manual') {
+          Alert.alert(
+            'Success',
+            data?.already_clocked_out ? 'Shift was already clocked out.' : 'Clocked out! Shift marked complete.',
+          );
+        }
+        await clearShiftGps(bookingId);
+        await loadBooking();
       } catch (e) {
-        if (mode !== 'auto') Alert.alert('Error', e?.message || 'Failed to clock out');
-        else setGeoStatus(e?.message || 'Waiting for GPS…');
+        const msg = String(e?.message || '');
+        if (mode !== 'auto' && /timeout|location|gps|permission/i.test(msg)) {
+          showLocationFailure('Clock out', () => tryClockOut('manual'));
+        } else if (mode !== 'auto') {
+          Alert.alert('Error', msg || 'Failed to clock out');
+        } else {
+          setGeoStatus(msg || 'Waiting for GPS…');
+        }
       } finally {
         clockOutBusyRef.current = false;
+        if (mode !== 'auto') {
+          setClockActionBusy(false);
+          setClockActionLabel('');
+        }
       }
     },
-    [bookingId, loadBooking],
+    [bookingId, loadBooking, resolveClockGps, showLocationFailure],
   );
 
   const handleEnableLocation = async () => {
@@ -369,6 +526,7 @@ export function BookingDetailScreen({ route, navigation }) {
   };
 
   const handleClockIn = () => {
+    if (clockActionBusy || clockInBusyRef.current) return;
     if (!canManualClockIn) {
       Alert.alert('Clock In unavailable', clockInDisabledReason || 'Clock-in is not available yet.');
       return;
@@ -377,20 +535,21 @@ export function BookingDetailScreen({ route, navigation }) {
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Clock In',
-        onPress: async () => {
-          await tryClockIn('manual');
+        onPress: () => {
+          tryClockIn('manual');
         },
       },
     ]);
   };
 
   const handleClockOut = () => {
+    if (clockActionBusy || clockOutBusyRef.current) return;
     Alert.alert('Clock Out', 'Clock out of this booking?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Clock Out',
-        onPress: async () => {
-          await tryClockOut('manual');
+        onPress: () => {
+          tryClockOut('manual');
         },
       },
     ]);
@@ -410,11 +569,11 @@ export function BookingDetailScreen({ route, navigation }) {
       try {
         const gps = await getDeviceLocation({ requestPermission: false });
         if (alive) {
-          setCurrentGps(gps);
+          rememberGps(gps);
           setGeoStatus('');
         }
       } catch (_) {
-        if (alive) setCurrentGps(null);
+        if (alive) setGeoStatus('Waiting for GPS fix…');
       }
     };
     (async () => {
@@ -427,7 +586,35 @@ export function BookingDetailScreen({ route, navigation }) {
       alive = false;
       if (timer) clearInterval(timer);
     };
-  }, [isWorker, booking?.status, booking?.timesheet?.clock_in_time]);
+  }, [isWorker, booking?.status, booking?.timesheet?.clock_in_time, rememberGps]);
+
+  // Keep GPS warm during an active shift so clock-out does not wait for a cold GPS fix.
+  useEffect(() => {
+    if (!isWorker) return;
+    const shouldWatch = booking?.status === 'in_progress' && !booking?.timesheet?.clock_out_time;
+    if (!shouldWatch) {
+      stopLocationWatch(locationWatchIdRef.current);
+      locationWatchIdRef.current = null;
+      return undefined;
+    }
+
+    (async () => {
+      await requestLocationPermission();
+    })();
+
+    locationWatchIdRef.current = startLocationWatch(
+      (coords) => {
+        rememberGps(coords);
+        setGeoStatus('');
+      },
+      () => {},
+    );
+
+    return () => {
+      stopLocationWatch(locationWatchIdRef.current);
+      locationWatchIdRef.current = null;
+    };
+  }, [isWorker, booking?.status, booking?.timesheet?.clock_out_time, rememberGps]);
 
   // Auto clock-out: when end_time is reached, clock out automatically (GPS validated on server).
   useEffect(() => {
@@ -494,9 +681,15 @@ export function BookingDetailScreen({ route, navigation }) {
   };
 
   const handleGenerateInvoice = async () => {
-    const { data, error } = await api.post(`/api/invoices/generate/${bookingId}`);
-    if (error) Alert.alert('Error', error.message);
-    else Alert.alert('Success', `Invoice ${data?.invoice?.invoice_number || ''} generated!`);
+    if (generatingInvoice) return;
+    setGeneratingInvoice(true);
+    try {
+      const { data, error } = await api.post(`/api/invoices/generate/${bookingId}`, null, { timeoutMs: 120000, retries: 1 });
+      if (error) alertApiError(error, 'Could not generate invoice');
+      else Alert.alert('Success', `Invoice ${data?.invoice?.invoice_number || ''} generated!`);
+    } finally {
+      setGeneratingInvoice(false);
+    }
   };
 
   const handleAuthorizeCard = async () => {
@@ -570,9 +763,20 @@ export function BookingDetailScreen({ route, navigation }) {
   }
 
   if (!booking) {
-    return <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background }}>
-      <Text style={{ color: Colors.text.secondary }}>Booking not found</Text>
-    </View>;
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background, padding: Spacing.lg }}>
+        {loadError ? (
+          <>
+            <LoadErrorBanner message={loadError} onRetry={retryLoadBooking} retrying={reloadBusy} />
+            <Text style={{ color: Colors.text.secondary, textAlign: 'center' }}>
+              Pull down to refresh or tap Retry when your connection is stable.
+            </Text>
+          </>
+        ) : (
+          <Text style={{ color: Colors.text.secondary }}>Booking not found</Text>
+        )}
+      </View>
+    );
   }
 
   const b = booking;
@@ -821,11 +1025,23 @@ export function BookingDetailScreen({ route, navigation }) {
         <Section title="Actions" subtitle="Shift controls">
           {b.status === 'pending' && (
             <View style={{ flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.sm }}>
-              <Pressable onPress={() => handleAction('accept')} style={({ pressed }) => ({ flex: 1, backgroundColor: Colors.status.success, paddingVertical: 12, borderRadius: Radius.md, alignItems: 'center', opacity: pressed ? 0.85 : 1 })}>
-                <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Accept</Text>
+              <Pressable
+                disabled={bookingActionBusy}
+                onPress={() => handleAction('accept')}
+                style={({ pressed }) => ({ flex: 1, backgroundColor: Colors.status.success, paddingVertical: 12, borderRadius: Radius.md, alignItems: 'center', opacity: pressed || bookingActionBusy ? 0.85 : 1 })}
+              >
+                <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>
+                  {bookingActionBusy ? 'Working…' : 'Accept'}
+                </Text>
               </Pressable>
-              <Pressable onPress={() => handleAction('decline')} style={({ pressed }) => ({ flex: 1, backgroundColor: Colors.status.error, paddingVertical: 12, borderRadius: Radius.md, alignItems: 'center', opacity: pressed ? 0.85 : 1 })}>
-                <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Decline</Text>
+              <Pressable
+                disabled={bookingActionBusy}
+                onPress={() => handleAction('decline')}
+                style={({ pressed }) => ({ flex: 1, backgroundColor: Colors.status.error, paddingVertical: 12, borderRadius: Radius.md, alignItems: 'center', opacity: pressed || bookingActionBusy ? 0.85 : 1 })}
+              >
+                <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>
+                  {bookingActionBusy ? 'Working…' : 'Decline'}
+                </Text>
               </Pressable>
             </View>
           )}
@@ -833,25 +1049,46 @@ export function BookingDetailScreen({ route, navigation }) {
           {b.status === 'confirmed' && !isShiftExpired && (
             <Pressable
               onPress={handleClockIn}
-              disabled={!canManualClockIn}
+              disabled={!canManualClockIn || clockActionBusy}
               style={({ pressed }) => ({
-                backgroundColor: canManualClockIn ? Colors.status.success : Colors.text.muted,
+                backgroundColor: canManualClockIn && !clockActionBusy ? Colors.status.success : Colors.text.muted,
                 paddingVertical: 14,
                 borderRadius: Radius.md,
                 alignItems: 'center',
                 marginBottom: Spacing.sm,
-                opacity: pressed ? 0.85 : 1,
+                opacity: pressed || clockActionBusy ? 0.85 : 1,
+                flexDirection: 'row',
+                justifyContent: 'center',
+                gap: 8,
               })}
             >
+              {clockActionBusy ? <ActivityIndicator color={Colors.text.white} size="small" /> : null}
               <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold, fontSize: Typography.fontSize.base }}>
-                Clock in
+                {clockActionBusy ? (clockActionLabel || 'Working…') : 'Clock in'}
               </Text>
             </Pressable>
           )}
 
           {canClockOut && (
-            <Pressable onPress={handleClockOut} style={({ pressed }) => ({ backgroundColor: Colors.status.error, paddingVertical: 14, borderRadius: Radius.md, alignItems: 'center', marginBottom: Spacing.sm, opacity: pressed ? 0.85 : 1 })}>
-              <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold, fontSize: Typography.fontSize.base }}>Clock out</Text>
+            <Pressable
+              onPress={handleClockOut}
+              disabled={clockActionBusy}
+              style={({ pressed }) => ({
+                backgroundColor: Colors.status.error,
+                paddingVertical: 14,
+                borderRadius: Radius.md,
+                alignItems: 'center',
+                marginBottom: Spacing.sm,
+                opacity: pressed || clockActionBusy ? 0.85 : 1,
+                flexDirection: 'row',
+                justifyContent: 'center',
+                gap: 8,
+              })}
+            >
+              {clockActionBusy ? <ActivityIndicator color={Colors.text.white} size="small" /> : null}
+              <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold, fontSize: Typography.fontSize.base }}>
+                {clockActionBusy ? (clockActionLabel || 'Working…') : 'Clock out'}
+              </Text>
             </Pressable>
           )}
 
@@ -1008,8 +1245,21 @@ export function BookingDetailScreen({ route, navigation }) {
 
       {/* Generate Invoice (worker, funded / legacy) */}
       {isWorker && b.status === 'completed' && !isPrivatePayPipeline && (
-        <Pressable onPress={handleGenerateInvoice} style={({ pressed }) => ({ backgroundColor: Colors.primaryDark, paddingVertical: Spacing.md, borderRadius: Radius.md, alignItems: 'center', marginBottom: Spacing.md, opacity: pressed ? 0.8 : 1 })}>
-          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}> Generate Invoice</Text>
+        <Pressable
+          onPress={handleGenerateInvoice}
+          disabled={generatingInvoice}
+          style={({ pressed }) => ({
+            backgroundColor: Colors.primaryDark,
+            paddingVertical: Spacing.md,
+            borderRadius: Radius.md,
+            alignItems: 'center',
+            marginBottom: Spacing.md,
+            opacity: pressed || generatingInvoice ? 0.8 : 1,
+          })}
+        >
+          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>
+            {generatingInvoice ? 'Generating…' : 'Generate Invoice'}
+          </Text>
         </Pressable>
       )}
 
@@ -1180,6 +1430,28 @@ export function BookingDetailScreen({ route, navigation }) {
               </Text>
             </Pressable>
           </View>
+        </View>
+      </View>
+    </Modal>
+
+    <Modal visible={clockActionBusy} transparent animationType="fade">
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'center', alignItems: 'center', padding: Spacing.lg }}>
+        <View style={{
+          backgroundColor: Colors.surface,
+          borderRadius: Radius.lg,
+          padding: Spacing.lg,
+          minWidth: 240,
+          alignItems: 'center',
+          gap: Spacing.md,
+          ...Shadows.md,
+        }}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={{ color: Colors.text.primary, fontWeight: Typography.fontWeight.semibold, textAlign: 'center' }}>
+            {clockActionLabel || 'Please wait…'}
+          </Text>
+          <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, textAlign: 'center' }}>
+            Do not close the app — this may take up to a minute on slow connections.
+          </Text>
         </View>
       </View>
     </Modal>

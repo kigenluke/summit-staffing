@@ -3,27 +3,39 @@
  */
 import React, { useState } from 'react';
 import { View, Text, ScrollView, Pressable, Alert } from 'react-native';
-import { api } from '../services/api.js';
+import { useAuthStore } from '../store/authStore.js';
+import { acceptTerms, getCurrentTermsVersion } from '../utils/termsService.js';
 import { Colors, Spacing, Typography, Radius } from '../constants/theme.js';
 
-const TERMS_VERSION = '1.0';
-
 export function TermsScreen({ navigation }) {
+  const { user } = useAuthStore();
   const [accepting, setAccepting] = useState(false);
+  const termsVersion = getCurrentTermsVersion();
 
   const accept = async () => {
-    setAccepting(true);
-    const { error } = await api.post('/api/legal/terms-acceptance', {
-      termsVersion: TERMS_VERSION,
-      acceptedAt: new Date().toISOString(),
-      deviceInfo: 'React Native Android App',
-    });
-    if (error) Alert.alert('Error', error.message);
-    else {
-      Alert.alert('Accepted', 'Terms & Conditions accepted.');
-      if (navigation?.goBack) navigation.goBack();
+    if (accepting) return;
+    if (!user?.id) {
+      Alert.alert('Sign in required', 'Please sign in again, then accept the terms.');
+      return;
     }
-    setAccepting(false);
+
+    setAccepting(true);
+    try {
+      const result = await acceptTerms(user.id);
+      if (result.ok) {
+        Alert.alert(
+          'Accepted',
+          result.warning || 'Terms & Conditions accepted.',
+        );
+        navigation?.goBack?.();
+        return;
+      }
+
+      const body = [result.error, result.hint].filter(Boolean).join('\n\n');
+      Alert.alert('Could not save acceptance', body || 'Please try again.');
+    } finally {
+      setAccepting(false);
+    }
   };
 
   return (
@@ -33,7 +45,7 @@ export function TermsScreen({ navigation }) {
           Terms & Conditions
         </Text>
         <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.muted, marginBottom: Spacing.lg }}>
-          Version {TERMS_VERSION} • Summit Staffing Pty Ltd • ABN 73 690 199 501
+          Version {termsVersion} • Summit Staffing Pty Ltd • ABN 73 690 199 501
         </Text>
 
         <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.sm, fontSize: Typography.fontSize.lg }}>1. Acceptance</Text>
@@ -78,10 +90,19 @@ export function TermsScreen({ navigation }) {
       </ScrollView>
 
       <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: Colors.surface, padding: Spacing.lg, borderTopWidth: 1, borderTopColor: Colors.border }}>
-        <Pressable onPress={accept} disabled={accepting}
-          style={({ pressed }) => ({ backgroundColor: accepting ? Colors.text.muted : Colors.primary, paddingVertical: Spacing.md, borderRadius: Radius.md, alignItems: 'center', opacity: pressed ? 0.8 : 1 })}>
+        <Pressable
+          onPress={accept}
+          disabled={accepting}
+          style={({ pressed }) => ({
+            backgroundColor: accepting ? Colors.text.muted : Colors.primary,
+            paddingVertical: Spacing.md,
+            borderRadius: Radius.md,
+            alignItems: 'center',
+            opacity: pressed ? 0.8 : 1,
+          })}
+        >
           <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold, fontSize: Typography.fontSize.lg }}>
-            {accepting ? 'Accepting...' : 'I Accept the Terms & Conditions'}
+            {accepting ? 'Accepting…' : 'I Accept the Terms & Conditions'}
           </Text>
         </Pressable>
       </View>

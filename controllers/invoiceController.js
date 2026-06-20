@@ -25,11 +25,9 @@ const formatDateYYYYMMDD = (date) => {
 
 const assertInvoiceAccess = async (req, invoiceId) => {
   const invRes = await pool.query(
-    `SELECT i.*, b.worker_id, b.participant_id, w.user_id AS worker_user_id, p.user_id AS participant_user_id
+    `SELECT i.*, b.worker_id, b.participant_id
      FROM invoices i
      JOIN bookings b ON b.id = i.booking_id
-     JOIN workers w ON w.id = b.worker_id
-     JOIN participants p ON p.id = b.participant_id
      WHERE i.id = $1
      LIMIT 1`,
     [invoiceId]
@@ -38,12 +36,49 @@ const assertInvoiceAccess = async (req, invoiceId) => {
   if (invRes.rowCount === 0) return { ok: false, status: 404, error: 'Invoice not found' };
 
   const invoice = invRes.rows[0];
-  if (req.user.role === 'admin') return { ok: true, invoice };
+  const userId = req.user?.userId;
+  const role = req.user?.role;
+  const email = String(req.user?.email || '').toLowerCase();
 
-  const can = req.user.userId === invoice.worker_user_id || req.user.userId === invoice.participant_user_id;
-  if (!can) return { ok: false, status: 403, error: 'Forbidden' };
+  if (role === 'admin' || email.endsWith('@summitstaffing.com.au')) {
+    return { ok: true, invoice };
+  }
 
-  return { ok: true, invoice };
+  if (role === 'worker') {
+    const workerRes = await pool.query('SELECT id FROM workers WHERE user_id = $1 LIMIT 1', [userId]);
+    if (workerRes.rowCount > 0 && workerRes.rows[0].id === invoice.worker_id) {
+      return { ok: true, invoice };
+    }
+  }
+
+  if (role === 'participant') {
+    const participantRes = await pool.query('SELECT id FROM participants WHERE user_id = $1 LIMIT 1', [userId]);
+    if (participantRes.rowCount > 0 && participantRes.rows[0].id === invoice.participant_id) {
+      return { ok: true, invoice };
+    }
+  }
+
+  if (role === 'coordinator') {
+    const participantRes = await pool.query(
+      'SELECT user_id FROM participants WHERE id = $1 LIMIT 1',
+      [invoice.participant_id]
+    );
+    if (participantRes.rowCount > 0) {
+      const accessRes = await pool.query(
+        `SELECT id FROM coordinator_participant_access
+         WHERE coordinator_user_id = $1 AND participant_user_id = $2 AND status = 'approved'
+         LIMIT 1`,
+        [userId, participantRes.rows[0].user_id]
+      );
+      if (accessRes.rowCount > 0) return { ok: true, invoice };
+    }
+  }
+
+  return {
+    ok: false,
+    status: 403,
+    error: 'You do not have permission to send this invoice. Sign in as the support worker or participant on the booking.',
+  };
 };
 
 const generateInvoice = async (req, res) => {
@@ -203,7 +238,7 @@ const getInvoices = async (req, res) => {
     const params = [];
     const where = [];
 
-    if (req.user.role === 'admin') {
+    if (req.user.role === 'admin' || String(req.user.email || '').toLowerCase().endsWith('@summitstaffing.com.au')) {
       // unrestricted
     } else if (req.user.role === 'worker') {
       const workerRes = await pool.query('SELECT id FROM workers WHERE user_id = $1 LIMIT 1', [req.user.userId]);
@@ -215,6 +250,12 @@ const getInvoices = async (req, res) => {
       if (participantRes.rowCount === 0) return res.status(403).json({ ok: false, error: 'Forbidden' });
       params.push(participantRes.rows[0].id);
       where.push(`b.participant_id = $${params.length}`);
+    } else if (req.user.role === 'coordinator') {
+      params.push(req.user.userId);
+      where.push(`p.user_id IN (
+        SELECT participant_user_id FROM coordinator_participant_access
+        WHERE coordinator_user_id = $${params.length} AND status = 'approved'
+      )`);
     } else {
       return res.status(403).json({ ok: false, error: 'Forbidden' });
     }
