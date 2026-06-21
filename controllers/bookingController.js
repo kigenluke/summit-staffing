@@ -417,6 +417,23 @@ const getBookingById = async (req, res) => {
 
     const timesheetRes = await pool.query('SELECT * FROM booking_timesheets WHERE booking_id = $1 LIMIT 1', [id]);
 
+    let timesheet = timesheetRes.rows[0] || null;
+    if (timesheet?.clock_in_time && timesheet?.clock_out_time && booking.source_shift_id) {
+      const shiftDescRes = await pool.query(
+        'SELECT description FROM shifts WHERE id = $1 LIMIT 1',
+        [booking.source_shift_id]
+      );
+      const { computeBillableShiftHours } = await import('../utils/billableShiftHours.mjs');
+      const { paidHoursAtRate } = computeBillableShiftHours({
+        clockInTime: timesheet.clock_in_time,
+        clockOutTime: timesheet.clock_out_time,
+        shiftStartTime: booking.start_time,
+        shiftEndTime: booking.end_time,
+        shiftDescription: shiftDescRes.rows[0]?.description,
+      });
+      timesheet = { ...timesheet, actual_hours: paidHoursAtRate };
+    }
+
     const paymentRes = await pool.query(
       `SELECT id, status, amount, payment_date, created_at
        FROM payments
@@ -437,7 +454,7 @@ const getBookingById = async (req, res) => {
     return res.status(200).json({
       ok: true,
       booking,
-      timesheet: timesheetRes.rows[0] || null,
+      timesheet,
       payment: paymentRes.rows[0] || null,
       user_review: reviewRes.rows[0] || null,
     });
@@ -767,7 +784,6 @@ const clockOut = async (req, res) => {
 
     const { id } = req.params;
     const { lat, lng } = req.body;
-    const useScheduledEndTime = req.body?.useScheduledEndTime === true || req.body?.mode === 'auto';
 
     const worker = await getWorkerForUser(req.user.userId);
     if (!worker) return res.status(403).json({ ok: false, error: 'Forbidden' });
@@ -777,9 +793,10 @@ const clockOut = async (req, res) => {
       await client.query('BEGIN');
 
       const bookingRes = await client.query(
-        `SELECT b.*, w.hourly_rate AS worker_hourly_rate
+        `SELECT b.*, w.hourly_rate AS worker_hourly_rate, s.description AS shift_description
          FROM bookings b
          JOIN workers w ON w.id = b.worker_id
+         LEFT JOIN shifts s ON s.id = b.source_shift_id
          WHERE b.id = $1 FOR UPDATE`,
         [id]
       );
@@ -831,10 +848,18 @@ const clockOut = async (req, res) => {
       }
 
       const clockInTime = new Date(timesheetRes.rows[0].clock_in_time);
-      const clockOutTime = useScheduledEndTime && booking?.end_time
-        ? new Date(booking.end_time)
-        : new Date();
-      const actualHours = Number(hoursBetween(clockInTime, clockOutTime).toFixed(2));
+      const clockOutTime = new Date();
+      const { computeLabourPayout } = await import('../utils/billableShiftHours.mjs');
+      const { paidHoursAtRate, labourSubtotal } = computeLabourPayout({
+        clockInTime,
+        clockOutTime,
+        shiftStartTime: booking.start_time,
+        shiftEndTime: booking.end_time,
+        shiftDescription: booking.shift_description,
+        hourlyRate: Number(booking.hourly_rate ?? booking.worker_hourly_rate ?? 0),
+      });
+      const actualHours = paidHoursAtRate;
+      const totalAmount = labourSubtotal;
 
       await client.query(
         `UPDATE booking_timesheets
@@ -846,8 +871,6 @@ const clockOut = async (req, res) => {
         [id, clockOutTime, Number(lat), Number(lng), actualHours]
       );
 
-      const rate = Number(booking.hourly_rate ?? booking.worker_hourly_rate ?? 0);
-      const totalAmount = Number((rate * actualHours).toFixed(2));
       const { commission: commissionAmount } = computePlatformFeeBreakdown(totalAmount);
 
       const updatedBooking = await client.query(

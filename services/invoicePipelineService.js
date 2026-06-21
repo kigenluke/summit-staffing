@@ -29,17 +29,31 @@ const loadBookingForInvoice = async (bookingId) => {
       p.funding_type, p.management_type, p.user_id AS participant_user_id,
       u.email AS participant_email,
       w.id AS worker_row_id, w.abn, w.first_name AS worker_first_name, w.last_name AS worker_last_name,
-      w.stripe_account_id, w.hourly_rate AS worker_hourly_rate
+      w.stripe_account_id, w.hourly_rate AS worker_hourly_rate,
+      s.description AS shift_description
     FROM bookings b
     JOIN booking_timesheets t ON t.booking_id = b.id
     JOIN participants p ON p.id = b.participant_id
     JOIN users u ON u.id = p.user_id
     JOIN workers w ON w.id = b.worker_id
+    LEFT JOIN shifts s ON s.id = b.source_shift_id
     WHERE b.id = $1
     LIMIT 1`,
     [bookingId]
   );
   return bookingRes.rowCount ? bookingRes.rows[0] : null;
+};
+
+const resolveBookingLabour = async (booking) => {
+  const { computeLabourPayout } = await import('../utils/billableShiftHours.mjs');
+  return computeLabourPayout({
+    clockInTime: booking.clock_in_time,
+    clockOutTime: booking.clock_out_time,
+    shiftStartTime: booking.start_time,
+    shiftEndTime: booking.end_time,
+    shiftDescription: booking.shift_description,
+    hourlyRate: Number(booking.hourly_rate ?? booking.worker_hourly_rate ?? 0),
+  });
 };
 
 const createFundedInvoiceForBooking = async (bookingId) => {
@@ -69,9 +83,9 @@ const createFundedInvoiceForBooking = async (bookingId) => {
     const invoiceNumber = `INV-${datePrefix}-${pad4(next)}`;
     const eftReference = buildEftReference(invoiceNumber);
 
-    const hours = Number(booking.actual_hours || 0);
+    const { paidHoursAtRate, labourSubtotal } = await resolveBookingLabour(booking);
+    const hours = paidHoursAtRate;
     const rate = Number(booking.hourly_rate ?? booking.worker_hourly_rate ?? 0);
-    const labourSubtotal = Number((hours * rate).toFixed(2));
     const travelKm = booking.travel_distance_km != null ? Number(booking.travel_distance_km) : 0;
     const travelPerKm = booking.travel_rate_per_km != null ? Number(booking.travel_rate_per_km) : 0.99;
     const travelSubtotal = computeTravelCharge(travelKm, travelPerKm);
