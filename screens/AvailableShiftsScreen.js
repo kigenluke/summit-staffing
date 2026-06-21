@@ -26,8 +26,8 @@ const { getShiftPayEstimate, parseBreakFromShiftDescription } = shiftBreakMeta;
 const ndisParticipantRates = ndisParticipantRatesMod.default ?? ndisParticipantRatesMod;
 const {
   validateParticipantOfferedHourlyRate,
-  getNdisMinimumHourlyRate,
-  getNdisMaximumHourlyRate,
+  getShiftWindowRateBounds,
+  describeSegmentRateBands,
   validateTravelDistanceKm,
   validateSleepoverFlatAmount,
   SLEEPOVER_FLAT_NIGHTLY,
@@ -713,11 +713,12 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo, editShift = 
       });
       if (!rateCheck.ok) {
         const rateMsg = rateCheck.error || `Allowed range $${Number(rateCheck.minimum).toFixed(2)} – $${Number(rateCheck.maximum).toFixed(2)}/hr.`;
-        const belowMax = rateCheck.maximum != null && offered > Number(rateCheck.maximum) + 1e-6;
-        say(
-          belowMax ? 'Rate above maximum' : 'Rate below minimum',
-          rateMsg,
-        );
+        const title = rateCheck.segmentsConflict
+          ? 'Shift times need adjusting'
+          : (rateCheck.maximum != null && offered > Number(rateCheck.maximum) + 1e-6
+            ? 'Rate above maximum'
+            : 'Rate below minimum');
+        say(title, rateMsg);
         return;
       }
     }
@@ -842,18 +843,6 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo, editShift = 
   };
 
   const liveHourlyRateHint = useMemo(() => {
-    const offered = parseFloat(String(hourlyRate || '').replace(/,/g, ''));
-    if (!Number.isFinite(offered)) {
-      return { borderColor: Colors.border, status: 'neutral', main: null, detail: null };
-    }
-    if (offered === 0) {
-      return {
-        borderColor: Colors.border,
-        status: 'zero',
-        main: includeSleepover ? '$0/hr labour with sleepover — OK if that matches your booking.' : 'Enter a rate above $0 or enable sleepover flat.',
-        detail: null,
-      };
-    }
     try {
       const startIso = combineDateAndTimeIso(date, startTime || '9:00 AM', 0);
       const startMins = parseTimeToMinutes(startTime || '9:00 AM');
@@ -868,11 +857,34 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo, editShift = 
           detail: null,
         };
       }
-      const min = getNdisMinimumHourlyRate(serviceType, startIso, endIso);
-      const max = getNdisMaximumHourlyRate(serviceType, startIso, {
+      const bounds = getShiftWindowRateBounds(serviceType, startIso, endIso, {
         highIntensity: highIntensitySupport,
-        endTimeIso: endIso,
       });
+      if (bounds.hasConflict) {
+        return {
+          borderColor: Colors.status.warning,
+          status: 'conflict',
+          main: 'Shift times cross incompatible rate bands',
+          detail:
+            `No single hourly rate fits this window. ${describeSegmentRateBands(bounds.segments, { highIntensity: highIntensitySupport })}. `
+            + 'Weekend shifts that run past midnight into Monday use lower weekday caps. End before 11:59 PM or post separate shifts.',
+        };
+      }
+      const min = bounds.minimum;
+      const max = bounds.maximum;
+
+      const offered = parseFloat(String(hourlyRate || '').replace(/,/g, ''));
+      if (!Number.isFinite(offered)) {
+        return { borderColor: Colors.border, status: 'neutral', main: null, detail: null };
+      }
+      if (offered === 0) {
+        return {
+          borderColor: Colors.border,
+          status: 'zero',
+          main: includeSleepover ? '$0/hr labour with sleepover — OK if that matches your booking.' : 'Enter a rate above $0 or enable sleepover flat.',
+          detail: null,
+        };
+      }
       const rateCheck = validateParticipantOfferedHourlyRate(serviceType, startIso, offered, {
         highIntensity: highIntensitySupport,
         endTimeIso: endIso,
@@ -1399,7 +1411,7 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo, editShift = 
                   <Pressable
                     onPress={handleCreate}
                     disabled={saving}
-                    style={({ pressed }) => [nextBtn, { flex: isEditMode ? 1 : undefined, opacity: pressed ? 0.8 : 1, backgroundColor: saving ? Colors.text.muted : Colors.primary }]}
+                    style={({ pressed }) => [nextBtn, { flex: 1, opacity: pressed ? 0.8 : 1, backgroundColor: saving ? Colors.text.muted : Colors.primary }]}
                   >
                     <Text style={nextBtnText}>
                       {saving ? (isEditMode ? 'Saving…' : 'Posting...') : (isEditMode ? 'Save Changes' : 'Post Shift')}
@@ -1491,6 +1503,7 @@ const stepperCount = {
 };
 const stepActions = {
   flexDirection: 'row',
+  alignItems: 'stretch',
   gap: Spacing.sm,
   marginTop: Spacing.md,
 };
@@ -1500,8 +1513,8 @@ const nextBtn = {
   borderRadius: Radius.md,
   alignItems: 'center',
   justifyContent: 'center',
-  paddingVertical: Spacing.sm,
-  marginTop: Spacing.md,
+  paddingVertical: Spacing.md,
+  minHeight: 48,
 };
 const nextBtnText = {
   color: Colors.text.white,
@@ -1515,8 +1528,8 @@ const ghostBtn = {
   borderRadius: Radius.md,
   alignItems: 'center',
   justifyContent: 'center',
-  paddingVertical: Spacing.sm,
-  marginTop: Spacing.md,
+  paddingVertical: Spacing.md,
+  minHeight: 48,
 };
 const ghostBtnText = {
   color: Colors.text.secondary,
@@ -1964,6 +1977,15 @@ export function AvailableShiftsScreen({ navigation, route }) {
   const [infoModal, setInfoModal] = useState({ visible: false, title: '', message: '' });
   const confirmActionRef = useRef(null);
   const focusShiftHandled = useRef(null);
+  const shiftsListRef = useRef(null);
+
+  const onWorkerShiftFilterChange = useCallback((key) => {
+    setWorkerShiftTypeFilter(key);
+    setShowAwayShifts(false);
+    requestAnimationFrame(() => {
+      shiftsListRef.current?.scrollToOffset?.({ offset: 0, animated: true });
+    });
+  }, []);
 
   const visibleApplications = useMemo(
     () => getVisibleShiftApplications(selectedShift, applications),
@@ -2213,15 +2235,62 @@ export function AvailableShiftsScreen({ navigation, route }) {
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
+      {isWorker && (
+        <View
+          style={{
+            flexDirection: 'row',
+            gap: Spacing.xs,
+            paddingHorizontal: Spacing.md,
+            paddingTop: Spacing.md,
+            paddingBottom: Spacing.xs,
+            backgroundColor: Colors.background,
+          }}
+        >
+          {[
+            { key: 'all', label: 'All' },
+            { key: 'am', label: 'AM' },
+            { key: 'pm', label: 'PM' },
+            { key: 'night', label: 'Night' },
+          ].map((option) => (
+            <Pressable
+              key={option.key}
+              onPress={() => onWorkerShiftFilterChange(option.key)}
+              hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+              android_ripple={{ color: `${Colors.primary}33`, borderless: false }}
+              style={({ pressed }) => ({
+                flex: 1,
+                paddingVertical: Spacing.sm,
+                borderRadius: Radius.full,
+                borderWidth: 1,
+                borderColor: workerShiftTypeFilter === option.key ? Colors.primary : Colors.border,
+                backgroundColor: workerShiftTypeFilter === option.key ? `${Colors.primary}22` : Colors.surface,
+                alignItems: 'center',
+                opacity: pressed ? 0.88 : 1,
+              })}
+            >
+              <Text style={{
+                color: workerShiftTypeFilter === option.key ? Colors.primary : Colors.text.secondary,
+                fontSize: Typography.fontSize.xs,
+                fontWeight: Typography.fontWeight.semibold,
+              }}>
+                {option.label}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
       <FlatList
+        ref={shiftsListRef}
         data={visibleShifts}
         keyExtractor={(item) => item.id}
+        key={`worker-shifts-${workerShiftTypeFilter}`}
         contentContainerStyle={{ padding: Spacing.md, paddingBottom: Spacing.xxl }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
         initialNumToRender={8}
         maxToRenderPerBatch={6}
         windowSize={7}
-        removeClippedSubviews={Platform.OS === 'android'}
+        removeClippedSubviews={false}
+        keyboardShouldPersistTaps="handled"
         renderItem={({ item }) => (
           <ShiftCard
             shift={item}
@@ -2252,38 +2321,6 @@ export function AvailableShiftsScreen({ navigation, route }) {
                   Add Shift
                 </Text>
               </Pressable>
-            )}
-            {isWorker && (
-              <View style={{ flexDirection: 'row', gap: Spacing.xs, marginBottom: Spacing.md }}>
-                {[
-                  { key: 'all', label: 'All' },
-                  { key: 'am', label: 'AM' },
-                  { key: 'pm', label: 'PM' },
-                  { key: 'night', label: 'Night' },
-                ].map((option) => (
-                  <Pressable
-                    key={option.key}
-                    onPress={() => setWorkerShiftTypeFilter(option.key)}
-                    style={{
-                      flex: 1,
-                      paddingVertical: Spacing.xs,
-                      borderRadius: Radius.full,
-                      borderWidth: 1,
-                      borderColor: workerShiftTypeFilter === option.key ? Colors.primary : Colors.border,
-                      backgroundColor: workerShiftTypeFilter === option.key ? `${Colors.primary}22` : Colors.surface,
-                      alignItems: 'center',
-                    }}
-                  >
-                    <Text style={{
-                      color: workerShiftTypeFilter === option.key ? Colors.primary : Colors.text.secondary,
-                      fontSize: Typography.fontSize.xs,
-                      fontWeight: Typography.fontWeight.semibold,
-                    }}>
-                      {option.label}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
             )}
             {isWorker && (
               <Pressable

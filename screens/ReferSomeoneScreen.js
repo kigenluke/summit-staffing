@@ -57,13 +57,29 @@ export function ReferSomeoneScreen({ route }) {
 
   const loadLink = useCallback(async (nextRole) => {
     setLoadingLink(true);
-    const { data, error } = await api.post('/api/referrals/link', { role: nextRole });
-    setLoadingLink(false);
-    if (error || !data?.ok) {
-      notify('Error', error?.message || data?.error || 'Could not generate referral link');
-      return;
+    try {
+      await api.get('/health', { timeoutMs: 20000, retries: 1 }).catch(() => {});
+      const { data, error, status } = await api.post(
+        '/api/referrals/link',
+        { role: nextRole },
+        { retries: 2, timeoutMs: 60000 },
+      );
+      if (error || !data?.ok) {
+        let msg = error?.message || data?.error || 'Could not generate referral link';
+        if (status === 401) {
+          msg = 'Your session expired. Please sign out and sign in again, then try Refer someone.';
+        } else if (status === 404 || /route not found/i.test(msg)) {
+          msg = 'Referrals are not available on this server yet. Update the app or try again after the server is updated.';
+        } else if (status === 408 || /took too long/i.test(msg)) {
+          msg = 'The server is slow to respond. Check your connection and try again.';
+        }
+        notify('Could not load referral link', msg);
+        return;
+      }
+      setLink(buildReferralDisplayLink(data));
+    } finally {
+      setLoadingLink(false);
     }
-    setLink(buildReferralDisplayLink(data));
   }, []);
 
   useEffect(() => {
@@ -91,13 +107,18 @@ export function ReferSomeoneScreen({ route }) {
       return;
     }
     setSending(true);
-    const { data, error } = await api.post('/api/referrals/send', {
-      role,
-      email: trimmed,
-    });
+    const { data, error, status } = await api.post(
+      '/api/referrals/send',
+      { role, email: trimmed },
+      { retries: 1, timeoutMs: 60000 },
+    );
     setSending(false);
     if (error || !data?.ok) {
-      notify('Could not send', error?.message || data?.error || 'Invitation failed');
+      let msg = error?.message || data?.error || 'Invitation failed';
+      if (status === 503 && /mailgun|email/i.test(msg)) {
+        msg = 'Could not send email right now (Mailgun). You can still copy the referral link below and share it manually.';
+      }
+      notify('Could not send', msg);
       if (data?.token || data?.link) setLink(buildReferralDisplayLink(data));
       return;
     }

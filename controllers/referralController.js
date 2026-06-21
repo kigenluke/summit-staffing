@@ -7,6 +7,31 @@ const VALID_ROLES = new Set(['worker', 'participant']);
 /** Referral share links always use the public website — never localhost or CORS origin lists. */
 const REFERRAL_WEB_BASE = 'https://summitstaffing.com.au';
 
+let referralSchemaReady = null;
+
+async function ensureReferralSchema() {
+  if (!referralSchemaReady) {
+    referralSchemaReady = pool.query(`
+      CREATE TABLE IF NOT EXISTS referral_invites (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        referrer_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        invited_email TEXT,
+        role TEXT NOT NULL CHECK (role IN ('worker', 'participant')),
+        token TEXT NOT NULL UNIQUE,
+        expires_at TIMESTAMPTZ NOT NULL,
+        consumed_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      CREATE INDEX IF NOT EXISTS referral_invites_token_idx ON referral_invites (token);
+      CREATE INDEX IF NOT EXISTS referral_invites_referrer_idx ON referral_invites (referrer_user_id);
+    `).catch((err) => {
+      referralSchemaReady = null;
+      throw err;
+    });
+  }
+  return referralSchemaReady;
+}
+
 const buildReferralLink = (token, role) =>
   `${REFERRAL_WEB_BASE}/refer?token=${encodeURIComponent(token)}&role=${encodeURIComponent(role)}`;
 
@@ -25,6 +50,7 @@ const createTokenRow = async ({ referrerUserId, role, email = null }) => {
 
 const createReferralLink = async (req, res) => {
   try {
+    await ensureReferralSchema();
     const role = String(req.body.role || '').trim();
     if (!VALID_ROLES.has(role)) {
       return res.status(400).json({ ok: false, error: 'Role must be worker or participant' });
@@ -44,6 +70,7 @@ const createReferralLink = async (req, res) => {
 
 const sendReferralInvite = async (req, res) => {
   try {
+    await ensureReferralSchema();
     const role = String(req.body.role || '').trim();
     const email = normalizeEmail(req.body.email);
     if (!VALID_ROLES.has(role)) {
@@ -129,6 +156,7 @@ const sendReferralInvite = async (req, res) => {
 
 const validateReferralToken = async (req, res) => {
   try {
+    await ensureReferralSchema();
     const token = String(req.query.token || '').trim();
     const role = String(req.query.role || '').trim();
     if (!token) {

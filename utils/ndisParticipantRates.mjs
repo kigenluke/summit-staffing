@@ -300,13 +300,33 @@ function getShiftWindowRateBounds(serviceType, startTimeIso, endTimeIso, opts = 
 
   if (!Number.isFinite(maximum)) maximum = SHIFT_TYPES.weekday_day.max;
 
-  return { minimum, maximum, segments: list };
+  const hasConflict = minimum > maximum + 1e-6;
+
+  return { minimum, maximum, segments: list, hasConflict };
 }
 
 function formatAud(amount) {
   const n = Number(amount);
   if (!Number.isFinite(n)) return '$0.00';
   return `$${n.toFixed(2)}`;
+}
+
+function formatShiftTypeLabel(shiftTypeId) {
+  return String(shiftTypeId || '').replace(/_/g, ' ');
+}
+
+function describeSegmentRateBands(segments, opts = {}) {
+  return segments
+    .map((seg) => {
+      const limits = getShiftTypeLimits(seg.shiftTypeId);
+      const segMax = getSegmentMaximum(seg.shiftTypeId, opts);
+      return `${formatShiftTypeLabel(seg.shiftTypeId)} (${seg.hours.toFixed(2)}h): ${formatAud(limits.min)}–${formatAud(segMax)}/hr`;
+    })
+    .join('; ');
+}
+
+function shiftWindowHasRateConflict(minimum, maximum) {
+  return Number(minimum) > Number(maximum) + 1e-6;
 }
 
 /**
@@ -366,7 +386,22 @@ function validateParticipantOfferedHourlyRate(serviceType, startTimeIso, hourlyR
   }
 
   const endIso = opts.endTimeIso || startTimeIso;
-  const { minimum, maximum, segments } = getShiftWindowRateBounds(serviceType, startTimeIso, endIso, opts);
+  const { minimum, maximum, segments, hasConflict } = getShiftWindowRateBounds(serviceType, startTimeIso, endIso, opts);
+
+  if (hasConflict) {
+    return {
+      ok: false,
+      minimum,
+      maximum,
+      segments,
+      segmentsConflict: true,
+      error:
+        `This shift crosses incompatible NDIS rate bands — no single hourly rate covers every part of the shift. `
+        + `Bands: ${describeSegmentRateBands(segments, opts)}. `
+        + `Weekend or public-holiday shifts that run past midnight into a weekday use lower weekday caps. `
+        + `End before midnight (11:59 PM) or post separate shifts for each day.`,
+    };
+  }
 
   for (const seg of segments) {
     const check = validateWorkerRate(seg.shiftTypeId, rate);
@@ -445,6 +480,8 @@ export {
   getShiftTypeLimits,
   splitShiftIntoRateSegments,
   getShiftWindowRateBounds,
+  describeSegmentRateBands,
+  shiftWindowHasRateConflict,
   validateWorkerRate,
   getNdisMinimumHourlyRate,
   getNdisMaximumHourlyRate,
