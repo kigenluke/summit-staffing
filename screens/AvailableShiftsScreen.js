@@ -3,7 +3,7 @@
  */
 import React, { useEffect, useState, useCallback, useLayoutEffect, useRef, useMemo } from 'react';
 import {
-  View, Text, FlatList, Pressable, RefreshControl, Alert, Modal,
+  View, Text, FlatList, Pressable, TouchableOpacity, RefreshControl, Alert, Modal,
   TextInput, ScrollView, ActivityIndicator, Platform, Image, Switch,
 } from 'react-native';
 import NativeDatePicker from '../components/NativeDatePicker.js';
@@ -22,7 +22,7 @@ import * as shiftBreakMetaMod from '../utils/shiftBreakMeta.js';
 import * as ndisParticipantRatesMod from '../utils/ndisParticipantRates.js';
 
 const shiftBreakMeta = shiftBreakMetaMod.default ?? shiftBreakMetaMod;
-const { getShiftPayEstimate, parseBreakFromShiftDescription } = shiftBreakMeta;
+const { getShiftPayEstimate, parseBreakFromShiftDescription, formatShiftPayBreakdownLines } = shiftBreakMeta;
 const ndisParticipantRates = ndisParticipantRatesMod.default ?? ndisParticipantRatesMod;
 const {
   validateParticipantOfferedHourlyRate,
@@ -55,8 +55,13 @@ function buildApplyConfirmBody(shift) {
   const unpaidDed = pay.breakMinutes > 0 && !pay.breakIsPaid && pay.paidHoursAtRate < pay.shiftHours - 1e-6;
   const workerNet = workerPayoutFromTotal(pay.estimatedTotal);
   const payLine = unpaidDed
-    ? `\nOn site: ${pay.shiftDurationLabel} • Paid time: ${pay.paidDurationLabel}\nYour payout: ~$${workerNet.toFixed(2)} (85% after 15% platform fee)`
-    : `\nYour payout: ~$${workerNet.toFixed(2)} (85% after 15% platform fee)`;
+    ? `\nOn site: ${pay.shiftDurationLabel} • Paid time: ${pay.paidDurationLabel}`
+    : '';
+  const breakdownLines = formatShiftPayBreakdownLines(pay, shift.hourly_rate);
+  const breakdownBlock = breakdownLines.length
+    ? `\n${breakdownLines.join('\n')}`
+    : '';
+  const payoutLine = `\nYour payout: ~$${workerNet.toFixed(2)} (85% after 15% platform fee)`;
   const dateStr = startDate ? formatDateDMY(startDate) : '—';
   const timeStr = startDate && endDate
     ? `${formatTime12h(startDate)} – ${formatTime12h(endDate)} (${pay.shiftDurationLabel})`
@@ -70,7 +75,7 @@ function buildApplyConfirmBody(shift) {
     + `Participant: ${participantName}\n`
     + `Date: ${dateStr}\n`
     + `Time: ${timeStr}\n`
-    + `Labour: $${Number(shift.hourly_rate || 0).toFixed(2)}/hr${payLine}\n`
+    + `Labour rate: $${Number(shift.hourly_rate || 0).toFixed(2)}/hr${payLine}${breakdownBlock}${payoutLine}\n`
     + `Location: ${shift.location || '—'}`
   );
 }
@@ -327,9 +332,12 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo, editShift = 
   const [travelKmInput, setTravelKmInput] = useState('');
 
   const locationFieldRef = useRef(null);
+  const locationSeedingRef = useRef(false);
 
-  const handleLocationTextChange = useCallback((text) => {
+  const handleLocationTextChange = useCallback((text, meta) => {
+    if (locationSeedingRef.current && !String(text || '').trim()) return;
     setLocation(text);
+    if (meta?.fromSelection) return;
     setLocationLat(null);
     setLocationLng(null);
   }, []);
@@ -352,6 +360,16 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo, editShift = 
       setEndTime(isoToAmPm(editShift.end_time));
       setCommonShiftPreset(getShiftPresetFromStartTime(isoToAmPm(editShift.start_time)));
       setLocation(editShift.location || '');
+      setLocationLat(
+        editShift.location_lat != null && editShift.location_lat !== ''
+          ? Number(editShift.location_lat)
+          : null
+      );
+      setLocationLng(
+        editShift.location_lng != null && editShift.location_lng !== ''
+          ? Number(editShift.location_lng)
+          : null
+      );
       setDescription(stripBreakMetaFromDescription(editShift.description));
       setHighIntensitySupport(Boolean(editShift.high_intensity));
       setIncludeSleepover(Number(editShift.sleepover_flat_amount) > 0);
@@ -366,7 +384,14 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo, editShift = 
       setSameShift(true);
       setStep('details');
       const addr = editShift.location || '';
-      setTimeout(() => locationFieldRef.current?.setAddressText?.(addr), 150);
+      locationSeedingRef.current = true;
+      const syncLocationField = () => locationFieldRef.current?.setAddressText?.(addr);
+      syncLocationField();
+      setTimeout(syncLocationField, 120);
+      setTimeout(syncLocationField, 400);
+      setTimeout(() => {
+        locationSeedingRef.current = false;
+      }, 900);
     } else if (!isEditMode) {
       reset();
     }
@@ -643,7 +668,10 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo, editShift = 
   };
 
   const validateCommonFields = () => {
-    if (!title || !serviceType || !date || !location) {
+    const effectiveLocation = String(
+      location || (isEditMode ? editShift?.location : '') || ''
+    ).trim();
+    if (!title || !serviceType || !date || !effectiveLocation) {
       say('Missing Fields', 'Please fill in all required fields.');
       return false;
     }
@@ -727,48 +755,44 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo, editShift = 
       ? `Break: ${breakMinutes} min | Paid break: ${paidBreak ? 'Yes' : 'No'}${paidBreak ? ` | Break pay: $${parseFloat(breakPay || 0).toFixed(2)}` : ''}`
       : '';
     const fullDescription = [description, breakMetaText].filter(Boolean).join('\n');
+    const addressTrimmed = String(
+      location || (isEditMode ? editShift?.location : '') || ''
+    ).trim();
+    const originalAddress = isEditMode ? String(editShift?.location || '').trim() : '';
+    const addressUnchanged = isEditMode && addressTrimmed === originalAddress;
+    const resolvedLat = locationLat != null
+      ? locationLat
+      : (addressUnchanged && editShift?.location_lat != null && editShift.location_lat !== ''
+        ? Number(editShift.location_lat)
+        : null);
+    const resolvedLng = locationLng != null
+      ? locationLng
+      : (addressUnchanged && editShift?.location_lng != null && editShift.location_lng !== ''
+        ? Number(editShift.location_lng)
+        : null);
 
     setSaving(true);
     submitLockRef.current = true;
     try {
-      // Best-effort: store participant coords so workers can filter by distance.
-      if (participantProfileId && locationLat != null && locationLng != null) {
-        try {
-          await api.put(`/api/participants/${participantProfileId}`, {
-            address: location,
-            latitude: locationLat,
-            longitude: locationLng,
-          });
-        } catch (_) {}
-      }
+      const shiftPayload = {
+        title,
+        service_type: serviceType,
+        hourly_rate: offered,
+        start_time,
+        end_time,
+        location: addressTrimmed,
+        location_lat: resolvedLat,
+        location_lng: resolvedLng,
+        description: fullDescription,
+        high_intensity_support: highIntensitySupport,
+        travel_distance_km: travelDistanceKm,
+        sleepover_flat_amount: sleepoverFlat,
+      };
+
       const { error } = isEditMode
-        ? await api.put(`/api/shifts/${editShift.id}`, {
-          title,
-          service_type: serviceType,
-          hourly_rate: offered,
-          start_time,
-          end_time,
-          location,
-          location_lat: locationLat,
-          location_lng: locationLng,
-          description: fullDescription,
-          high_intensity_support: highIntensitySupport,
-          travel_distance_km: travelDistanceKm,
-          sleepover_flat_amount: sleepoverFlat,
-        })
+        ? await api.put(`/api/shifts/${editShift.id}`, shiftPayload, { retries: 1, timeoutMs: 90000 })
         : await api.post('/api/shifts', {
-          title,
-          service_type: serviceType,
-          hourly_rate: offered,
-          start_time,
-          end_time,
-          location,
-          location_lat: locationLat,
-          location_lng: locationLng,
-          description: fullDescription,
-          high_intensity_support: highIntensitySupport,
-          travel_distance_km: travelDistanceKm,
-          sleepover_flat_amount: sleepoverFlat,
+          ...shiftPayload,
           workers_count: count,
           same_shift: count >= 2 ? sameShift : true,
           has_break: addBreak,
@@ -782,7 +806,16 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo, editShift = 
               end_time: toApiTime(shift.end),
             }))
             : [],
-        });
+        }, { retries: 1, timeoutMs: 90000 });
+
+      // Best-effort: sync participant profile coords after shift is saved (don't block save).
+      if (!error && participantProfileId && resolvedLat != null && resolvedLng != null) {
+        api.put(`/api/participants/${participantProfileId}`, {
+          address: addressTrimmed,
+          latitude: resolvedLat,
+          longitude: resolvedLng,
+        }).catch(() => {});
+      }
       if (error) {
         say('Error', error.message || (isEditMode ? 'Failed to update shift' : 'Failed to create shift'));
       } else {
@@ -1109,9 +1142,9 @@ function CreateShiftModal({ visible, onClose, onCreated, onAppInfo, editShift = 
         ]}
       >
         <LocationAutocompleteField
-          key={isEditMode ? `edit-loc-${editShift?.id}` : 'create-loc'}
+          key={isEditMode ? `edit-loc-${editShift?.id}-${visible ? 'open' : 'closed'}` : `create-loc-${visible ? 'open' : 'closed'}`}
           ref={locationFieldRef}
-          initialAddress={location}
+          initialAddress={isEditMode ? (location || editShift?.location || '') : location}
           onAddressChange={handleLocationTextChange}
           onPlaceSelected={handlePlaceSelected}
           fallbackInputStyle={inputStyle}
@@ -1821,8 +1854,16 @@ const ShiftCard = React.memo(function ShiftCard({ shift, onApply, isWorker, isPa
       <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>
         💰 ${Number(shift.hourly_rate || 0).toFixed(2)}/hr • ~${workerPayoutFromTotal(payEst.estimatedTotal).toFixed(2)} your payout
         {payEst.breakIsPaid && payEst.breakPay > 0 ? ' (includes break pay)' : ''}
+        {payEst.travelCharge > 0 ? ` (incl. $${payEst.travelCharge.toFixed(2)} travel)` : ''}
+        {payEst.sleepoverFlatAmount > 0 ? ` (incl. sleepover)` : ''}
         {isWorker ? ' • 15% platform fee deducted' : ''}
       </Text>
+
+      {(payEst.travelCharge > 0 || payEst.sleepoverFlatAmount > 0) && (
+        <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.muted, marginBottom: 4 }}>
+          {formatShiftPayBreakdownLines(payEst, shift.hourly_rate).filter((l) => !l.startsWith('Shift total')).join(' • ')}
+        </Text>
+      )}
 
       {payEst.breakMinutes > 0 && (
         <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: 4 }}>
@@ -1979,6 +2020,11 @@ export function AvailableShiftsScreen({ navigation, route }) {
   const focusShiftHandled = useRef(null);
   const shiftsListRef = useRef(null);
 
+  const openCreateShiftModal = useCallback(() => {
+    setEditShift(null);
+    setShowCreateModal(true);
+  }, []);
+
   const onWorkerShiftFilterChange = useCallback((key) => {
     setWorkerShiftTypeFilter(key);
     setShowAwayShifts(false);
@@ -2038,17 +2084,18 @@ export function AvailableShiftsScreen({ navigation, route }) {
       ),
       headerRight: isParticipant
         ? () => (
-          <Pressable
-            onPress={() => { setEditShift(null); setShowCreateModal(true); }}
+          <TouchableOpacity
+            onPress={openCreateShiftModal}
+            activeOpacity={0.75}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             style={{ paddingRight: 4, paddingVertical: 8, justifyContent: 'center', alignItems: 'center', minWidth: 44 }}
           >
             <Text style={{ color: Colors.text.white, fontSize: 28, fontWeight: '300', lineHeight: 30 }}>+</Text>
-          </Pressable>
+          </TouchableOpacity>
         )
         : undefined,
     });
-  }, [navigation, isParticipant]);
+  }, [navigation, isParticipant, openCreateShiftModal]);
 
   const loadEarnings = useCallback(async (force = false) => {
     if (!isWorker) return;
@@ -2304,9 +2351,10 @@ export function AvailableShiftsScreen({ navigation, route }) {
         ListHeaderComponent={
           <View style={{ marginBottom: Spacing.md }}>
             {isParticipant && (
-              <Pressable
-                onPress={() => { setEditShift(null); setShowCreateModal(true); }}
-                style={({ pressed }) => ({
+              <TouchableOpacity
+                onPress={openCreateShiftModal}
+                activeOpacity={0.85}
+                style={{
                   backgroundColor: Colors.primary,
                   borderRadius: Radius.lg,
                   paddingVertical: Spacing.md,
@@ -2314,13 +2362,12 @@ export function AvailableShiftsScreen({ navigation, route }) {
                   marginBottom: Spacing.md,
                   alignItems: 'center',
                   ...Shadows.md,
-                  opacity: pressed ? 0.9 : 1,
-                })}
+                }}
               >
                 <Text style={{ color: Colors.text.white, fontSize: Typography.fontSize.base, fontWeight: Typography.fontWeight.bold }}>
                   Add Shift
                 </Text>
-              </Pressable>
+              </TouchableOpacity>
             )}
             {isWorker && (
               <Pressable

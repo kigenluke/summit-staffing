@@ -71,6 +71,7 @@ function getShiftPayEstimate(startTime, endTime, hourlyRate, description, billin
   const travelCharge = Number((travelKm * perKm).toFixed(2));
 
   const estimatedTotal = Number((labourSubtotal + sleepoverFlatAmount + travelCharge).toFixed(2));
+  const labourFromHours = Number((paidHoursAtRate * rate).toFixed(2));
 
   return {
     shiftHours,
@@ -83,19 +84,58 @@ function getShiftPayEstimate(startTime, endTime, hourlyRate, description, billin
     breakIsPaid,
     breakPay,
     labourSubtotal,
+    labourFromHours,
     sleepoverFlatAmount,
     travelKm,
+    travelRatePerKm: perKm,
     travelCharge,
     estimatedTotal,
     rateSegments: segmentBreakdown,
   };
 }
 
-export { parseBreakFromShiftDescription, formatDecimalHoursAsHhMm, getShiftPayEstimate };
+/**
+ * Human-readable pay lines for worker-facing UI (labour, travel, sleepover, total).
+ */
+function formatShiftPayBreakdownLines(payEst, hourlyRate) {
+  const rate = Math.max(0, Number(hourlyRate) || 0);
+  const lines = [];
+  const labourHours = Number(payEst?.labourFromHours ?? 0);
+  const labourTotal = Number(payEst?.labourSubtotal ?? 0);
+  const paidLabel = payEst?.paidDurationLabel || '0h';
+
+  if (labourHours > 0 && rate > 0) {
+    lines.push(`Labour: ${paidLabel} @ $${rate.toFixed(2)}/hr = $${labourHours.toFixed(2)}`);
+  } else if (labourTotal > 0) {
+    lines.push(`Labour: $${labourTotal.toFixed(2)}`);
+  }
+
+  if (payEst?.breakIsPaid && Number(payEst.breakPay) > 0) {
+    lines.push(`Paid break: $${Number(payEst.breakPay).toFixed(2)}`);
+  }
+
+  if (Number(payEst?.sleepoverFlatAmount) > 0) {
+    lines.push(`Sleepover (flat): $${Number(payEst.sleepoverFlatAmount).toFixed(2)}`);
+  }
+
+  if (Number(payEst?.travelKm) > 0 && Number(payEst?.travelCharge) > 0) {
+    const perKm = Number(payEst.travelRatePerKm) || (payEst.travelCharge / payEst.travelKm);
+    lines.push(`Travel: ${Number(payEst.travelKm)} km @ $${perKm.toFixed(2)}/km = $${Number(payEst.travelCharge).toFixed(2)}`);
+  }
+
+  if (Number(payEst?.estimatedTotal) > 0) {
+    lines.push(`Shift total (before fee): $${Number(payEst.estimatedTotal).toFixed(2)}`);
+  }
+
+  return lines;
+}
+
+export { parseBreakFromShiftDescription, formatDecimalHoursAsHhMm, getShiftPayEstimate, formatShiftPayBreakdownLines };
 
 const shiftBreakMetaDefault = {
   parseBreakFromShiftDescription,
   formatDecimalHoursAsHhMm,
   getShiftPayEstimate,
+  formatShiftPayBreakdownLines,
 };
 export default shiftBreakMetaDefault;

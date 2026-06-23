@@ -160,13 +160,14 @@ export const LocationAutocompleteField = React.memo(
     const textInputProps = useMemo(
       () => ({
         placeholderTextColor: Colors.text.muted,
+        defaultValue: String(initialAddress || ''),
         onFocus: () => setFocused(true),
         onBlur: () => {
           setTimeout(() => setFocused(false), 150);
         },
         onChangeText: handleTextChange,
       }),
-      [handleTextChange]
+      [handleTextChange, initialAddress]
     );
 
     if (!canUsePlacesAutocomplete) {

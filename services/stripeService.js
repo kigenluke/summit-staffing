@@ -391,7 +391,7 @@ const createCheckoutSession = async ({
 }) => {
   return stripe.checkout.sessions.create({
     mode: 'payment',
-    locale: 'en-AU',
+    locale: 'en',
     success_url: successUrl,
     cancel_url: cancelUrl,
     payment_method_types: ['card', 'au_becs_debit'],
