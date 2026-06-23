@@ -38,7 +38,6 @@ const placesQueryKey = getGooglePlacesBrowserKey() || 'places-proxy-key';
 const PLACES_QUERY = Object.freeze({
   key: placesQueryKey,
   language: 'en',
-  components: 'country:au',
 });
 
 const PLACES_REQUEST_URL = canUsePlacesAutocomplete
@@ -83,7 +82,7 @@ export const LocationAutocompleteField = React.memo(
       initialAddress = '',
       onAddressChange,
       onPlaceSelected,
-      placeholder = 'Start typing address in Australia',
+      placeholder = 'Start typing your address',
       fallbackInputStyle,
       containerStyle,
     },

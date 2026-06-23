@@ -426,7 +426,7 @@ export function EditProfileScreen({ navigation }) {
           ) : (
             <PlacesAutocompleteComponent
               ref={placesRef}
-              placeholder="Start typing address in Australia"
+              placeholder="Start typing your address"
               onPress={async (data, details) => {
                 const selectedAddress = data.description || data.formatted_address || '';
                 lastSelectedAddressRef.current = selectedAddress;
@@ -462,7 +462,6 @@ export function EditProfileScreen({ navigation }) {
               query={{
                 key: placesQueryKey,
                 language: 'en',
-                components: 'country:au',
               }}
               requestUrl={placesRequestUrl}
               fetchDetails={false}

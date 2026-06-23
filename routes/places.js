@@ -24,9 +24,11 @@ async function handleAutocomplete(req, res) {
     input: input.trim(),
     key,
     language: String(req.query.language || 'en'),
-    // Summit Staffing operates in Australia only — restrict predictions to AU addresses.
-    components: String(req.query.components || 'country:au'),
   });
+  const components = String(req.query.components || '').trim();
+  if (components) {
+    params.set('components', components);
+  }
 
   try {
     const response = await fetch(
