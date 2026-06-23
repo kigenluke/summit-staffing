@@ -1,7 +1,7 @@
 const { validationResult } = require('express-validator');
 
 const pool = require('../config/database');
-const { isWithinRadius } = require('../utils/gpsHelper');
+const { isWithinRadius, CLOCK_SITE_RADIUS_METERS } = require('../utils/gpsHelper.cjs');
 const { sendPushNotification } = require('../services/notificationService');
 const { sendSMS } = require('../services/smsService');
 const { getPaymentPipeline, isFundedAccount } = require('../utils/fundingPipeline');
@@ -757,14 +757,39 @@ const clockIn = async (req, res) => {
       const actualClockInTime = now;
 
       if (booking.location_lat === null || booking.location_lng === null) {
+        const coords = await resolveWorkLocationCoords({
+          location_lat: booking.location_lat,
+          location_lng: booking.location_lng,
+          location_address: booking.location_address,
+        });
+        if (coords.lat != null && coords.lng != null) {
+          await client.query(
+            'UPDATE bookings SET location_lat = $2, location_lng = $3, updated_at = now() WHERE id = $1',
+            [id, coords.lat, coords.lng]
+          );
+          booking.location_lat = coords.lat;
+          booking.location_lng = coords.lng;
+        }
+      }
+
+      if (booking.location_lat === null || booking.location_lng === null) {
         await client.query('ROLLBACK');
         return res.status(400).json({ ok: false, error: 'Booking location is not set' });
       }
 
-      const within = isWithinRadius(Number(lat), Number(lng), Number(booking.location_lat), Number(booking.location_lng), 100);
+      const within = isWithinRadius(
+        Number(lat),
+        Number(lng),
+        Number(booking.location_lat),
+        Number(booking.location_lng),
+        CLOCK_SITE_RADIUS_METERS,
+      );
       if (!within) {
         await client.query('ROLLBACK');
-        return res.status(400).json({ ok: false, error: 'You must be within 100 metres of the shift location to clock in. Move closer and try again.' });
+        return res.status(400).json({
+          ok: false,
+          error: `You must be within ${CLOCK_SITE_RADIUS_METERS} metres of the shift location to clock in. Move closer and try again.`,
+        });
       }
 
       const timesheetRes = await client.query('SELECT * FROM booking_timesheets WHERE booking_id = $1 LIMIT 1', [id]);

@@ -1,6 +1,6 @@
-/** Worker may clock in up to 15 minutes before scheduled start. */
+/** Worker may clock in up to 15 minutes before scheduled start. Site GPS check is worldwide (100 m radius). */
 export const EARLY_CLOCK_IN_GRACE_MS = 15 * 60 * 1000;
-/** Worker may manually clock out up to 15 minutes after scheduled end. */
+/** Worker may manually clock out any time after clock-in until this long after scheduled end. */
 export const LATE_CLOCK_OUT_GRACE_MS = 15 * 60 * 1000;
 /** System auto-closes forgotten sessions this long after scheduled end (cron backup). */
 export const AUTO_FORCE_CLOSE_AFTER_END_MS = 2 * 60 * 60 * 1000;
@@ -39,10 +39,24 @@ export function canManualClockOutAt(now, shiftEndTime) {
       ok: false,
       error:
         'Manual clock-out is only available until 15 minutes after your shift ends. '
-        + 'This shift will be closed automatically for payroll review.',
+        + 'Contact support if you still need to close this shift.',
       code: 'LATE_CLOCKOUT_WINDOW_CLOSED',
     };
   }
+  return { ok: true };
+}
+
+/** Worker manual clock-out: any time after clock-in, including before scheduled shift end. */
+export function canWorkerManualClockOut(now, shiftEndTime, clockInTime) {
+  const windowCheck = canManualClockOutAt(now, shiftEndTime);
+  if (!windowCheck.ok) return windowCheck;
+
+  const nowMs = toMs(now);
+  const inMs = toMs(clockInTime);
+  if (inMs != null && nowMs != null && nowMs < inMs) {
+    return { ok: false, error: 'Cannot clock out before you clocked in.', code: 'BEFORE_CLOCK_IN' };
+  }
+
   return { ok: true };
 }
 

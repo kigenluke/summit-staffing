@@ -13,7 +13,8 @@ import { getDeviceLocation, getDeviceLocationForClock, requestLocationPermission
 import { StripePayBookingButton } from '../components/StripePayBookingButton';
 import { LoadErrorBanner } from '../components/LoadErrorBanner.js';
 import { saveShiftGps, readShiftGps, clearShiftGps } from '../utils/shiftGpsCache.js';
-import { alertApiError } from '../utils/userAlert.js';
+import { alertApiError, confirmUserAction, showUserAlert } from '../utils/userAlert.js';
+import { CLOCK_SITE_RADIUS_METERS } from '../utils/gpsHelper.js';
 
 const CLOCK_API_OPTS = { timeoutMs: 60000, retries: 2 };
 const EARLY_CLOCK_IN_MS = 15 * 60 * 1000;
@@ -42,18 +43,19 @@ const formatWorkerDistance = (meters) => {
       unreliable: true,
     };
   }
-  const withinRange = meters <= 100;
+  const withinRange = meters <= CLOCK_SITE_RADIUS_METERS;
+  const radiusLabel = `${CLOCK_SITE_RADIUS_METERS} m`;
   if (meters >= 1000) {
     return {
       short: `${(meters / 1000).toFixed(1)} km from site`,
-      detail: withinRange ? 'Within clock-in range' : 'Move within 100 m to clock in',
+      detail: withinRange ? 'Within clock-in range' : `Move within ${radiusLabel} of the shift site to clock in`,
       withinRange,
       unreliable: false,
     };
   }
   return {
     short: `${Math.round(meters)} m from site`,
-    detail: withinRange ? 'Within clock-in range' : 'Move within 100 m to clock in',
+    detail: withinRange ? 'Within clock-in range' : `Move within ${radiusLabel} of the shift site to clock in`,
     withinRange,
     unreliable: false,
   };
@@ -205,7 +207,6 @@ export function BookingDetailScreen({ route, navigation }) {
   const [disputeModalVisible, setDisputeModalVisible] = useState(false);
   const [disputeReason, setDisputeReason] = useState('');
 
-  const autoClockOutIntervalRef = useRef(null);
   const clockInBusyRef = useRef(false);
   const clockOutBusyRef = useRef(false);
   const gpsFetchedAtRef = useRef(0);
@@ -308,8 +309,20 @@ export function BookingDetailScreen({ route, navigation }) {
       setBookingActionBusy(true);
       try {
         const { error } = await api[a.method](a.path, body, { retries: 1 });
-        if (error) Alert.alert('Error', error.message);
-        else loadBooking();
+        if (error) {
+          showUserAlert('Error', error.message);
+          return;
+        }
+        if (action === 'cancel') {
+          showUserAlert('Deleted', 'Old shift removed from your list.');
+          if (typeof navigation.canGoBack === 'function' && navigation.canGoBack()) {
+            navigation.goBack();
+          } else {
+            navigation.navigate('MainTabs', { screen: 'Bookings' });
+          }
+          return;
+        }
+        loadBooking();
       } finally {
         setBookingActionBusy(false);
       }
@@ -331,12 +344,22 @@ export function BookingDetailScreen({ route, navigation }) {
       return;
     }
 
-    Alert.alert('Confirm', `${a.label} this booking?`, [
-      { text: 'No', style: 'cancel' },
-      { text: 'Yes', onPress: async () => {
-        await runAction();
-      }},
-    ]);
+    if (action === 'cancel') {
+      confirmUserAction(
+        'Delete old shift',
+        'Remove this expired shift from your list?',
+        () => { runAction(); },
+        { confirmLabel: 'Delete' },
+      );
+      return;
+    }
+
+    confirmUserAction(
+      'Confirm',
+      `${a.label} this booking?`,
+      () => { runAction(); },
+      { confirmLabel: 'Yes' },
+    );
   };
 
   const refreshWorkerGps = useCallback(async () => {
@@ -357,7 +380,7 @@ export function BookingDetailScreen({ route, navigation }) {
     }
   }, [rememberGps]);
 
-  const resolveClockGps = useCallback(async (statusLabel, { forClockOut = false } = {}) => {
+  const resolveClockGps = useCallback(async (statusLabel, { forClockOut = false, siteLat = null, siteLng = null } = {}) => {
     setClockActionLabel(statusLabel);
     const cached = currentGpsRef.current
       ? { ...currentGpsRef.current, fetchedAt: gpsFetchedAtRef.current }
@@ -365,6 +388,21 @@ export function BookingDetailScreen({ route, navigation }) {
 
     try {
       const gps = await getDeviceLocationForClock({ cached, forClockOut });
+      if (
+        siteLat != null
+        && siteLng != null
+        && cached?.lat != null
+        && cached?.lng != null
+      ) {
+        const freshDist = distanceMeters(gps.lat, gps.lng, siteLat, siteLng);
+        const cachedDist = distanceMeters(cached.lat, cached.lng, siteLat, siteLng);
+        // Browser can return a coarse/wrong fix on click while the UI already shows in-range coords.
+        if (cachedDist <= CLOCK_SITE_RADIUS_METERS && freshDist > CLOCK_SITE_RADIUS_METERS) {
+          const useCached = { lat: cached.lat, lng: cached.lng };
+          rememberGps(useCached);
+          return useCached;
+        }
+      }
       rememberGps(gps);
       return gps;
     } catch (err) {
@@ -404,7 +442,11 @@ export function BookingDetailScreen({ route, navigation }) {
         await api.get('/health', { timeoutMs: 15000, retries: 1 }).catch(() => {});
         const gps = await resolveClockGps(
           mode === 'auto' ? 'Waiting for GPS…' : 'Getting your location…',
-          { forClockOut: false },
+          {
+            forClockOut: false,
+            siteLat: booking?.location_lat,
+            siteLng: booking?.location_lng,
+          },
         );
         setClockActionLabel('Clocking in…');
         const { data, error } = await api.post(
@@ -418,24 +460,24 @@ export function BookingDetailScreen({ route, navigation }) {
             setGeoStatus('');
             await loadBooking();
             if (mode === 'manual') {
-              Alert.alert('Already clocked in', 'Your shift is already running.');
+              showUserAlert('Already clocked in', 'Your shift is already running.');
             }
             return;
           }
-          if (mode !== 'auto') Alert.alert('Error', error.message);
+          if (mode !== 'auto') showUserAlert('Error', error.message);
           else setGeoStatus(error.message);
           return;
         }
 
         setGeoStatus('');
-        if (mode === 'manual') Alert.alert('Success', 'Clocked in!');
+        if (mode === 'manual') showUserAlert('Success', 'Clocked in!');
         await loadBooking();
       } catch (e) {
         const msg = String(e?.message || '');
         if (mode !== 'auto' && /timeout|location|gps|permission/i.test(msg)) {
           showLocationFailure('Clock in', () => tryClockIn('manual'));
         } else if (mode !== 'auto') {
-          Alert.alert('Error', msg || 'Failed to clock in');
+          showUserAlert('Error', msg || 'Failed to clock in');
         } else {
           setGeoStatus(msg || 'Waiting for GPS…');
         }
@@ -447,7 +489,7 @@ export function BookingDetailScreen({ route, navigation }) {
         }
       }
     },
-    [bookingId, loadBooking, resolveClockGps, showLocationFailure],
+    [bookingId, booking?.location_lat, booking?.location_lng, loadBooking, resolveClockGps, showLocationFailure],
   );
 
   const tryClockOut = useCallback(
@@ -464,7 +506,11 @@ export function BookingDetailScreen({ route, navigation }) {
         await api.get('/health', { timeoutMs: 15000, retries: 1 }).catch(() => {});
         const gps = await resolveClockGps(
           mode === 'auto' ? 'Waiting for GPS…' : 'Getting your location…',
-          { forClockOut: true },
+          {
+            forClockOut: true,
+            siteLat: booking?.location_lat,
+            siteLng: booking?.location_lng,
+          },
         );
         setClockActionLabel('Clocking out…');
         const useScheduledEndTime = mode === 'auto';
@@ -481,7 +527,7 @@ export function BookingDetailScreen({ route, navigation }) {
 
         if (error) {
           const msg = String(error.message || '');
-          if (mode !== 'auto') alertApiError(error, 'Could not clock out');
+          if (mode !== 'auto') showUserAlert('Could not clock out', error.message);
           else setGeoStatus(error.message);
           if (/already clocked out/i.test(msg)) {
             await loadBooking();
@@ -491,7 +537,7 @@ export function BookingDetailScreen({ route, navigation }) {
 
         setGeoStatus('');
         if (mode === 'manual') {
-          Alert.alert(
+          showUserAlert(
             'Success',
             data?.already_clocked_out ? 'Shift was already clocked out.' : 'Clocked out! Shift marked complete.',
           );
@@ -503,7 +549,7 @@ export function BookingDetailScreen({ route, navigation }) {
         if (mode !== 'auto' && /timeout|location|gps|permission/i.test(msg)) {
           showLocationFailure('Clock out', () => tryClockOut('manual'));
         } else if (mode !== 'auto') {
-          Alert.alert('Error', msg || 'Failed to clock out');
+          showUserAlert('Error', msg || 'Failed to clock out');
         } else {
           setGeoStatus(msg || 'Waiting for GPS…');
         }
@@ -515,7 +561,7 @@ export function BookingDetailScreen({ route, navigation }) {
         }
       }
     },
-    [bookingId, loadBooking, resolveClockGps, showLocationFailure],
+    [bookingId, booking?.location_lat, booking?.location_lng, loadBooking, resolveClockGps, showLocationFailure],
   );
 
   const handleEnableLocation = async () => {
@@ -530,31 +576,29 @@ export function BookingDetailScreen({ route, navigation }) {
   const handleClockIn = () => {
     if (clockActionBusy || clockInBusyRef.current) return;
     if (!canManualClockIn) {
-      Alert.alert('Clock In unavailable', clockInDisabledReason || 'Clock-in is not available yet.');
+      showUserAlert('Clock In unavailable', clockInDisabledReason || 'Clock-in is not available yet.');
       return;
     }
-    Alert.alert('Clock In', 'Clock in to this booking?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Clock In',
-        onPress: () => {
-          tryClockIn('manual');
-        },
-      },
-    ]);
+    confirmUserAction(
+      'Clock In',
+      'Clock in to this booking?',
+      () => { tryClockIn('manual'); },
+      { confirmLabel: 'Clock In' },
+    );
   };
 
   const handleClockOut = () => {
     if (clockActionBusy || clockOutBusyRef.current) return;
-    Alert.alert('Clock Out', 'Clock out of this booking?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Clock Out',
-        onPress: () => {
-          tryClockOut('manual');
-        },
-      },
-    ]);
+    if (!canManualClockOut) {
+      showUserAlert('Clock Out unavailable', clockOutDisabledReason || 'Clock-out is not available right now.');
+      return;
+    }
+    confirmUserAction(
+      'Clock Out',
+      'End your shift now? You can clock out before the scheduled end time. Pay is based on hours from clock-in until you clock out.',
+      () => { tryClockOut('manual'); },
+      { confirmLabel: 'Clock Out' },
+    );
   };
 
   // Keep refreshing worker GPS while booking is confirmed to decide whether Clock In can be enabled.
@@ -617,44 +661,6 @@ export function BookingDetailScreen({ route, navigation }) {
       locationWatchIdRef.current = null;
     };
   }, [isWorker, booking?.status, booking?.timesheet?.clock_out_time, rememberGps]);
-
-  // Auto clock-out: when end_time is reached, clock out automatically (GPS validated on server).
-  useEffect(() => {
-    if (!isWorker) return;
-
-    const shouldAutoOut = booking?.status === 'in_progress' && !booking?.timesheet?.clock_out_time;
-    if (!shouldAutoOut) {
-      if (autoClockOutIntervalRef.current) clearInterval(autoClockOutIntervalRef.current);
-      autoClockOutIntervalRef.current = null;
-      return;
-    }
-
-    if (autoClockOutIntervalRef.current) clearInterval(autoClockOutIntervalRef.current);
-
-    const endMs = booking?.end_time ? new Date(booking.end_time).getTime() : null;
-    setGeoStatus('Auto clock-out will run at the end time…');
-
-    const maxRetryAfterEndMs = LATE_CLOCK_OUT_MS;
-    const tick = async () => {
-      if (!endMs) return;
-      if (Date.now() < endMs) return;
-      if (Date.now() > endMs + maxRetryAfterEndMs) {
-        setGeoStatus('Auto clock-out window ended.');
-        if (autoClockOutIntervalRef.current) clearInterval(autoClockOutIntervalRef.current);
-        autoClockOutIntervalRef.current = null;
-        return;
-      }
-      await tryClockOut('auto');
-    };
-
-    tick();
-    autoClockOutIntervalRef.current = setInterval(tick, 15000);
-
-    return () => {
-      if (autoClockOutIntervalRef.current) clearInterval(autoClockOutIntervalRef.current);
-      autoClockOutIntervalRef.current = null;
-    };
-  }, [isWorker, booking?.status, booking?.timesheet?.clock_out_time, booking?.end_time, tryClockOut]);
 
   const handleReview = async () => {
     if (incidentReported && incidentDetails.trim().length < 5) {
@@ -784,8 +790,6 @@ export function BookingDetailScreen({ route, navigation }) {
   const b = booking;
   const ts = b.timesheet;
   const hasClockedOut = Boolean(ts?.clock_out_time);
-  const canClockOut = isWorker && b.status === 'in_progress' && !hasClockedOut && isManualClockOutWindowOpen;
-  const canMarkComplete = isWorker && b.status === 'in_progress' && hasClockedOut;
 
   const isPendingAcceptance = isWorker && (b.status === 'pending' || b.status === 'confirmed');
   const bookingHasGps = b.location_lat != null && b.location_lng != null;
@@ -796,10 +800,31 @@ export function BookingDetailScreen({ route, navigation }) {
   const isShiftWindowOpen = endMs == null ? true : nowMs < endMs;
   const isShiftExpired = endMs != null && nowMs >= endMs;
   const isManualClockOutWindowOpen = endMs == null ? true : nowMs <= endMs + LATE_CLOCK_OUT_MS;
+
   const workerDistanceM = bookingHasGps && currentGps
     ? distanceMeters(currentGps.lat, currentGps.lng, b.location_lat, b.location_lng)
     : null;
-  const isWithinClockInRadius = workerDistanceM != null ? workerDistanceM <= 100 : false;
+  const isWithinClockInRadius = workerDistanceM != null ? workerDistanceM <= CLOCK_SITE_RADIUS_METERS : false;
+  const isWithinClockOutRadius = workerDistanceM != null ? workerDistanceM <= CLOCK_SITE_RADIUS_METERS : false;
+
+  const canClockOut = isWorker && b.status === 'in_progress' && !hasClockedOut && isManualClockOutWindowOpen;
+  const canManualClockOut = canClockOut && bookingHasGps && isWithinClockOutRadius;
+
+  const clockOutDisabledReason = (() => {
+    if (!(isWorker && b.status === 'in_progress' && !hasClockedOut)) return '';
+    if (!isManualClockOutWindowOpen) {
+      return 'Manual clock-out is only available until 15 minutes after your shift ends. Contact support if you still need to close this shift.';
+    }
+    if (!bookingHasGps) return 'Booking location is not set.';
+    if (workerDistanceM == null) return 'Enable location below to share GPS for clock-out.';
+    if (!isWithinClockOutRadius) {
+      const dist = formatWorkerDistance(workerDistanceM);
+      if (dist?.unreliable) return 'GPS signal unavailable. Enable location on this device to clock out.';
+      return `${dist?.short || 'Too far from site'}. Move within ${CLOCK_SITE_RADIUS_METERS} m of the shift site to clock out.`;
+    }
+    return '';
+  })();
+  const canMarkComplete = isWorker && b.status === 'in_progress' && hasClockedOut;
   const canManualClockIn = isWorker
     && b.status === 'confirmed'
     && isClockInWindowOpen
@@ -819,7 +844,7 @@ export function BookingDetailScreen({ route, navigation }) {
     if (!isWithinClockInRadius) {
       const dist = formatWorkerDistance(workerDistanceM);
       if (dist?.unreliable) return 'GPS signal unavailable. Enable location on this device to clock in.';
-      return `${dist?.short || 'Too far from site'}. Move within 100 m to clock in.`;
+      return `${dist?.short || 'Too far from site'}. Move within ${CLOCK_SITE_RADIUS_METERS} m of the shift site to clock in.`;
     }
     return '';
   })();
@@ -989,7 +1014,7 @@ export function BookingDetailScreen({ route, navigation }) {
         ) : null}
       </Section>
 
-      {isWorker && b.status === 'confirmed' && !isShiftExpired && !ts?.clock_in_time && workerDistanceM == null && (
+      {isWorker && (b.status === 'confirmed' || b.status === 'in_progress') && !hasClockedOut && workerDistanceM == null && (
         <Pressable
           onPress={handleEnableLocation}
           disabled={locationBusy}
@@ -1003,7 +1028,7 @@ export function BookingDetailScreen({ route, navigation }) {
           })}
         >
           <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>
-            {locationBusy ? 'Getting location…' : 'Enable location for clock-in'}
+            {locationBusy ? 'Getting location…' : b.status === 'in_progress' ? 'Enable location for clock-out' : 'Enable location for clock-in'}
           </Text>
         </Pressable>
       )}
@@ -1086,9 +1111,9 @@ export function BookingDetailScreen({ route, navigation }) {
           {canClockOut && (
             <Pressable
               onPress={handleClockOut}
-              disabled={clockActionBusy}
+              disabled={!canManualClockOut || clockActionBusy}
               style={({ pressed }) => ({
-                backgroundColor: Colors.status.error,
+                backgroundColor: canManualClockOut && !clockActionBusy ? Colors.status.error : Colors.text.muted,
                 paddingVertical: 14,
                 borderRadius: Radius.md,
                 alignItems: 'center',
@@ -1106,9 +1131,21 @@ export function BookingDetailScreen({ route, navigation }) {
             </Pressable>
           )}
 
+          {canClockOut && clockOutDisabledReason ? (
+            <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.status.warning, marginBottom: Spacing.sm, lineHeight: 20 }}>
+              {clockOutDisabledReason}
+            </Text>
+          ) : null}
+
+          {canClockOut && canManualClockOut && endMs != null && nowMs < endMs ? (
+            <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: Spacing.sm, lineHeight: 20 }}>
+              You can clock out early. Pay is based on time from clock-in until you clock out.
+            </Text>
+          ) : null}
+
           {isWorker && b.status === 'in_progress' && !hasClockedOut && !isManualClockOutWindowOpen && (
             <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.status.warning, marginBottom: Spacing.sm, lineHeight: 20 }}>
-              Manual clock-out is only available until 15 minutes after your shift ends. This shift will be closed automatically at the scheduled end time.
+              Manual clock-out window has closed. Contact support if you still need to close this shift.
             </Text>
           )}
 
@@ -1129,6 +1166,7 @@ export function BookingDetailScreen({ route, navigation }) {
           {canWorkerCancelPast && (
             <Pressable
               onPress={() => handleAction('cancel')}
+              disabled={bookingActionBusy}
               style={({ pressed }) => ({
                 backgroundColor: Colors.surfaceSecondary,
                 borderWidth: 1,
@@ -1136,18 +1174,33 @@ export function BookingDetailScreen({ route, navigation }) {
                 paddingVertical: 12,
                 borderRadius: Radius.md,
                 alignItems: 'center',
-                opacity: pressed ? 0.85 : 1,
+                opacity: pressed || bookingActionBusy ? 0.85 : 1,
               })}
             >
-              <Text style={{ color: Colors.status.error, fontWeight: Typography.fontWeight.semibold }}>Delete old shift</Text>
+              <Text style={{ color: Colors.status.error, fontWeight: Typography.fontWeight.semibold }}>
+                {bookingActionBusy ? 'Deleting…' : 'Delete old shift'}
+              </Text>
             </Pressable>
           )}
         </Section>
       )}
 
       {canParticipantCancelPast && (
-        <Pressable onPress={() => handleAction('cancel')} style={({ pressed }) => ({ backgroundColor: Colors.status.error, paddingVertical: Spacing.md, borderRadius: Radius.md, alignItems: 'center', marginBottom: Spacing.md, opacity: pressed ? 0.85 : 1 })}>
-          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>Delete old shift</Text>
+        <Pressable
+          onPress={() => handleAction('cancel')}
+          disabled={bookingActionBusy}
+          style={({ pressed }) => ({
+            backgroundColor: Colors.status.error,
+            paddingVertical: Spacing.md,
+            borderRadius: Radius.md,
+            alignItems: 'center',
+            marginBottom: Spacing.md,
+            opacity: pressed || bookingActionBusy ? 0.85 : 1,
+          })}
+        >
+          <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.semibold }}>
+            {bookingActionBusy ? 'Deleting…' : 'Delete old shift'}
+          </Text>
         </Pressable>
       )}
 

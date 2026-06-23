@@ -1,5 +1,5 @@
 const pool = require('../config/database');
-const { isWithinRadius } = require('../utils/gpsHelper');
+const { isWithinRadius, CLOCK_SITE_RADIUS_METERS } = require('../utils/gpsHelper.cjs');
 const { computePlatformFeeBreakdown } = require('../utils/platformFee.cjs');
 const { submitTimesheetForReview } = require('./timesheetApprovalService');
 
@@ -49,6 +49,7 @@ async function performShiftClockOut({
 
   const {
     canManualClockOutAt,
+    canWorkerManualClockOut,
     getPayrollClockOutTime,
   } = await import('../utils/shiftClockRules.mjs');
   const { computeLabourPayout } = await import('../utils/billableShiftHours.mjs');
@@ -65,7 +66,7 @@ async function performShiftClockOut({
        JOIN workers w ON w.id = b.worker_id
        LEFT JOIN shifts s ON s.id = b.source_shift_id
        WHERE b.id = $1
-       FOR UPDATE`,
+       FOR UPDATE OF b`,
       [bookingId]
     );
 
@@ -105,6 +106,16 @@ async function performShiftClockOut({
     const isWorkerSource = source === 'worker';
 
     if (isWorkerSource) {
+      const manualCheck = canWorkerManualClockOut(
+        now,
+        booking.end_time,
+        timesheetRes.rows[0].clock_in_time,
+      );
+      if (!manualCheck.ok) {
+        if (ownsClient) await client.query('ROLLBACK');
+        return { ok: false, status: 400, error: manualCheck.error, code: manualCheck.code };
+      }
+    } else {
       const manualCheck = canManualClockOutAt(now, booking.end_time);
       if (!manualCheck.ok) {
         if (ownsClient) await client.query('ROLLBACK');
@@ -122,14 +133,14 @@ async function performShiftClockOut({
         Number(lng),
         Number(booking.location_lat),
         Number(booking.location_lng),
-        100
+        CLOCK_SITE_RADIUS_METERS,
       );
       if (!within) {
         if (ownsClient) await client.query('ROLLBACK');
         return {
           ok: false,
           status: 400,
-          error: 'You must be within 100 metres of the shift location to clock out. Move closer and try again.',
+          error: `You must be within ${CLOCK_SITE_RADIUS_METERS} metres of the shift location to clock out. Move closer and try again.`,
         };
       }
     }

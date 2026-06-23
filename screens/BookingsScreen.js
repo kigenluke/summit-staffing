@@ -18,6 +18,7 @@ import {
 } from '../utils/bookingDisplayStatus.js';
 import { VerificationBanner } from '../components/VerificationBanner.js';
 import { LoadErrorBanner } from '../components/LoadErrorBanner.js';
+import { showUserAlert } from '../utils/userAlert.js';
 
 const TABS = ['all', 'pending', 'confirmed', 'in_progress'];
 
@@ -87,10 +88,10 @@ export function BookingsScreen() {
         : await api.put(`/api/bookings/${id}/cancel`, null, { retries: 1 });
 
       if (error) {
-        Alert.alert('Error', error.message || 'Failed to delete old shift');
+        showUserAlert('Error', error.message || 'Failed to delete old shift');
         return;
       }
-      Alert.alert('Deleted', 'Old shift deleted successfully.');
+      showUserAlert('Deleted', 'Old shift deleted successfully.');
       invalidateCachedGet('/api/bookings');
       await loadBookings(true);
     } finally {

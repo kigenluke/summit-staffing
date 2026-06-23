@@ -1,5 +1,5 @@
 /**
- * Geocode an Australian address via Google Geocoding API (server-side).
+ * Geocode an address via Google Geocoding API (server-side).
  */
 function getGoogleKey() {
   return process.env.GOOGLE_MAPS_BROWSER_KEY || process.env.GOOGLE_MAPS_API_KEY || '';
@@ -15,7 +15,6 @@ async function geocodeAddress(address) {
   const params = new URLSearchParams({
     address: query,
     key,
-    components: 'country:AU',
   });
 
   try {

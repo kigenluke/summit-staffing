@@ -7,7 +7,7 @@ const toNumberOrNull = (value) => {
 };
 
 /**
- * Resolve work-site GPS for a booking: explicit coords → participant profile → geocode address.
+ * Resolve work-site GPS for a booking (worldwide): shift coords → profile coords → geocode address.
  */
 async function resolveWorkLocationCoords({ location_lat, location_lng, location_address, participantLat, participantLng }) {
   let lat = toNumberOrNull(location_lat);
