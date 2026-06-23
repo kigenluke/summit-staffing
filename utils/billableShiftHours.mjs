@@ -17,13 +17,22 @@ function hoursBetweenMs(startMs, endMs) {
 /**
  * Paid shift hours for timesheet / payout.
  *
- * Billable window: clock-in → min(clock-out, scheduled shift end).
+ * Billable window: max(clock-in, shift start) → min(clock-out, scheduled shift end).
  * Early clock-out pays only until actual clock-out.
  * Late clock-out never pays beyond scheduled shift end.
  *
- * Unpaid break reduces paid hours when the worker covers the full scheduled shift
- * (clock-in at/before shift start, billable end at shift end).
+ * Unpaid break is deducted in proportion to time worked (same share of the shift
+ * as wall-clock time), capped at the full-shift break. Early clock-out therefore
+ * never pays more than completing the full scheduled shift.
  */
+function proportionalUnpaidBreakHours(billableHours, scheduledHours, breakMinutes) {
+  if (!breakMinutes || breakMinutes <= 0 || billableHours <= 0) return 0;
+  const fullBreakHours = breakMinutes / 60;
+  if (scheduledHours <= 0) return Math.min(fullBreakHours, billableHours);
+  const workedFraction = Math.min(1, billableHours / scheduledHours);
+  return fullBreakHours * workedFraction;
+}
+
 function computeBillableShiftHours({
   clockInTime,
   clockOutTime,
@@ -83,8 +92,17 @@ function computeBillableShiftHours({
   let paidHoursAtRate = billableHours;
   let appliedBreakPay = 0;
 
-  if (coveredFullScheduledShift && breakMinutes > 0 && !breakIsPaid) {
-    paidHoursAtRate = Math.max(0, scheduledHours - breakMinutes / 60);
+  if (breakMinutes > 0 && !breakIsPaid) {
+    const breakDeduction = proportionalUnpaidBreakHours(
+      billableHours,
+      scheduledHours,
+      breakMinutes,
+    );
+    paidHoursAtRate = Math.max(0, billableHours - breakDeduction);
+    if (scheduledHours > 0) {
+      const fullShiftPaidCap = Math.max(0, scheduledHours - breakMinutes / 60);
+      paidHoursAtRate = Math.min(paidHoursAtRate, fullShiftPaidCap);
+    }
   } else if (coveredFullScheduledShift && breakIsPaid) {
     paidHoursAtRate = scheduledHours;
     appliedBreakPay = breakPay;
@@ -106,4 +124,4 @@ function computeLabourPayout({ hourlyRate, ...shiftInput }) {
   return { paidHoursAtRate, breakPay, labourSubtotal };
 }
 
-export { computeBillableShiftHours, computeLabourPayout };
+export { computeBillableShiftHours, computeLabourPayout, proportionalUnpaidBreakHours };

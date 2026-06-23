@@ -61,12 +61,7 @@ async function performShiftClockOut({
     if (ownsClient) await client.query('BEGIN');
 
     const bookingRes = await client.query(
-      `SELECT b.*, w.hourly_rate AS worker_hourly_rate, s.description AS shift_description
-       FROM bookings b
-       JOIN workers w ON w.id = b.worker_id
-       LEFT JOIN shifts s ON s.id = b.source_shift_id
-       WHERE b.id = $1
-       FOR UPDATE OF b`,
+      'SELECT * FROM bookings WHERE id = $1 FOR UPDATE',
       [bookingId]
     );
 
@@ -76,6 +71,22 @@ async function performShiftClockOut({
     }
 
     const booking = bookingRes.rows[0];
+
+    const workerRes = await client.query(
+      'SELECT hourly_rate FROM workers WHERE id = $1 LIMIT 1',
+      [booking.worker_id]
+    );
+    booking.worker_hourly_rate = workerRes.rows[0]?.hourly_rate ?? null;
+
+    if (booking.source_shift_id) {
+      const shiftRes = await client.query(
+        'SELECT description FROM shifts WHERE id = $1 LIMIT 1',
+        [booking.source_shift_id]
+      );
+      booking.shift_description = shiftRes.rows[0]?.description ?? null;
+    } else {
+      booking.shift_description = null;
+    }
 
     if (booking.status !== 'in_progress') {
       if (ownsClient) await client.query('ROLLBACK');
