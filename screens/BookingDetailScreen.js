@@ -16,6 +16,8 @@ import { saveShiftGps, readShiftGps, clearShiftGps } from '../utils/shiftGpsCach
 import { alertApiError } from '../utils/userAlert.js';
 
 const CLOCK_API_OPTS = { timeoutMs: 60000, retries: 2 };
+const EARLY_CLOCK_IN_MS = 15 * 60 * 1000;
+const LATE_CLOCK_OUT_MS = 15 * 60 * 1000;
 
 const STATUS_THEME = {
   pending: { bg: '#FFFBEB', text: '#B45309', border: '#FDE68A', dot: Colors.status.warning },
@@ -479,7 +481,7 @@ export function BookingDetailScreen({ route, navigation }) {
 
         if (error) {
           const msg = String(error.message || '');
-          if (mode !== 'auto') Alert.alert('Error', error.message);
+          if (mode !== 'auto') alertApiError(error, 'Could not clock out');
           else setGeoStatus(error.message);
           if (/already clocked out/i.test(msg)) {
             await loadBooking();
@@ -632,7 +634,7 @@ export function BookingDetailScreen({ route, navigation }) {
     const endMs = booking?.end_time ? new Date(booking.end_time).getTime() : null;
     setGeoStatus('Auto clock-out will run at the end time…');
 
-    const maxRetryAfterEndMs = 10 * 60 * 1000; // retry up to 10 minutes
+    const maxRetryAfterEndMs = LATE_CLOCK_OUT_MS;
     const tick = async () => {
       if (!endMs) return;
       if (Date.now() < endMs) return;
@@ -782,7 +784,7 @@ export function BookingDetailScreen({ route, navigation }) {
   const b = booking;
   const ts = b.timesheet;
   const hasClockedOut = Boolean(ts?.clock_out_time);
-  const canClockOut = isWorker && b.status === 'in_progress' && !hasClockedOut;
+  const canClockOut = isWorker && b.status === 'in_progress' && !hasClockedOut && isManualClockOutWindowOpen;
   const canMarkComplete = isWorker && b.status === 'in_progress' && hasClockedOut;
 
   const isPendingAcceptance = isWorker && (b.status === 'pending' || b.status === 'confirmed');
@@ -790,16 +792,17 @@ export function BookingDetailScreen({ route, navigation }) {
   const startMs = b.start_time ? new Date(b.start_time).getTime() : null;
   const endMs = b.end_time ? new Date(b.end_time).getTime() : null;
   const nowMs = Date.now();
-  const isStartTimeReached = startMs != null ? nowMs >= startMs : false;
+  const isClockInWindowOpen = startMs == null ? true : nowMs >= startMs - EARLY_CLOCK_IN_MS;
   const isShiftWindowOpen = endMs == null ? true : nowMs < endMs;
   const isShiftExpired = endMs != null && nowMs >= endMs;
+  const isManualClockOutWindowOpen = endMs == null ? true : nowMs <= endMs + LATE_CLOCK_OUT_MS;
   const workerDistanceM = bookingHasGps && currentGps
     ? distanceMeters(currentGps.lat, currentGps.lng, b.location_lat, b.location_lng)
     : null;
   const isWithinClockInRadius = workerDistanceM != null ? workerDistanceM <= 100 : false;
   const canManualClockIn = isWorker
     && b.status === 'confirmed'
-    && isStartTimeReached
+    && isClockInWindowOpen
     && isShiftWindowOpen
     && bookingHasGps
     && isWithinClockInRadius;
@@ -808,8 +811,9 @@ export function BookingDetailScreen({ route, navigation }) {
     if (!(isWorker && b.status === 'confirmed')) return '';
     if (isShiftExpired) return 'Shift window has ended. Clock-in is no longer available.';
     if (!bookingHasGps) return 'Booking location is not set.';
-    if (!isStartTimeReached) {
-      return `Clock-in will be enabled at ${new Date(b.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`;
+    if (!isClockInWindowOpen && startMs != null) {
+      const earliest = new Date(startMs - EARLY_CLOCK_IN_MS);
+      return `You can check in from ${earliest.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} (15 minutes before start).`;
     }
     if (workerDistanceM == null) return 'Enable location below to share GPS for clock-in.';
     if (!isWithinClockInRadius) {
@@ -1017,6 +1021,16 @@ export function BookingDetailScreen({ route, navigation }) {
           <DetailRow label="Clock in" value={ts.clock_in_time ? formatDateTimeDMY(ts.clock_in_time) : 'Not clocked in'} />
           <DetailRow label="Clock out" value={ts.clock_out_time ? formatDateTimeDMY(ts.clock_out_time) : 'Not clocked out'} />
           <DetailRow label="Hours" value={ts.actual_hours ? `${Number(ts.actual_hours).toFixed(1)} hrs` : '—'} highlight={!!ts.actual_hours} />
+          {ts.clock_out_source === 'system' ? (
+            <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.status.warning, marginBottom: Spacing.sm }}>
+              System logged out at scheduled shift end — pending admin review.
+            </Text>
+          ) : null}
+          {ts.payroll_review_required ? (
+            <Text style={{ fontSize: Typography.fontSize.xs, color: Colors.text.secondary, marginBottom: Spacing.sm }}>
+              Payroll flagged for review.
+            </Text>
+          ) : null}
           {ts.notes ? <DetailRow label="Notes" value={ts.notes} last /> : null}
         </Section>
       )}
@@ -1090,6 +1104,12 @@ export function BookingDetailScreen({ route, navigation }) {
                 {clockActionBusy ? (clockActionLabel || 'Working…') : 'Clock out'}
               </Text>
             </Pressable>
+          )}
+
+          {isWorker && b.status === 'in_progress' && !hasClockedOut && !isManualClockOutWindowOpen && (
+            <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.status.warning, marginBottom: Spacing.sm, lineHeight: 20 }}>
+              Manual clock-out is only available until 15 minutes after your shift ends. This shift will be closed automatically at the scheduled end time.
+            </Text>
           )}
 
           {hasClockedOut && isWorker && b.status === 'completed' && (

@@ -104,6 +104,7 @@ const start = async () => {
         const cron = require('node-cron');
         const { runTimesheetApprovalCron } = require('./jobs/timesheetApprovalCron');
         const { runMissedShiftCron } = require('./jobs/missedShiftCron');
+        const { runForgottenClockOutCron } = require('./jobs/forgottenClockOutCron');
         const { runWorkerPayoutCron } = require('./jobs/workerPayoutCron');
         cron.schedule('*/15 * * * *', () => {
           runTimesheetApprovalCron().catch((e) => {
@@ -113,6 +114,10 @@ const start = async () => {
           runMissedShiftCron().catch((e) => {
             // eslint-disable-next-line no-console
             console.error('[cron] missed-shift auto-close failed:', e.message);
+          });
+          runForgottenClockOutCron().catch((e) => {
+            // eslint-disable-next-line no-console
+            console.error('[cron] forgotten clock-out failed:', e.message);
           });
           runWorkerPayoutCron().catch((e) => {
             // eslint-disable-next-line no-console

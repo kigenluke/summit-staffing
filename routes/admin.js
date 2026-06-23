@@ -136,4 +136,22 @@ router.post(
   adminController.unassignWorkerFromShift
 );
 
+router.post(
+  '/bookings/:bookingId/clock-out',
+  [
+    auth,
+    checkAdmin,
+    param('bookingId').isUUID(),
+    body('note').optional().isString().isLength({ max: 500 }),
+    body('clock_out_time').optional().isISO8601(),
+  ],
+  adminController.adminClockOutBooking
+);
+
+router.get(
+  '/bookings/stale-in-progress',
+  [auth, checkAdmin, query('limit').optional().isInt({ min: 1, max: 100 }).toInt()],
+  adminController.getStaleInProgressBookings
+);
+
 module.exports = router;

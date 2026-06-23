@@ -10,6 +10,10 @@ const { submitTimesheetForReview } = require('../services/timesheetApprovalServi
 const { resolveWorkLocationCoords } = require('../utils/bookingLocation');
 const { computePlatformFeeBreakdown } = require('../utils/platformFee.cjs');
 const { syncMissingBookingsForUser } = require('../services/shiftBookingSyncService');
+const {
+  performShiftClockOut,
+  reconcileStaleInProgressShift,
+} = require('../services/shiftClockService');
 const respondValidation = (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -415,6 +419,32 @@ const getBookingById = async (req, res) => {
       }
     }
 
+    if (booking.status === 'in_progress') {
+      try {
+        await reconcileStaleInProgressShift(id);
+      } catch (reconcileErr) {
+        // eslint-disable-next-line no-console
+        console.error('[booking] reconcile stale shift:', id, reconcileErr?.message || reconcileErr);
+      }
+      const refreshed = await pool.query(
+        `SELECT b.*,
+          p.user_id AS participant_user_id,
+          p.first_name AS participant_first_name,
+          p.last_name AS participant_last_name,
+          p.about AS participant_about,
+          w.user_id AS worker_user_id
+        FROM bookings b
+        JOIN participants p ON p.id = b.participant_id
+        JOIN workers w ON w.id = b.worker_id
+        WHERE b.id = $1
+        LIMIT 1`,
+        [id]
+      );
+      if (refreshed.rowCount) {
+        Object.assign(booking, refreshed.rows[0]);
+      }
+    }
+
     const timesheetRes = await pool.query('SELECT * FROM booking_timesheets WHERE booking_id = $1 LIMIT 1', [id]);
 
     let timesheet = timesheetRes.rows[0] || null;
@@ -717,13 +747,14 @@ const clockIn = async (req, res) => {
       const endAt = booking.end_time ? new Date(booking.end_time) : null;
       const now = new Date();
 
-      if (endAt && now > endAt) {
+      const { canClockInAt } = await import('../utils/shiftClockRules.mjs');
+      const clockInCheck = canClockInAt(now, startAt, endAt);
+      if (!clockInCheck.ok) {
         await client.query('ROLLBACK');
-        return res.status(400).json({ ok: false, error: 'Shift window has ended. Clock-in is no longer available.' });
+        return res.status(400).json({ ok: false, error: clockInCheck.error, code: clockInCheck.code });
       }
 
-      // Guard rail: if an early clock-in request comes in, cap recorded time at shift start.
-      const effectiveClockInTime = (startAt && now < startAt) ? startAt : now;
+      const actualClockInTime = now;
 
       if (booking.location_lat === null || booking.location_lng === null) {
         await client.query('ROLLBACK');
@@ -746,14 +777,14 @@ const clockIn = async (req, res) => {
         await client.query(
           `INSERT INTO booking_timesheets (booking_id, clock_in_time, clock_in_lat, clock_in_lng)
            VALUES ($1, $2, $3, $4)`,
-          [id, effectiveClockInTime, Number(lat), Number(lng)]
+          [id, actualClockInTime, Number(lat), Number(lng)]
         );
       } else {
         await client.query(
           `UPDATE booking_timesheets
            SET clock_in_time = $2, clock_in_lat = $3, clock_in_lng = $4
            WHERE booking_id = $1`,
-          [id, effectiveClockInTime, Number(lat), Number(lng)]
+          [id, actualClockInTime, Number(lat), Number(lng)]
         );
       }
 
@@ -784,126 +815,55 @@ const clockOut = async (req, res) => {
 
     const { id } = req.params;
     const { lat, lng } = req.body;
+    const isAutoMode = req.body?.mode === 'auto';
 
     const worker = await getWorkerForUser(req.user.userId);
     if (!worker) return res.status(403).json({ ok: false, error: 'Forbidden' });
 
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-
-      const bookingRes = await client.query(
-        `SELECT b.*, w.hourly_rate AS worker_hourly_rate, s.description AS shift_description
-         FROM bookings b
-         JOIN workers w ON w.id = b.worker_id
-         LEFT JOIN shifts s ON s.id = b.source_shift_id
-         WHERE b.id = $1 FOR UPDATE`,
-        [id]
-      );
-
-      if (bookingRes.rowCount === 0) {
-        await client.query('ROLLBACK');
-        return res.status(404).json({ ok: false, error: 'Booking not found' });
-      }
-
-      const booking = bookingRes.rows[0];
-
-      if (booking.worker_id !== worker.id) {
-        await client.query('ROLLBACK');
-        return res.status(403).json({ ok: false, error: 'Forbidden' });
-      }
-
-      if (booking.status !== 'in_progress') {
-        await client.query('ROLLBACK');
-        return res.status(400).json({ ok: false, error: 'Invalid booking status transition' });
-      }
-
-      if (booking.location_lat === null || booking.location_lng === null) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({ ok: false, error: 'Booking location is not set' });
-      }
-
-      const within = isWithinRadius(Number(lat), Number(lng), Number(booking.location_lat), Number(booking.location_lng), 100);
-      if (!within) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({ ok: false, error: 'You must be within 100 metres of the shift location to clock out. Move closer and try again.' });
-      }
-
-      const timesheetRes = await client.query('SELECT * FROM booking_timesheets WHERE booking_id = $1 LIMIT 1 FOR UPDATE', [id]);
-      if (timesheetRes.rowCount === 0 || !timesheetRes.rows[0].clock_in_time) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({ ok: false, error: 'Cannot clock out before clock in' });
-      }
-
-      if (timesheetRes.rows[0].clock_out_time) {
-        const currentBooking = await client.query('SELECT * FROM bookings WHERE id = $1 LIMIT 1', [id]);
-        const currentTs = await client.query('SELECT * FROM booking_timesheets WHERE booking_id = $1 LIMIT 1', [id]);
-        await client.query('COMMIT');
-        return res.status(200).json({
-          ok: true,
-          already_clocked_out: true,
-          booking: currentBooking.rows[0],
-          timesheet: currentTs.rows[0] || null,
-        });
-      }
-
-      const clockInTime = new Date(timesheetRes.rows[0].clock_in_time);
-      const clockOutTime = new Date();
-      const { computeLabourPayout } = await import('../utils/billableShiftHours.mjs');
-      const { paidHoursAtRate, labourSubtotal } = computeLabourPayout({
-        clockInTime,
-        clockOutTime,
-        shiftStartTime: booking.start_time,
-        shiftEndTime: booking.end_time,
-        shiftDescription: booking.shift_description,
-        hourlyRate: Number(booking.hourly_rate ?? booking.worker_hourly_rate ?? 0),
-      });
-      const actualHours = paidHoursAtRate;
-      const totalAmount = labourSubtotal;
-
-      await client.query(
-        `UPDATE booking_timesheets
-         SET clock_out_time = $2,
-             clock_out_lat = $3,
-             clock_out_lng = $4,
-             actual_hours = $5
-         WHERE booking_id = $1`,
-        [id, clockOutTime, Number(lat), Number(lng), actualHours]
-      );
-
-      const { commission: commissionAmount } = computePlatformFeeBreakdown(totalAmount);
-
-      const updatedBooking = await client.query(
-        "UPDATE bookings SET status = 'completed', total_amount = $2, commission_amount = $3, updated_at = now() WHERE id = $1 RETURNING *",
-        [id, totalAmount, commissionAmount]
-      );
-
-      const updatedTimesheet = await client.query('SELECT * FROM booking_timesheets WHERE booking_id = $1 LIMIT 1', [id]);
-
-      await client.query('COMMIT');
-
-      let timesheetReview = null;
-      try {
-        timesheetReview = await submitTimesheetForReview(id);
-      } catch (submitErr) {
-        timesheetReview = { error: submitErr.message };
-      }
-
-      return res.status(200).json({
-        ok: true,
-        booking: updatedBooking.rows[0],
-        timesheet: updatedTimesheet.rows[0] || null,
-        actual_hours: actualHours,
-        timesheet_review: timesheetReview,
-      });
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
+    const bookingCheck = await pool.query('SELECT id, worker_id, end_time FROM bookings WHERE id = $1 LIMIT 1', [id]);
+    if (bookingCheck.rowCount === 0) {
+      return res.status(404).json({ ok: false, error: 'Booking not found' });
     }
+    if (bookingCheck.rows[0].worker_id !== worker.id) {
+      return res.status(403).json({ ok: false, error: 'Forbidden' });
+    }
+
+    const endAt = bookingCheck.rows[0].end_time ? new Date(bookingCheck.rows[0].end_time) : null;
+    const skipGpsCheck = isAutoMode && endAt && Date.now() >= endAt.getTime();
+
+    const result = await performShiftClockOut({
+      bookingId: id,
+      clockOutTime: new Date(),
+      lat,
+      lng,
+      source: 'worker',
+      skipGpsCheck,
+    });
+
+    if (!result.ok) {
+      return res.status(result.status || 400).json({
+        ok: false,
+        error: result.error,
+        code: result.code,
+      });
+    }
+
+    return res.status(200).json({
+      ok: true,
+      already_clocked_out: result.already_clocked_out === true,
+      booking: result.booking,
+      timesheet: result.timesheet || null,
+      actual_hours: result.actual_hours,
+      timesheet_review: result.timesheet_review,
+    });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: 'Failed to clock out' });
+    // eslint-disable-next-line no-console
+    console.error('[clockOut]', err);
+    const msg = String(err?.message || '').trim();
+    return res.status(500).json({
+      ok: false,
+      error: msg && !/internal/i.test(msg) ? msg : 'Failed to clock out',
+    });
   }
 };
 

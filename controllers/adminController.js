@@ -5,6 +5,10 @@ const { sendEmail } = require('../services/emailService');
 const { uploadFile } = require('../services/s3Service');
 const { replaceStaleComplianceUpload } = require('../utils/complianceDocumentDb');
 const { unassignWorkerAndReopenShift, listAssignedShifts } = require('../services/adminShiftService');
+const {
+  performShiftClockOut,
+  listStaleInProgressBookings,
+} = require('../services/shiftClockService');
 
 const respondValidation = (req, res) => {
   const errors = validationResult(req);
@@ -666,6 +670,63 @@ const unassignWorkerFromShift = async (req, res) => {
   }
 };
 
+const getStaleInProgressBookings = async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 50, 100);
+    const bookings = await listStaleInProgressBookings(limit);
+    return res.status(200).json({ ok: true, bookings });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: 'Failed to load active shifts' });
+  }
+};
+
+const adminClockOutBooking = async (req, res) => {
+  try {
+    if (respondValidation(req, res)) return;
+
+    const { bookingId } = req.params;
+    const note = String(req.body?.note || '').trim();
+
+    const bookingRes = await pool.query('SELECT id, end_time FROM bookings WHERE id = $1 LIMIT 1', [bookingId]);
+    if (bookingRes.rowCount === 0) {
+      return res.status(404).json({ ok: false, error: 'Booking not found' });
+    }
+
+    const endTime = bookingRes.rows[0].end_time ? new Date(bookingRes.rows[0].end_time) : new Date();
+    const clockOutTime = req.body?.clock_out_time ? new Date(req.body.clock_out_time) : endTime;
+
+    const result = await performShiftClockOut({
+      bookingId,
+      clockOutTime,
+      source: 'admin',
+      skipGpsCheck: true,
+      payrollReviewRequired: false,
+    });
+
+    if (!result.ok) {
+      return res.status(result.status || 400).json({ ok: false, error: result.error });
+    }
+
+    if (note) {
+      await pool.query(
+        `UPDATE booking_timesheets
+         SET notes = CASE WHEN notes IS NULL OR notes = '' THEN $2 ELSE notes || E'\n' || $2 END
+         WHERE booking_id = $1`,
+        [bookingId, `Admin clock-out: ${note.slice(0, 500)}`]
+      );
+    }
+
+    return res.status(200).json({
+      ok: true,
+      booking: result.booking,
+      timesheet: result.timesheet,
+      message: 'Shift clocked out by admin.',
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message || 'Failed to clock out shift' });
+  }
+};
+
 module.exports = {
   getDashboardStats,
   getPendingDocuments,
@@ -680,4 +741,6 @@ module.exports = {
   getBookingMetrics,
   getAssignedShifts,
   unassignWorkerFromShift,
+  getStaleInProgressBookings,
+  adminClockOutBooking,
 };

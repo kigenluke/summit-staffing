@@ -1,8 +1,8 @@
 import { parseBreakFromShiftDescription } from './shiftBreakMeta.mjs';
 
 const MS_PER_HOUR = 3600000;
-/** Clock-in may be up to 1 minute after scheduled start and still count as full shift coverage. */
-const SHIFT_START_TOLERANCE_MS = 60000;
+/** Clock-in within 15 minutes of scheduled start counts as covering full shift for break logic. */
+const SHIFT_START_TOLERANCE_MS = 15 * 60 * 1000;
 
 function toMs(value) {
   if (value == null || value === '') return null;

@@ -80,7 +80,9 @@ export function AdminDashboardScreen({ navigation }) {
 
   // Assigned shifts (admin unassign)
   const [assignedShifts, setAssignedShifts] = useState([]);
+  const [staleShifts, setStaleShifts] = useState([]);
   const [unassignBusyId, setUnassignBusyId] = useState(null);
+  const [adminClockOutBusyId, setAdminClockOutBusyId] = useState(null);
 
   /* ── loaders ── */
   const loadOverview = useCallback(async () => {
@@ -111,9 +113,14 @@ export function AdminDashboardScreen({ navigation }) {
   }, []);
 
   const loadAssignedShifts = useCallback(async () => {
-    const { data } = await api.get('/api/admin/shifts/assigned?limit=50');
-    if (data?.ok && data?.shifts) setAssignedShifts(data.shifts);
+    const [assignedRes, staleRes] = await Promise.all([
+      api.get('/api/admin/shifts/assigned?limit=50'),
+      api.get('/api/admin/bookings/stale-in-progress?limit=50'),
+    ]);
+    if (assignedRes.data?.ok && assignedRes.data?.shifts) setAssignedShifts(assignedRes.data.shifts);
     else setAssignedShifts([]);
+    if (staleRes.data?.ok && staleRes.data?.bookings) setStaleShifts(staleRes.data.bookings);
+    else setStaleShifts([]);
   }, []);
 
   const refresh = useCallback(async () => {
@@ -181,6 +188,33 @@ export function AdminDashboardScreen({ navigation }) {
       return;
     }
     await loadCompliance(complianceUser);
+  };
+
+  const confirmAdminClockOut = (row) => {
+    const workerName = [row.worker_first_name, row.worker_last_name].filter(Boolean).join(' ') || 'Worker';
+    Alert.alert(
+      'Admin clock out',
+      `Clock out ${workerName} at the scheduled shift end time?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clock out',
+          style: 'destructive',
+          onPress: async () => {
+            setAdminClockOutBusyId(row.booking_id);
+            const { data, error } = await api.post(`/api/admin/bookings/${row.booking_id}/clock-out`, {
+              note: 'Manual admin clock-out',
+            });
+            setAdminClockOutBusyId(null);
+            if (error || !data?.ok) Alert.alert('Error', error?.message || data?.error || 'Clock-out failed');
+            else {
+              Alert.alert('Done', data.message || 'Shift clocked out.');
+              await loadAssignedShifts();
+            }
+          },
+        },
+      ],
+    );
   };
 
   const confirmUnassignWorker = (row) => {
@@ -284,6 +318,47 @@ export function AdminDashboardScreen({ navigation }) {
         {tab === 'Shifts' && (
           <>
             <Text style={{ fontSize: Typography.fontSize.xl, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.xs }}>
+              Active shifts needing attention
+            </Text>
+            <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: Spacing.md, lineHeight: 20 }}>
+              Workers who forgot to clock out appear here. Admins can close the shift at the scheduled end time for payroll.
+            </Text>
+            {staleShifts.length === 0 ? (
+              <Text style={{ color: Colors.text.muted, textAlign: 'center', marginBottom: Spacing.lg }}>No stuck in-progress shifts</Text>
+            ) : (
+              staleShifts.map((row) => {
+                const busy = adminClockOutBusyId === row.booking_id;
+                const workerName = [row.worker_first_name, row.worker_last_name].filter(Boolean).join(' ') || '—';
+                return (
+                  <View key={row.booking_id} style={{ backgroundColor: Colors.surface, borderRadius: Radius.md, padding: Spacing.md, marginBottom: Spacing.sm, ...Shadows.sm, borderLeftWidth: 4, borderLeftColor: Colors.status.warning }}>
+                    <Text style={{ fontWeight: Typography.fontWeight.bold, color: Colors.text.primary }}>{row.service_type || 'Shift'}</Text>
+                    <Text style={{ color: Colors.text.secondary, fontSize: Typography.fontSize.sm, marginTop: 4 }}>
+                      {formatDateDMY(row.start_time)}
+                      {row.end_time ? ` · ends ${new Date(row.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
+                    </Text>
+                    <Text style={{ color: Colors.text.primary, fontSize: Typography.fontSize.sm, marginTop: 6 }}>Worker: {workerName}</Text>
+                    <Pressable
+                      disabled={busy}
+                      onPress={() => confirmAdminClockOut(row)}
+                      style={({ pressed }) => ({
+                        marginTop: Spacing.md,
+                        backgroundColor: Colors.primary,
+                        paddingVertical: Spacing.sm,
+                        borderRadius: Radius.md,
+                        alignItems: 'center',
+                        opacity: pressed || busy ? 0.85 : 1,
+                      })}
+                    >
+                      <Text style={{ color: Colors.text.white, fontWeight: Typography.fontWeight.bold }}>
+                        {busy ? 'Clocking out…' : 'Admin clock out (scheduled end)'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                );
+              })
+            )}
+
+            <Text style={{ fontSize: Typography.fontSize.xl, fontWeight: Typography.fontWeight.bold, color: Colors.text.primary, marginBottom: Spacing.xs, marginTop: Spacing.md }}>
               Filled shifts
             </Text>
             <Text style={{ fontSize: Typography.fontSize.sm, color: Colors.text.secondary, marginBottom: Spacing.md, lineHeight: 20 }}>
